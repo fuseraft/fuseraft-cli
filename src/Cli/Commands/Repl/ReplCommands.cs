@@ -44,6 +44,7 @@ internal static partial class ReplCommands
             case "/agent":      return await CmdAgentAsync(ctx, arg, cancellationToken);
             case "/sessions":      await CmdSessionsAsync(ctx.JsonMode, cancellationToken); return CommandResult.Continue;
             case "/fork":          return await CmdForkAsync(ctx, arg, cancellationToken);
+            case "/title":         return await CmdTitleAsync(ctx, arg);
             case "/switch":        return await CmdSwitchAsync(ctx, arg, cancellationToken);
             case "/conversation":  CmdConversation(ctx); return CommandResult.Continue;
             case "/rewind":        return await CmdRewindAsync(ctx, arg, cancellationToken);
@@ -96,6 +97,7 @@ internal static partial class ReplCommands
             new("/sessions", "List resumable sessions with IDs and turn counts"),
             new("/fork", "Snapshot the current session to a new ID so you can branch from this point"),
             new("/fork switch", "Fork and immediately become the fork (continue under the new ID)"),
+            new("/title [name]", "Show the chat's title, or name it (the Chats list shows the title instead of the first message); /title --clear goes back to the first message. Runs at once, even mid-reply"),
             new("/switch <id>", "Save the current session and load another saved session in its place"),
             new("/conversation", "List all turns with numbers so you can pick a rewind point"),
             new("/rewind <n>", "Keep turns 1…n and discard the rest"),

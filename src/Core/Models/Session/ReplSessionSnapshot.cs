@@ -61,6 +61,9 @@ public sealed record ReplSessionSnapshot
     public required string ModelId   { get; init; }
     public required string Cwd       { get; init; }
 
+    // A name the user gave the chat with /title; null means it's known by its first message.
+    public string? Title { get; init; }
+
     public DateTime StartedAt     { get; init; } = DateTime.UtcNow;
     public DateTime LastUpdatedAt { get; set;  } = DateTime.UtcNow;
     public int      TurnIndex     { get; set;  }
@@ -99,9 +102,11 @@ public sealed record ReplSessionSnapshot
         string?          recoveryHint    = null,
         TodoItem[]?      todoItems       = null,
         SavedGoal?       goal            = null,
-        int?             lastExtractedTurnIndex = null) => new()
+        int?             lastExtractedTurnIndex = null,
+        string?          title           = null) => new()
     {
         SessionId       = sessionId,
+        Title           = title,
         ModelId         = modelId,
         Cwd             = cwd,
         StartedAt       = startedAt,

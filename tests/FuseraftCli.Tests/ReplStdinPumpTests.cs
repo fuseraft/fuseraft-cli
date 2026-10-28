@@ -49,4 +49,42 @@ public sealed class ReplStdinPumpTests
 
         Assert.Equal("next question", (await pump.ReadMessageAsync())!.Text);
     }
+
+    [Theory]
+    [InlineData("""{"type":"user_input","text":" /title Login bug "}""", "/title Login bug")]
+    [InlineData("""{"type":"user_input","text":"/title a\nb"}""", null)]
+    [InlineData("""{"type":"user_input","text":"plain"}""", null)]
+    [InlineData("""{"type":"user_input","text":"/title x","images":[{"name":"a.png","data":"AAAA"}]}""", null)]
+    public void CommandText_OnlyOneLineCommands(string line, string? expected) =>
+        Assert.Equal(expected, ReplStdinPump.CommandText(line));
+
+    [Fact]
+    public async Task WhileATurnRuns_ACommandThatNeedNotWait_RunsNow_AndOthersQueue()
+    {
+        var ran = new List<string>();
+        using var turn = new CancellationTokenSource();
+        var pump = new ReplStdinPump(new StringReader(string.Join('\n',
+            """{"type":"user_input","text":"/title Login bug"}""",
+            """{"type":"user_input","text":"/compact"}""")), () => turn)
+        {
+            RunNow = line => { ran.Add(line); return line.StartsWith("/title") ? "renamed" : null; },
+        };
+        pump.Start();
+
+        Assert.Equal("/compact", (await pump.ReadMessageAsync())!.Text);
+        Assert.Null(await pump.ReadMessageAsync());
+        Assert.Equal(["/title Login bug", "/compact"], ran);
+    }
+
+    [Fact]
+    public async Task BetweenTurns_EvenAnInstantCommandQueues()
+    {
+        var pump = new ReplStdinPump(new StringReader("""{"type":"user_input","text":"/title Later"}"""), () => null)
+        {
+            RunNow = _ => "renamed",
+        };
+        pump.Start();
+
+        Assert.Equal("/title Later", (await pump.ReadMessageAsync())!.Text);
+    }
 }

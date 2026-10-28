@@ -355,6 +355,7 @@ internal static class ReplTurn
         Console.CancelKeyPress += OnCancelKeyPress;
         // The TUI reads Ctrl+C as a key, so it asks here instead of raising CancelKeyPress.
         if (ReplInput.Screen is { } screen)
+        {
             screen.Interrupt = () =>
             {
                 var c = ctx.ActiveCts;
@@ -363,11 +364,16 @@ internal static class ReplTurn
                 else c.Cancel();
                 return true;
             };
+            screen.RunNow = line => ReplCommands.RunMidTurn(ctx, line);
+        }
+        if (ctx.StdinPump is { } pump)
+            pump.RunNow = line => ReplCommands.RunMidTurn(ctx, line);
         try   { await RunLoopAsync(ctx, cancellationToken); }
         finally
         {
             Console.CancelKeyPress -= OnCancelKeyPress;
-            if (ReplInput.Screen is { } s) s.Interrupt = null;
+            if (ReplInput.Screen is { } s) { s.Interrupt = null; s.RunNow = null; }
+            if (ctx.StdinPump is { } p) p.RunNow = null;
         }
 
         void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
@@ -489,6 +495,8 @@ internal static class ReplTurn
             // The TUI has its own prompt, and shows what was sent once the REPL takes it.
             if (!ctx.JsonMode && ReplInput.Screen is null)
                 AnsiConsole.Markup((modeTags.Count > 0 ? $"[dim][[{string.Join("·", modeTags)}]] {turnLabel}[/]" : $"[dim]{turnLabel}[/]") + "[bold cyan]>[/] ");
+
+            if (ctx.TitleUnsaved) await SaveSnapshotAsync(ctx);
 
             string? raw;
             IReadOnlyList<DataContent> bridgeImages = [];
@@ -722,6 +730,7 @@ internal static class ReplTurn
     {
         try
         {
+            ctx.TitleUnsaved = false;
             var snap = ReplSessionSnapshot.Capture(
                 ctx.SessionId, ctx.ModelId, ctx.Cwd,
                 ctx.TurnIndex, ctx.History, ctx.StartedAt,
@@ -742,7 +751,8 @@ internal static class ReplTurn
                                  ? [.. todoItems]
                                  : null,
                 goal:            ctx.LastGoal?.ToSaved(),
-                lastExtractedTurnIndex: ctx.LastExtractedTurnIndex >= 0 ? ctx.LastExtractedTurnIndex : null);
+                lastExtractedTurnIndex: ctx.LastExtractedTurnIndex >= 0 ? ctx.LastExtractedTurnIndex : null,
+                title:           ctx.Title);
             await ReplSessionSnapshot.SaveAsync(snap);
         }
         catch { }

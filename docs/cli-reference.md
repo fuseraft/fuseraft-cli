@@ -443,7 +443,8 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | Command | Description |
 |---------|-------------|
 | `/help` | Show all slash commands |
-| `/sessions` | List resumable REPL sessions with their IDs, model, turn count, and age. Resume with `fuseraft repl --resume <id>`. |
+| `/sessions` | List resumable REPL sessions with their IDs, model, turn count, age, and title. Resume with `fuseraft repl --resume <id>`. |
+| `/title [name]` | Name the chat. The title is saved with the session and shown by `/sessions` and the VS Code Chats list, which otherwise shows the chat's first message. `/title` alone shows the current title; `/title --clear` removes it. `/clear` removes it too. Unlike other commands, `/title` doesn't wait for a running reply to finish — it takes effect at once. |
 | `/fork` | Snapshot the current session to a new ID. The snapshot is saved immediately; the current session continues unchanged. Use `fuseraft repl --resume <id>` to open the fork later. |
 | `/fork switch` | Fork and immediately become the fork. The original session is already checkpointed on disk; the live session continues under the new ID. |
 | `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored, and the session's most recent turns are re-displayed (see `repl.resumeReplayTurns`). A session that ran in another directory isn't loaded; `/switch` prints the `cd … && fuseraft --resume <id>` that resumes it there. Use `/sessions` to find IDs. |

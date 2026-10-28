@@ -46,6 +46,9 @@ public sealed class ReplStdinPump
     /// </summary>
     internal volatile Func<string, bool>? Interject;
 
+    /// <summary>Runs a <c>/command</c> that arrives while a turn runs if it needn't wait for the turn (see <c>ReplCommands.RunMidTurn</c>).</summary>
+    internal volatile Func<string, string?>? RunNow;
+
     private async Task PumpLoopAsync()
     {
         while (true)
@@ -70,6 +73,10 @@ public sealed class ReplStdinPump
                 continue; // handled here — never queued for ReadInputAsync/ReadApprovalResponseAsync
             }
 
+            if (_getActiveCts() is not null && RunNow is { } runNow && CommandText(line) is { } command
+                && runNow(command) is not null)
+                continue;
+
             if (Interject is { } interject && InterjectionText(line) is { } text && interject(text))
                 continue;
 
@@ -78,7 +85,15 @@ public sealed class ReplStdinPump
     }
 
     /// <summary>The text of a <c>user_input</c> line that may join a running turn, or null.</summary>
-    internal static string? InterjectionText(string line)
+    internal static string? InterjectionText(string line) =>
+        UserText(line) is { Length: > 0 } text && text[0] is not ('/' or '!' or '$') ? text : null;
+
+    /// <summary>The text of a <c>user_input</c> line that is a one-line /command, or null.</summary>
+    internal static string? CommandText(string line) =>
+        UserText(line) is { Length: > 0 } text && text[0] == '/' && !text.Contains('\n') ? text : null;
+
+    // A user_input line's trimmed text; null for anything else, or a message that carries images.
+    private static string? UserText(string line)
     {
         try
         {
@@ -90,8 +105,7 @@ public sealed class ReplStdinPump
                 return null;
             if (root.TryGetProperty("images", out var images) && images.ValueKind == JsonValueKind.Array && images.GetArrayLength() > 0)
                 return null;
-            var text = t.GetString()!.Trim();
-            return text.Length == 0 || text[0] is '/' or '!' or '$' ? null : text;
+            return t.GetString()!.Trim();
         }
         catch (JsonException) { return null; }
     }

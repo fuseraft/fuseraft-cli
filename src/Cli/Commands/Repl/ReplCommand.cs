@@ -842,6 +842,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             ReplTurn.RepairDanglingToolCalls(ctx.History);
             ctx.TurnIndex = snapshot.TurnIndex;
             ctx.LastExtractedTurnIndex = snapshot.LastExtractedTurnIndex ?? -1;
+            ctx.Title = snapshot.Title;
 
             if (snapshot.TodoItems is { Length: > 0 } restoredTodoItems)
                 todoPlugin?.Restore(restoredTodoItems);
@@ -891,7 +892,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
 
         if (jsonMode)
-            ReplJsonBridge.Emit(new { type = "ready", sessionId, model = modelId });
+            ReplJsonBridge.Emit(new { type = "ready", sessionId, model = modelId, title = ctx.Title, midTurnCommands = ReplCommands.MidTurnCommands });
 
         // Write a seed snapshot immediately so this session appears in the sessions list
         // even if the process dies before the first turn completes.

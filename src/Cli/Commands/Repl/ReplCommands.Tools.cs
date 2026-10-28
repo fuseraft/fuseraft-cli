@@ -277,6 +277,27 @@ internal static partial class ReplCommands
     // /hitl
     // -------------------------------------------------------------------------
 
+    /// <summary>Turns HITL on (withdrawing auto) or off; returns what to tell the user. Safe mid-turn: approvers read the flag per call.</summary>
+    private static string SetHitl(ReplSessionContext ctx, bool on)
+    {
+        if (on)
+        {
+            if (ctx.HitlMode && !ctx.Hitl.AutoApproveReadOnly) return "HITL mode is already on.";
+            var wasAuto = ctx.HitlMode;   // on + auto -> plain on: only the auto-approval is being withdrawn
+            ctx.Hitl.AutoApproveReadOnly = false;
+            ctx.HitlMode = true;
+            _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/hitl on" });
+            return wasAuto
+                ? "HITL mode on: every shell command asks again — read-only commands are no longer auto-approved."
+                : "HITL mode on: shell commands, FileSystem writes/deletes, Git writes, and Http write-ish calls will ask for y/N approval before running.";
+        }
+
+        if (!ctx.HitlMode) return "HITL mode is already off.";
+        ctx.HitlMode = false;
+        _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/hitl off" });
+        return "HITL mode off: those calls run without approval again.";
+    }
+
     private static async Task<CommandResult> CmdHitlAsync(ReplSessionContext ctx, string arg)
     {
         if (string.IsNullOrEmpty(arg))
@@ -286,22 +307,9 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
-        if (arg.Equals("on", StringComparison.OrdinalIgnoreCase))
+        if (arg.Equals("on", StringComparison.OrdinalIgnoreCase) || arg.Equals("off", StringComparison.OrdinalIgnoreCase))
         {
-            if (ctx.HitlMode && !ctx.Hitl.AutoApproveReadOnly)
-            {
-                AnsiConsole.MarkupLine("[dim]HITL mode is already on.[/]");
-            }
-            else
-            {
-                var wasAuto = ctx.HitlMode;   // on + auto -> plain on: only the auto-approval is being withdrawn
-                ctx.HitlMode = true;
-                ctx.Hitl.AutoApproveReadOnly = false;
-                AnsiConsole.MarkupLine(wasAuto
-                    ? "[dim]HITL mode[/] [green]on[/][dim]: every shell command asks again — read-only commands are no longer auto-approved.[/]"
-                    : "[dim]HITL mode[/] [green]on[/][dim]: shell commands, FileSystem writes/deletes, Git writes, and Http write-ish calls will ask for y/N approval before running.[/]");
-                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/hitl on" });
-            }
+            AnsiConsole.MarkupLine($"[dim]{Markup.Escape(SetHitl(ctx, on: arg.Equals("on", StringComparison.OrdinalIgnoreCase)))}[/]");
         }
         else if (arg.Equals("auto", StringComparison.OrdinalIgnoreCase))
         {
@@ -315,19 +323,6 @@ internal static partial class ReplCommands
                 ctx.Hitl.AutoApproveReadOnly = true;
                 AnsiConsole.MarkupLine("[dim]HITL mode[/] [green]auto[/][dim]: provably read-only shell commands (ls, git status, grep, …) run without asking; anything that can change something — including every FileSystem write, Git write, and write-ish Http call — still asks.[/]");
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/hitl auto" });
-            }
-        }
-        else if (arg.Equals("off", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!ctx.HitlMode)
-            {
-                AnsiConsole.MarkupLine("[dim]HITL mode is already off.[/]");
-            }
-            else
-            {
-                ctx.HitlMode = false;
-                AnsiConsole.MarkupLine("[dim]HITL mode[/] [dim]off[/][dim]: those calls run without approval again.[/]");
-                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/hitl off" });
             }
         }
         else
