@@ -220,12 +220,13 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
         return string.Join("\n", rows.Select((row, i) => (i == 0 ? "  ∴ " : "    ") + Paint(T.Muted, row)));
     }
 
-    /// <summary>A tool call's arguments in a few words: the one that says most (a command, a path), else the first.</summary>
+    /// <summary>A tool call's arguments in a few words: the one that says most (a command, a query, a path), else the first.</summary>
     public static string Summarize(IDictionary<string, object?>? args)
     {
         if (args is not { Count: > 0 })
             return "";
-        string[] telling = ["command", "path", "directory", "pattern", "query", "url", "symbol", "task", "name", "source"];
+        // What a search looks for says more than where it looks: "search_content src" hides the query.
+        string[] telling = ["command", "query", "pattern", "symbol", "path", "directory", "url", "task", "name", "source"];
         var value = telling.Select(k => args.FirstOrDefault(a => a.Key.Equals(k, StringComparison.OrdinalIgnoreCase)).Value)
             .FirstOrDefault(v => v is not null) ?? args.First().Value;
         var text = (value?.ToString() ?? "").ReplaceLineEndings(" ").Trim();
