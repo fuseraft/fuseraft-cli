@@ -141,9 +141,12 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
             return 1;
         }
 
-        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? await InstallViaUpdaterAsync(newBinary, binaryPath, latestVersion, tag, cancellationToken)
-            : await InstallInPlaceAsync(newBinary, binaryPath, latestVersion, cancellationToken);
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return await InstallInPlaceAsync(newBinary, binaryPath, latestVersion, cancellationToken);
+
+        // install.ps1 used to install only fuseraft.exe, so the updater may be missing; the release zip has it.
+        var newUpdater = ext == "zip" ? ExtractFromZip(archiveBytes, UpdaterFileName) : null;
+        return await InstallViaUpdaterAsync(newBinary, newUpdater, binaryPath, latestVersion, tag, cancellationToken);
     }
 
     // Linux / macOS: atomic rename works on a running binary.
@@ -176,12 +179,12 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
     // Windows: can't overwrite a running executable. Write a pending binary then
     // hand off to fuseraft-update.exe which waits for all fuseraft instances to exit.
     private static async Task<int> InstallViaUpdaterAsync(
-        byte[] newBinary, string binaryPath, string latestVersion, string tag, CancellationToken ct)
+        byte[] newBinary, byte[]? newUpdater, string binaryPath, string latestVersion, string tag, CancellationToken ct)
     {
         var binaryDir   = Path.GetDirectoryName(binaryPath)!;
-        var updaterPath = Path.Combine(binaryDir, "fuseraft-update.exe");
+        var updaterPath = EnsureUpdater(binaryDir, newUpdater);
 
-        if (!File.Exists(updaterPath))
+        if (updaterPath is null)
         {
             AnsiConsole.MarkupLine("[red]✗ fuseraft-update.exe not found alongside the running binary.[/]");
             AnsiConsole.MarkupLine($"[dim]Download it from https://github.com/{Repo}/releases/tag/{Markup.Escape(tag)}[/]");
@@ -247,10 +250,37 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
         return v.Trim();
     }
 
+    internal const string UpdaterFileName = "fuseraft-update.exe";
+
+    /// <summary>
+    /// The updater's path in <paramref name="binaryDir"/>, writing it from <paramref name="fromArchive"/> first when it's
+    /// missing; null when it's missing and can't be written.
+    /// </summary>
+    internal static string? EnsureUpdater(string binaryDir, byte[]? fromArchive)
+    {
+        var updaterPath = Path.Combine(binaryDir, UpdaterFileName);
+        if (File.Exists(updaterPath)) return updaterPath;
+        if (fromArchive is null) return null;
+
+        var tmpPath = updaterPath + ".new";
+        try
+        {
+            File.WriteAllBytes(tmpPath, fromArchive);
+            File.Move(tmpPath, updaterPath, overwrite: true);
+            AnsiConsole.MarkupLine($"[dim]Restored {UpdaterFileName} from the release.[/]");
+            return updaterPath;
+        }
+        catch
+        {
+            try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch { }
+            return null;
+        }
+    }
+
     private static async Task<byte[]?> ExtractBinaryAsync(byte[] archiveBytes, string ext, CancellationToken ct)
     {
         if (ext.Equals("zip", StringComparison.OrdinalIgnoreCase))
-            return await ExtractFromZipAsync(archiveBytes, ct);
+            return ExtractFromZip(archiveBytes, "fuseraft.exe") ?? ExtractFromZip(archiveBytes, "fuseraft");
 
         return await ExtractFromTarGzAsync(archiveBytes, ct);
     }
@@ -279,24 +309,19 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
         return null;
     }
 
-    private static Task<byte[]?> ExtractFromZipAsync(byte[] zipBytes, CancellationToken ct)
+    /// <summary>The bytes of the entry named <paramref name="fileName"/> (in any folder) in a zip, or null.</summary>
+    internal static byte[]? ExtractFromZip(byte[] zipBytes, string fileName)
     {
         using var ms      = new MemoryStream(zipBytes);
         using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
 
-        foreach (var entry in archive.Entries)
-        {
-            var name = Path.GetFileName(entry.FullName);
-            if (name.Equals("fuseraft",     StringComparison.OrdinalIgnoreCase) ||
-                name.Equals("fuseraft.exe", StringComparison.OrdinalIgnoreCase))
-            {
-                using var stream = entry.Open();
-                using var buf    = new MemoryStream();
-                stream.CopyTo(buf);
-                return Task.FromResult<byte[]?>(buf.ToArray());
-            }
-        }
+        var entry = archive.Entries.FirstOrDefault(e =>
+            Path.GetFileName(e.FullName).Equals(fileName, StringComparison.OrdinalIgnoreCase));
+        if (entry is null) return null;
 
-        return Task.FromResult<byte[]?>(null);
+        using var stream = entry.Open();
+        using var buf    = new MemoryStream();
+        stream.CopyTo(buf);
+        return buf.ToArray();
     }
 }

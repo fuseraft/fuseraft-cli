@@ -136,6 +136,19 @@ try {
     Copy-Item $ExeSource $TempExe -Force
     Move-Item $TempExe $TargetExe -Force
 
+    # 'fuseraft update' hands off to fuseraft-update.exe, since a running exe can't replace itself on Windows
+    $UpdaterSource = Get-ChildItem -Path $TmpDir -Recurse -Filter 'fuseraft-update.exe' |
+        Select-Object -First 1 -ExpandProperty FullName
+
+    if ($UpdaterSource) {
+        $TargetUpdater = Join-Path $InstallDir 'fuseraft-update.exe'
+        $TempUpdater   = "$TargetUpdater.new"
+        Copy-Item $UpdaterSource $TempUpdater -Force
+        Move-Item $TempUpdater $TargetUpdater -Force
+    } else {
+        Write-Warning "fuseraft-update.exe not found in archive; 'fuseraft update' will fetch it. Re-running this installer also updates fuseraft."
+    }
+
     Write-Host ""
     Write-Host "  fuseraft $Version installed to $TargetExe"
 } finally {

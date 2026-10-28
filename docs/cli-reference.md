@@ -2692,7 +2692,7 @@ The command detects the current platform and architecture, downloads the matchin
 4. Moves `fuseraft.exe.pending` → `fuseraft.exe`.
 5. Deletes the backup and reports success.
 
-`fuseraft-update.exe` must be present alongside `fuseraft.exe`. It is included in every Windows release archive published by CI.
+`fuseraft-update.exe` lives alongside `fuseraft.exe`; it is included in every Windows release archive, and `install.ps1` installs both. If it's missing (installs made with `install.ps1` before October 2026 only got `fuseraft.exe`), `fuseraft update` restores it from the release it just downloaded.
 
 If the current version already matches or exceeds the latest release the command exits immediately with no changes.
 
