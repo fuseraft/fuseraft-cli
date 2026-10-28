@@ -155,6 +155,9 @@ internal static class ProcessHelper
             using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             try { await o.WaitAsync(drainCts.Token).ConfigureAwait(false); } catch { }
             try { await e.WaitAsync(drainCts.Token).ConfigureAwait(false); } catch { }
+            // The pipes close as the process dies, a moment before it has exited; wait for that too, so a
+            // caller told the process is gone doesn't find it still there.
+            try { await p.WaitForExitAsync(drainCts.Token).ConfigureAwait(false); } catch { }
         }
 
         try
