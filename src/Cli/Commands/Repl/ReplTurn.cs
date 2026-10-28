@@ -496,10 +496,12 @@ internal static class ReplTurn
             if (!ctx.JsonMode && ReplInput.Screen is null)
                 AnsiConsole.Markup((modeTags.Count > 0 ? $"[dim][[{string.Join("·", modeTags)}]] {turnLabel}[/]" : $"[dim]{turnLabel}[/]") + "[bold cyan]>[/] ");
 
+            ReplAutoTitle.MaybeStart(ctx);
             if (ctx.TitleUnsaved) await SaveSnapshotAsync(ctx);
 
             string? raw;
             IReadOnlyList<DataContent> bridgeImages = [];
+            ctx.AwaitingInput = true;
             try
             {
                 if (ReplInput.Screen is { } screen)
@@ -539,6 +541,7 @@ internal static class ReplTurn
                 else raw = ctx.LineReader.ReadLine();
             }
             catch (OperationCanceledException) { break; }
+            finally { ctx.AwaitingInput = false; }
 
             if (raw is null) break;
 
@@ -728,9 +731,9 @@ internal static class ReplTurn
 
     internal static async Task SaveSnapshotAsync(ReplSessionContext ctx)
     {
+        await SnapshotGate.WaitAsync();
         try
         {
-            ctx.TitleUnsaved = false;
             var snap = ReplSessionSnapshot.Capture(
                 ctx.SessionId, ctx.ModelId, ctx.Cwd,
                 ctx.TurnIndex, ctx.History, ctx.StartedAt,
@@ -752,11 +755,17 @@ internal static class ReplTurn
                                  : null,
                 goal:            ctx.LastGoal?.ToSaved(),
                 lastExtractedTurnIndex: ctx.LastExtractedTurnIndex >= 0 ? ctx.LastExtractedTurnIndex : null,
-                title:           ctx.Title);
+                title:           ctx.Title,
+                autoTitle:       ctx.AutoTitle);
             await ReplSessionSnapshot.SaveAsync(snap);
+            ctx.TitleUnsaved = false;
         }
         catch { }
+        finally { SnapshotGate.Release(); }
     }
+
+    // A generated title can be saved from a background task while the REPL loop saves too.
+    private static readonly SemaphoreSlim SnapshotGate = new(1, 1);
 
     // -------------------------------------------------------------------------
     // Turn execution

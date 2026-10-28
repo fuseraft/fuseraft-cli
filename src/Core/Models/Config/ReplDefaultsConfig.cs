@@ -35,6 +35,10 @@ public sealed class ReplDefaultsConfig
     [JsonPropertyName("bell")]
     public bool? Bell { get; set; }
 
+    /// <summary>Whether a chat is named from its first exchange (with the memory.model override, if set); on unless false.</summary>
+    [JsonPropertyName("autoTitle")]
+    public bool? AutoTitle { get; set; }
+
     [JsonPropertyName("noBanner")]
     public bool NoBanner { get; set; }
 

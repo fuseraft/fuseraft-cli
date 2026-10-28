@@ -28,6 +28,10 @@ internal static partial class ReplCommands
         ctx.ResetPlanState();
         ctx.LastGoal = null;
         ctx.Title    = null;
+        // A new conversation, so it gets a new generated title.
+        ctx.AutoTitle = null;
+        ctx.AutoTitleStarted = false;
+        ctx.AutoTitleGeneration++;
         ctx.Todo?.Clear();
 
         if (!ctx.JsonMode && !ctx.NoBanner)
