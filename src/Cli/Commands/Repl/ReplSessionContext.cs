@@ -278,6 +278,13 @@ internal sealed class ReplSessionContext
     public string?  Title;
     // Set when /title changes the title; it may have run mid-turn, after the turn's last save.
     public volatile bool TitleUnsaved;
+    // Generated from the first exchange (see ReplAutoTitle); shown when Title is null.
+    public string? AutoTitle;
+    public bool    AutoTitleStarted;
+    // Bumped by /clear and /switch, so a title still being generated for the old conversation is dropped.
+    public volatile int AutoTitleGeneration;
+    // True while the REPL waits for the user's next message.
+    public volatile bool AwaitingInput;
     public int  TurnIndex              = 0;
     public int  LastExtractedTurnIndex = -1;
     public bool PendingSave;

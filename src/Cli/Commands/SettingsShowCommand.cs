@@ -61,6 +61,7 @@ public sealed class SettingsShowCommand : AsyncCommand
         repl.AddRow("Theme",          Markup.Escape(config.Repl.Theme ?? "default"));
         repl.AddRow("Dock",           Markup.Escape(config.Repl.Dock ?? "bottom"));
         repl.AddRow("Bell",           config.Repl.Bell ?? true    ? "[green]on[/]" : "[dim]off[/]");
+        repl.AddRow("Auto titles",    config.Repl.AutoTitle ?? true ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("No banner",      config.Repl.NoBanner       ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Verbose",        config.Repl.Verbose        ? "[green]on[/]" : "[dim]off[/]");
         repl.AddRow("Safe mode",      config.Repl.SafeModeDefault ? "[green]on[/]" : "[dim]off[/]");

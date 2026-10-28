@@ -444,7 +444,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 |---------|-------------|
 | `/help` | Show all slash commands |
 | `/sessions` | List resumable REPL sessions with their IDs, model, turn count, age, and title. Resume with `fuseraft repl --resume <id>`. |
-| `/title [name]` | Name the chat. The title is saved with the session and shown by `/sessions` and the VS Code Chats list, which otherwise shows the chat's first message. `/title` alone shows the current title; `/title --clear` removes it. `/clear` removes it too. Unlike other commands, `/title` doesn't wait for a running reply to finish — it takes effect at once. |
+| `/title [name]` | Name the chat. The title is saved with the session and shown by `/sessions` and the VS Code Chats list, which otherwise shows the chat's first message. `/title` alone shows the current title; `/title --clear` removes it. `/clear` removes it too. Without one, a chat is named automatically from its first prompt and reply — one short extra model call, made in the background on `memory.model` if set, and never repeated — and `/title --clear` falls back to that name. `fuseraft settings set repl.autoTitle false` turns this off. Unlike other commands, `/title` doesn't wait for a running reply to finish — it takes effect at once. |
 | `/fork` | Snapshot the current session to a new ID. The snapshot is saved immediately; the current session continues unchanged. Use `fuseraft repl --resume <id>` to open the fork later. |
 | `/fork switch` | Fork and immediately become the fork. The original session is already checkpointed on disk; the live session continues under the new ID. |
 | `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored, and the session's most recent turns are re-displayed (see `repl.resumeReplayTurns`). A session that ran in another directory isn't loaded; `/switch` prints the `cd … && fuseraft --resume <id>` that resumes it there. Use `/sessions` to find IDs. |
@@ -1021,7 +1021,7 @@ The extractor is told to save only what will still be true later: standing prefe
 
 Extraction runs only when there are turns it hasn't seen, so resuming a session and exiting without a new turn doesn't extract it again. When the extraction call fails, the REPL says so and tries again at the next of these points.
 
-This extraction call uses the REPL's main chat model by default. Set `memory.model` (see [`fuseraft settings`](#fuseraft-settings)) to run it on a different — e.g. cheaper — model instead:
+This extraction call uses the REPL's main chat model by default. Set `memory.model` (see [`fuseraft settings`](#fuseraft-settings)) to run it on a different — e.g. cheaper — model instead; the same model also names new chats (`repl.autoTitle`):
 
 ```bash
 fuseraft settings set memory.model gpt-4o-mini
@@ -2800,6 +2800,7 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `repl.theme` | Full-screen REPL color theme: `default`, `bright`, `light`, `mono`, `rust`, or a file in `~/.fuseraft/themes`; `""` resets |
 | `repl.dock` | `bottom` (default) or `top`: where the full-screen REPL puts the prompt; `""` resets |
 | `repl.bell` | `true`/`false`: ring the bell when a turn ends or a question waits while you're away (default `true`) |
+| `repl.autoTitle` | `true`/`false`: name each chat from its first exchange, using `memory.model` if set (default `true`) |
 | `repl.noBanner` | `true`/`false` |
 | `repl.verbose` | `true`/`false` |
 | `repl.safeMode` | `true`/`false` — engage `/safe-mode` at startup |

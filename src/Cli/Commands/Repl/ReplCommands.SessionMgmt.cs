@@ -58,7 +58,8 @@ internal static partial class ReplCommands
             recoveryHint:    ctx.RecoveryHint,
             todoItems:       ctx.Todo?.Snapshot() is { Count: > 0 } todoItems ? [.. todoItems] : null,
             goal:            ctx.LastGoal?.ToSaved(),
-            title:           ctx.Title);
+            title:           ctx.Title,
+            autoTitle:       ctx.AutoTitle);
 
         try
         {
@@ -169,22 +170,26 @@ internal static partial class ReplCommands
         string message;
         if (string.IsNullOrWhiteSpace(arg))
         {
-            message = ctx.Title is null
-                ? "No title — this chat is listed by its first message. Name it with /title followed by a name."
-                : $"Title: {ctx.Title} (/title --clear goes back to the first message)";
+            message = (ctx.Title, ctx.AutoTitle) switch
+            {
+                ({ } title, { } auto) => $"Title: {title} (/title --clear goes back to the generated title, {auto})",
+                ({ } title, null)     => $"Title: {title} (/title --clear goes back to the first message)",
+                (null, { } auto)      => $"Title: {auto} (generated from the first exchange; /title followed by a name renames it)",
+                _                     => "No title — this chat is listed by its first message. Name it with /title followed by a name.",
+            };
         }
         else
         {
             ctx.Title = arg.Trim().Equals("--clear", StringComparison.OrdinalIgnoreCase) ? null : NormalizeTitle(arg);
             ctx.TitleUnsaved = true;
-            message = ctx.Title is null
-                ? "Title cleared — this chat is listed by its first message again."
-                : $"Chat renamed to {ctx.Title}.";
+            message = ctx.Title is not null ? $"Chat renamed to {ctx.Title}."
+                : ctx.AutoTitle is not null ? $"Title cleared — this chat is listed by its generated title, {ctx.AutoTitle}, again."
+                : "Title cleared — this chat is listed by its first message again.";
             _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/title", title = ctx.Title });
         }
 
         if (ctx.JsonMode)
-            ReplJsonBridge.Emit(new { type = "title", sessionId = ctx.SessionId, title = ctx.Title });
+            ReplJsonBridge.Emit(new { type = "title", sessionId = ctx.SessionId, title = ctx.Title, autoTitle = ctx.AutoTitle });
         return message;
     }
 
@@ -272,6 +277,9 @@ internal static partial class ReplCommands
         ctx.SessionId = snapshot.SessionId;
         ctx.StartedAt = snapshot.StartedAt;
         ctx.Title     = snapshot.Title;
+        ctx.AutoTitle = snapshot.AutoTitle;
+        ctx.AutoTitleStarted = false;
+        ctx.AutoTitleGeneration++;
         ctx.Emitter.SetSessionId(snapshot.SessionId);
 
         // Restore history; keep the current system prompt so memories and AGENTS.md
@@ -381,7 +389,7 @@ internal static partial class ReplCommands
                           : age.TotalHours >= 1 ? $"{(int)age.TotalHours}h ago"
                           : $"{(int)age.TotalMinutes}m ago";
                 var turns = $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}";
-                var title = s.Title is null ? string.Empty : $" — {s.Title}";
+                var title = (s.Title ?? s.AutoTitle) is { } shown ? $" — {shown}" : string.Empty;
                 sb.AppendLine(
                     $"- **`{s.SessionId}`**{title} — {s.ModelId}, {turns}, {label} *({Path.GetFileName(s.Cwd)})*");
             }
@@ -419,7 +427,8 @@ internal static partial class ReplCommands
             var turns   = $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}";
             var model   = s.ModelId.Length > 28 ? s.ModelId[..27] + "…" : s.ModelId;
             var cwd     = Path.GetFileName(s.Cwd);
-            var title   = s.Title is { Length: > 40 } t ? t[..39] + "…" : s.Title ?? string.Empty;
+            var shown   = s.Title ?? s.AutoTitle;
+            var title   = shown is { Length: > 40 } t ? t[..39] + "…" : shown ?? string.Empty;
 
             grid.AddRow(
                 $"[bold cyan]{Markup.Escape(s.SessionId)}[/]",
