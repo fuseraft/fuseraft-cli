@@ -57,7 +57,8 @@ internal static partial class ReplCommands
             haltedToolCalls: ctx.HaltedToolCalls.Count > 0 ? [.. ctx.HaltedToolCalls] : null,
             recoveryHint:    ctx.RecoveryHint,
             todoItems:       ctx.Todo?.Snapshot() is { Count: > 0 } todoItems ? [.. todoItems] : null,
-            goal:            ctx.LastGoal?.ToSaved());
+            goal:            ctx.LastGoal?.ToSaved(),
+            title:           ctx.Title);
 
         try
         {
@@ -115,6 +116,83 @@ internal static partial class ReplCommands
         }
 
         return CommandResult.Continue;
+    }
+
+    // -------------------------------------------------------------------------
+    // /title
+    // -------------------------------------------------------------------------
+
+    private static async Task<CommandResult> CmdTitleAsync(ReplSessionContext ctx, string arg)
+    {
+        var message = ApplyTitle(ctx, arg);
+        if (ctx.TitleUnsaved) await ReplTurn.SaveSnapshotAsync(ctx);
+
+        if (ctx.JsonMode)
+            ReplJsonBridge.Emit(new { type = "text", text = message });
+        else
+            AnsiConsole.MarkupLine($"[dim]{Markup.Escape(message)}[/]");
+        return CommandResult.Continue;
+    }
+
+    // Commands that can run while a turn is still going: they touch nothing the turn reads or writes, except
+    // the HITL flag, which every approver reads afresh per tool call. A one-word entry takes any argument; a
+    // longer one is the whole command. The VS Code panel gets this list in the ready event.
+    internal static readonly string[] MidTurnCommands = ["/title", "/hitl on", "/hitl off"];
+
+    /// <summary>
+    /// Runs <paramref name="line"/> straight away if it's one of the commands that needn't wait for the
+    /// running turn, returning what to tell the user; null when it has to wait. Never writes to the console,
+    /// which the turn is streaming to.
+    /// </summary>
+    internal static string? RunMidTurn(ReplSessionContext ctx, string line)
+    {
+        var parts   = line.Trim().Split(' ', 2, StringSplitOptions.TrimEntries);
+        var command = parts[0].ToLowerInvariant();
+        var arg     = parts.Length > 1 ? parts[1] : string.Empty;
+        var whole   = arg.Length > 0 ? $"{command} {arg.ToLowerInvariant()}" : command;
+        if (!MidTurnCommands.Any(c => c == whole || (!c.Contains(' ') && c == command))) return null;
+
+        var message = command switch
+        {
+            // The turn's own snapshot save picks the title up, or the REPL saves it before its next prompt.
+            "/title" => ApplyTitle(ctx, arg),
+            _        => SetHitl(ctx, on: whole == "/hitl on"),
+        };
+        if (ctx.JsonMode)
+            ReplJsonBridge.Emit(new { type = "applied", command = line.Trim(), message });
+        return message;
+    }
+
+    /// <summary>Shows, sets or (with --clear) removes the title, telling the panel; returns the message for the user.</summary>
+    private static string ApplyTitle(ReplSessionContext ctx, string arg)
+    {
+        string message;
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            message = ctx.Title is null
+                ? "No title — this chat is listed by its first message. Name it with /title followed by a name."
+                : $"Title: {ctx.Title} (/title --clear goes back to the first message)";
+        }
+        else
+        {
+            ctx.Title = arg.Trim().Equals("--clear", StringComparison.OrdinalIgnoreCase) ? null : NormalizeTitle(arg);
+            ctx.TitleUnsaved = true;
+            message = ctx.Title is null
+                ? "Title cleared — this chat is listed by its first message again."
+                : $"Chat renamed to {ctx.Title}.";
+            _ = ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/title", title = ctx.Title });
+        }
+
+        if (ctx.JsonMode)
+            ReplJsonBridge.Emit(new { type = "title", sessionId = ctx.SessionId, title = ctx.Title });
+        return message;
+    }
+
+    /// <summary>Collapses a title to one line; null when nothing is left.</summary>
+    internal static string? NormalizeTitle(string? title)
+    {
+        var collapsed = string.Join(' ', (title ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return collapsed.Length == 0 ? null : collapsed;
     }
 
     // -------------------------------------------------------------------------
@@ -193,6 +271,7 @@ internal static partial class ReplCommands
 
         ctx.SessionId = snapshot.SessionId;
         ctx.StartedAt = snapshot.StartedAt;
+        ctx.Title     = snapshot.Title;
         ctx.Emitter.SetSessionId(snapshot.SessionId);
 
         // Restore history; keep the current system prompt so memories and AGENTS.md
@@ -302,8 +381,9 @@ internal static partial class ReplCommands
                           : age.TotalHours >= 1 ? $"{(int)age.TotalHours}h ago"
                           : $"{(int)age.TotalMinutes}m ago";
                 var turns = $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}";
+                var title = s.Title is null ? string.Empty : $" — {s.Title}";
                 sb.AppendLine(
-                    $"- **`{s.SessionId}`** — {s.ModelId}, {turns}, {label} *({Path.GetFileName(s.Cwd)})*");
+                    $"- **`{s.SessionId}`**{title} — {s.ModelId}, {turns}, {label} *({Path.GetFileName(s.Cwd)})*");
             }
             sb.AppendLine();
             sb.AppendLine("Resume a session with `/resume` if it's already loaded, or restart the panel and select the session.");
@@ -319,14 +399,16 @@ internal static partial class ReplCommands
         grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 2, 0))); // model
         grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 2, 0))); // turns
         grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 2, 0))); // age
-        grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 0, 0))); // label
+        grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 2, 0))); // path
+        grid.AddColumn(new GridColumn().NoWrap().Padding(new Padding(0, 0, 0, 0))); // title
 
         grid.AddRow(
             "[dim underline]ID[/]",
             "[dim underline]Model[/]",
             "[dim underline]Turns[/]",
             "[dim underline]Age[/]",
-            "[dim underline]Path[/]");
+            "[dim underline]Path[/]",
+            "[dim underline]Title[/]");
 
         foreach (var s in sessions)
         {
@@ -337,13 +419,15 @@ internal static partial class ReplCommands
             var turns   = $"{s.TurnIndex} turn{(s.TurnIndex == 1 ? "" : "s")}";
             var model   = s.ModelId.Length > 28 ? s.ModelId[..27] + "…" : s.ModelId;
             var cwd     = Path.GetFileName(s.Cwd);
+            var title   = s.Title is { Length: > 40 } t ? t[..39] + "…" : s.Title ?? string.Empty;
 
             grid.AddRow(
                 $"[bold cyan]{Markup.Escape(s.SessionId)}[/]",
                 $"[dim]{Markup.Escape(model)}[/]",
                 $"[dim]{Markup.Escape(turns)}[/]",
                 $"[dim]{Markup.Escape(age)}[/]",
-                $"[dim]{Markup.Escape(cwd)}[/]");
+                $"[dim]{Markup.Escape(cwd)}[/]",
+                Markup.Escape(title));
         }
 
         AnsiConsole.Write(grid);

@@ -31,7 +31,7 @@ internal sealed class ReplLineReader
         "/max-tokens", "/mcp", "/memory", "/model", "/models", "/paste", "/plan",
         "/provider", "/reasoning", "/recover", "/replay", "/resume", "/retry", "/rewind",
         "/run", "/safe-mode", "/save", "/seed", "/sessions", "/snapshot", "/switch",
-        "/system", "/temperature", "/theme", "/tools", "/top-p", "/undo",
+        "/system", "/temperature", "/theme", "/title", "/tools", "/top-p", "/undo",
     ];
 
     internal static readonly Dictionary<string, string[]> SubCommands =
@@ -52,6 +52,7 @@ internal sealed class ReplLineReader
         ["/safe-mode"]   = ["off", "on"],
         ["/seed"]        = ["reset"],
         ["/temperature"] = ["reset"],
+        ["/title"]       = ["--clear"],
         ["/tools"]       = ["disable", "enable", "restrict", "unrestrict"],
         ["/top-p"]       = ["reset"],
     };

@@ -16,6 +16,9 @@ internal interface IReplScreen
     /// <summary>Called on Ctrl+C; returns true when it cancelled something (a turn, a shell command).</summary>
     Func<bool>? Interrupt { set; }
 
+    /// <summary>Runs a /command sent while a turn runs if it needn't wait for the turn; returns what to show, or null.</summary>
+    Func<string, string?>? RunNow { set; }
+
     /// <summary>Takes a message the user sends while a turn runs; true when it joined the turn. Set for the length of a turn.</summary>
     Func<string, bool>? Interject { set; }
 

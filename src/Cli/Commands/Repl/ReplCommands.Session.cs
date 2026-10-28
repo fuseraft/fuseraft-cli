@@ -27,6 +27,7 @@ internal static partial class ReplCommands
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
         ctx.LastGoal = null;
+        ctx.Title    = null;
         ctx.Todo?.Clear();
 
         if (!ctx.JsonMode && !ctx.NoBanner)

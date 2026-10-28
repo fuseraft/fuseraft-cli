@@ -66,6 +66,7 @@ internal sealed partial class ReplTui : IReplScreen
     public static bool Supported => !Console.IsInputRedirected && !Console.IsOutputRedirected;
 
     public Func<bool>? Interrupt { private get; set; }
+    public Func<string, string?>? RunNow { private get; set; }
 
     public Func<string, bool>? Interject { private get; set; }
 
@@ -225,6 +226,12 @@ internal sealed partial class ReplTui : IReplScreen
             return;
         }
         var command = text.StartsWith('!') || (text.StartsWith('/') && !text.Contains('\n'));
+        if (command && text.StartsWith('/') && RunNow?.Invoke(text) is { } done)
+        {
+            _renderer.Line(Accent("› ") + text);
+            _renderer.Line(Muted("  " + done));
+            return;
+        }
         if (!command && Interject?.Invoke(text) == true)
         {
             _renderer.Line(Accent("› ") + text);

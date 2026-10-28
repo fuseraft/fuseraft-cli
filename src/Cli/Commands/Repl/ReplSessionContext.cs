@@ -21,14 +21,15 @@ internal enum CommandOutcome { Continue, Exit, SendInput }
 /// </summary>
 internal sealed class HitlModeState
 {
-    public bool Enabled;
+    // Volatile: /hitl on|off can flip these from the input thread while a turn's tool calls read them.
+    public volatile bool Enabled;
 
     /// <summary>
     /// <c>/hitl auto</c>: while HITL is on, skip the y/N prompt for shell commands that are provably
     /// read-only (see <see cref="ReadOnlyShellCommand"/>). Everything else — including every
     /// FileSystem write, Git write, and write-ish Http call — still asks. Off by default.
     /// </summary>
-    public bool AutoApproveReadOnly;
+    public volatile bool AutoApproveReadOnly;
 
     /// <summary>True when <paramref name="command"/> must be shown to the user for a y/N decision right now.</summary>
     public bool RequiresShellApproval(string command) =>
@@ -274,6 +275,9 @@ internal sealed class ReplSessionContext
 
     // Session lifecycle
     public DateTime StartedAt { get; set; }
+    public string?  Title;
+    // Set when /title changes the title; it may have run mid-turn, after the turn's last save.
+    public volatile bool TitleUnsaved;
     public int  TurnIndex              = 0;
     public int  LastExtractedTurnIndex = -1;
     public bool PendingSave;
