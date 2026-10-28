@@ -139,6 +139,9 @@ public sealed class TuiRendererTests
     {
         Assert.Equal("dotnet test", TuiRenderer.Summarize(new Dictionary<string, object?> { ["timeout"] = 30, ["command"] = "dotnet test" }));
         Assert.Equal("first line", TuiRenderer.Summarize(new Dictionary<string, object?> { ["x"] = "first\nline" }));
+        Assert.Equal("Foo|Bar", TuiRenderer.Summarize(new Dictionary<string, object?> { ["directory"] = "src", ["query"] = "Foo|Bar", ["filePattern"] = "*.ts" }));
+        Assert.Equal("Parse", TuiRenderer.Summarize(new Dictionary<string, object?> { ["path"] = "src/Foo.cs", ["symbol"] = "Parse" }));
+        Assert.Equal("src/Foo.cs", TuiRenderer.Summarize(new Dictionary<string, object?> { ["path"] = "src/Foo.cs", ["startLine"] = 10 }));
         Assert.Equal("", TuiRenderer.Summarize(null));
     }
 
