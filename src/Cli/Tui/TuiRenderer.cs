@@ -9,10 +9,11 @@ internal sealed record ToolOutput(string Title, string Text, bool Diff);
 
 /// <summary>
 /// Draws a turn's events in the transcript: the model's Markdown styled as it streams (the open part of the message
-/// redrawn as it grows), its thinking under a ∴ while it lasts, one line per tool call, and the files it changed.
-/// Everything else in the transcript comes from Spectre, as on a plain terminal.
+/// redrawn as it grows), its thinking under a ∴ while it lasts, one line per tool call that counts up while it runs and
+/// turns ✓ or ✗ when it ends, and the files it changed. Everything else in the transcript comes from Spectre, as on a
+/// plain terminal.
 /// </summary>
-internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
+internal sealed class TuiRenderer(Transcript transcript, Func<int> width, TimeProvider? clock = null)
 {
     /// <summary>How many outputs are kept for the viewer; older ones are let go.</summary>
     public const int KeptOutputs = 100;
@@ -20,9 +21,16 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
     /// <summary>How many rows of the thinking show while it streams: its latest, so it reads as progress.</summary>
     public const int ThinkingRows = 6;
 
+    /// <summary>How long a call runs before its line starts counting.</summary>
+    public static readonly TimeSpan Counted = TimeSpan.FromSeconds(2);
+
+    // What a running call was started with, for its output, and its line, to redraw as it runs and when it ends.
+    sealed record Call(string Title, string? Arguments, List<Span> Line, string Text, DateTime Started);
+
     readonly Lock _lock = new();
     readonly List<ToolOutput> _outputs = [];
-    readonly Dictionary<string, (string Title, string? Arguments)> _calls = []; // what each running call was started with, for its output
+    readonly Dictionary<string, Call> _calls = [];
+    readonly TimeProvider _clock = clock ?? TimeProvider.System;
     Markdown? _message; // the model's message being streamed, while it's being redrawn
     System.Text.StringBuilder? _thought; // the model's thinking so far, until it moves on and the thinking is folded
     bool _marked; // whether the message being streamed has its mark yet
@@ -91,6 +99,12 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
         {
             EndThinking();
             EndMessage();
+            if (!turn)
+                return;
+            // Calls a turn didn't see the end of were cancelled with it.
+            foreach (var call in _calls.Values)
+                transcript.Rewrite(call.Line, call.Text + Paint(T.Muted, " · stopped"));
+            _calls.Clear();
         }
     }
 
@@ -99,10 +113,23 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
         lock (_lock)
         {
             End(turn: false);
+            var text = (agent is null ? "  " : "    " + Paint(T.Agent, $"[{agent}]") + " ") + Paint(T.Tool, "↳ " + name) + (summary.Length == 0 ? "" : Paint(T.Muted, " " + summary));
+            var line = Line(text);
             // A subagent's calls report no result here, so only the turn's own are remembered for their output.
             if (agent is null)
-                _calls[callId] = ((name + " " + summary).Trim(), arguments);
-            Line((agent is null ? "  " : "    " + Paint(T.Agent, $"[{agent}]") + " ") + Paint(T.Tool, "↳ " + name) + (summary.Length == 0 ? "" : Paint(T.Muted, " " + summary)));
+                _calls[callId] = new((name + " " + summary).Trim(), arguments, line, text, _clock.GetUtcNow().UtcDateTime);
+        }
+    }
+
+    /// <summary>Redraws the line of each call that has run for <see cref="Counted"/> with how long it has run.</summary>
+    public void Tick()
+    {
+        lock (_lock)
+        {
+            var now = _clock.GetUtcNow().UtcDateTime;
+            foreach (var call in _calls.Values)
+                if (now - call.Started >= Counted)
+                    transcript.Rewrite(call.Line, call.Text + Paint(T.Muted, " · " + StatusView.Elapsed(now - call.Started)));
         }
     }
 
@@ -110,7 +137,14 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
     {
         lock (_lock)
         {
-            var (title, arguments) = _calls.Remove(callId, out var started) ? started : (name, null);
+            _calls.Remove(callId, out var call);
+            var (title, arguments) = call is null ? (name, null) : (call.Title, call.Arguments);
+            if (call is not null)
+            {
+                var took = _clock.GetUtcNow().UtcDateTime - call.Started;
+                transcript.Rewrite(call.Line, call.Text + " " + (ok ? Paint(T.Success, "✓") : Paint(T.Error, "✗"))
+                    + (took >= TimeSpan.FromSeconds(1) ? Paint(T.Muted, " " + StatusView.Elapsed(took)) : ""));
+            }
             var shown = McpToolResult.Display(result, indentJson: true);
             if (shown.Length == 0)
                 shown = "(no output)";
@@ -152,19 +186,16 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width)
         }
     }
 
-    /// <summary>A whole line; while a message or thinking streams, it goes above what's still being written.</summary>
-    public void Line(string text)
+    /// <summary>
+    /// A whole line; while a message or thinking streams, it goes above what's still being written. Returns the line, for
+    /// <see cref="Transcript.Rewrite"/>.
+    /// </summary>
+    public List<Span> Line(string text)
     {
         lock (_lock)
-        {
-            if ((_message ?? (object?)_thought) is not null && transcript.Streaming)
-                transcript.WriteLineAbove(text);
-            else
-            {
-                StartLine();
-                transcript.Write(text + "\n");
-            }
-        }
+            return (_message ?? (object?)_thought) is not null && transcript.Streaming
+                ? transcript.WriteLineAbove(text)
+                : transcript.AddLine(text);
     }
 
     // A stream redraws from the line it starts on, so it has to start on one of its own.

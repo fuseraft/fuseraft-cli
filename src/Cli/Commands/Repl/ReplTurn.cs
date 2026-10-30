@@ -715,6 +715,9 @@ internal static class ReplTurn
         context = Math.Round(status.Context, 4),
         level   = status.Level.ToString().ToLowerInvariant(),
         modes   = status.Modes,
+        input   = status.Input,
+        output  = status.Output,
+        cached  = status.Cached,
     };
 
     // The TUI's status line: the model, the turn, how full the context is (and how near auto-compaction), and the modes.
@@ -726,7 +729,8 @@ internal static class ReplTurn
         var level   = tokens > trigger ? ContextLevel.Compacting
                     : tokens + ctx.LastTurnGrowth > trigger ? ContextLevel.Near
                     : ContextLevel.Clear;
-        return new ReplStatus(ctx.ModelId, ctx.TurnIndex + 1, (double)tokens / budget, level, modeTags);
+        return new ReplStatus(ctx.ModelId, ctx.TurnIndex + 1, (double)tokens / budget, level, modeTags,
+            ctx.CumulativeInputTokens, ctx.CumulativeOutputTokens, ctx.CumulativeCacheReadTokens);
     }
 
     internal static async Task SaveSnapshotAsync(ReplSessionContext ctx)

@@ -27,6 +27,9 @@ internal sealed partial class ReplTui : IReplScreen
 {
     const int MaxPromptRows = 10;
 
+    // A paste longer than this (or than the prompt's rows) is folded into a mark.
+    const int FoldedChars = 2000;
+
     // How long typing has to stop before a panel takes keys, so a "y" typed into the draft never answers an approval.
     static readonly TimeSpan Quiet = TimeSpan.FromMilliseconds(400);
 
@@ -37,7 +40,9 @@ internal sealed partial class ReplTui : IReplScreen
     readonly Transcript _transcript = new();
     readonly TuiRenderer _renderer;
     readonly IAnsiConsole _console;
-    readonly Channel<(string? Text, bool Echoed)> _sent = Channel.CreateUnbounded<(string?, bool)>(); // null ends the session
+    readonly Channel<string?> _sent = Channel.CreateUnbounded<string?>(); // null ends the session
+    readonly List<string> _queued = []; // sent during a turn, to run after it, oldest first
+    readonly Dictionary<string, string> _pasted = []; // what each folded paste's mark stands for
     readonly SemaphoreSlim _panelTurn = new(1, 1);
     readonly Runnable _top;
     readonly TranscriptView _view;
@@ -51,6 +56,7 @@ internal sealed partial class ReplTui : IReplScreen
     readonly PromptView _prompt;
     readonly PromptCompletion _completion = new();
     readonly SuggestView _suggest;
+    readonly QueueView _queue;
     readonly PanelView _panel;
     readonly StatusView _status;
     DateTime _lastInterrupt;
@@ -101,9 +107,10 @@ internal sealed partial class ReplTui : IReplScreen
         Paint();
         _prompt = new PromptView { X = 2, Width = Dim.Fill() };
         _suggest = new SuggestView { X = 0, Width = Dim.Fill(), Visible = false };
+        _queue = new QueueView { X = 0, Width = Dim.Fill(), Visible = false };
         _panel = new PanelView { X = 0, Width = Dim.Fill(), Visible = false };
         _status = new StatusView { X = 0, Width = Dim.Fill(), Height = 1 };
-        _top.Add(_view, _outputView, _suggest, _rule, _caret, _prompt, _panel, _status);
+        _top.Add(_view, _outputView, _queue, _suggest, _rule, _caret, _prompt, _panel, _status);
 
         _view.Scrolled = () => _rule.Below = _view.Below;
         _view.Wheeled = _outputView.Wheeled = () => _lastKey = DateTime.UtcNow;
@@ -121,6 +128,7 @@ internal sealed partial class ReplTui : IReplScreen
             return false;
         });
         _prompt.Completion = _completion;
+        _prompt.Unqueue = Unqueue;
         _prompt.SuggestionsChanged += () =>
         {
             _suggest.Show(_prompt.Suggestions, _prompt.Selected);
@@ -134,9 +142,14 @@ internal sealed partial class ReplTui : IReplScreen
             // The editor doesn't take pastes itself; a field in the panel does.
             if (!_prompt.HasFocus)
                 return;
-            _prompt.Insert(e.Text.ReplaceLineEndings("\n"));
+            _prompt.Insert(Fold(e.Text.ReplaceLineEndings("\n")));
             e.Handled = true;
         };
+        _app.AddTimeout(TimeSpan.FromSeconds(1), () =>
+        {
+            _renderer.Tick();
+            return true;
+        });
         _app.ScreenChanged += (_, _) => Layout();
         if (settings.Dock is { } dock && Docks.Named(dock) is { } docked)
             _dock = docked;
@@ -211,7 +224,7 @@ internal sealed partial class ReplTui : IReplScreen
     }
 
     // While a turn runs, a message joins it; a command waits for it to end, and so does a message when nothing can
-    // take it (a command is running). Otherwise the REPL is waiting for it.
+    // take it (a command is running), queued above the prompt. Otherwise the REPL is waiting for it.
     void Send(string text)
     {
         // Nothing reads it once the session is ending; it's in the history, for ↑ in the next one.
@@ -222,36 +235,101 @@ internal sealed partial class ReplTui : IReplScreen
         }
         if (!_status.Working)
         {
-            _sent.Writer.TryWrite((text, false));
+            _sent.Writer.TryWrite(text);
             return;
         }
         var command = text.StartsWith('!') || (text.StartsWith('/') && !text.Contains('\n'));
-        if (command && text.StartsWith('/') && RunNow?.Invoke(text) is { } done)
+        if (command && text.StartsWith('/') && RunNow?.Invoke(Expand(text)) is { } done)
         {
             _renderer.Line(Accent("› ") + text);
             _renderer.Line(Muted("  " + done));
             return;
         }
-        if (!command && Interject?.Invoke(text) == true)
+        if (!command && Interject?.Invoke(Expand(text)) == true)
         {
             _renderer.Line(Accent("› ") + text);
             return;
         }
-        _sent.Writer.TryWrite((text, true));
-        _renderer.Line(Accent("› ") + text + Muted(command ? "  (runs when this turn ends)" : "  (sent when this ends)"));
+        lock (_queued)
+            _queued.Add(text);
+        ShowQueue();
     }
 
     public async Task<string?> ReadAsync(CancellationToken ct)
     {
         _renderer.End(turn: true);
         Working(false);
-        var (text, echoed) = await _sent.Reader.ReadAsync(ct);
-        if (text is not null)
+        var text = Dequeue() ?? await _sent.Reader.ReadAsync(ct);
+        if (text is null)
+            return null;
+        _renderer.Line(Accent("› ") + text);
+        Working(true);
+        return Expand(text);
+    }
+
+    string? Dequeue() => Take(first: true);
+
+    // ↑ on an empty prompt: the last message queued comes back to be edited (or sent again, or dropped).
+    string? Unqueue() => Take(first: false);
+
+    string? Take(bool first)
+    {
+        string text;
+        lock (_queued)
         {
-            if (!echoed)
-                _renderer.Line(Accent("› ") + text);
-            Working(true);
+            if (_queued.Count == 0)
+                return null;
+            var at = first ? 0 : _queued.Count - 1;
+            text = _queued[at];
+            _queued.RemoveAt(at);
         }
+        ShowQueue();
+        return text;
+    }
+
+    void ShowQueue()
+    {
+        List<string> queued;
+        lock (_queued)
+            queued = [.. _queued];
+        Ui(() =>
+        {
+            _queue.Show(queued);
+            Layout();
+        });
+    }
+
+    /// <summary>The mark a paste too long for the prompt is folded into, or null when it fits.</summary>
+    internal static string? PasteMark(string text, int number)
+    {
+        var lines = text.TrimEnd('\n').Split('\n').Length;
+        if (lines <= MaxPromptRows && text.Length <= FoldedChars)
+            return null;
+        return $"[pasted #{number} · {(lines > 1 ? $"{lines:N0} lines" : $"{text.Length:N0} chars")}]";
+    }
+
+    // A long paste goes into the draft as a mark, and what it stands for is put back in when the message is sent.
+    string Fold(string text)
+    {
+        lock (_pasted)
+        {
+            if (PasteMark(text, _pasted.Count + 1) is not { } mark)
+                return text;
+            _pasted[mark] = text;
+            return mark;
+        }
+    }
+
+    // What a message says once its folded pastes are put back, each of which Ctrl+O can then show.
+    string Expand(string text)
+    {
+        lock (_pasted)
+            foreach (var (mark, pasted) in _pasted)
+                if (text.Contains(mark))
+                {
+                    text = text.Replace(mark, pasted);
+                    _renderer.Keep(new ToolOutput(mark.Trim('[', ']'), pasted, Diff: false));
+                }
         return text;
     }
 
@@ -274,8 +352,12 @@ internal sealed partial class ReplTui : IReplScreen
         _status.Set(_shown is null ? "" : StatusText(_shown), working);
     });
 
+    /// <summary>A token count in a few characters: 950, 48.2k, 1.25M.</summary>
+    internal static string Count(long n) =>
+        n < 1000 ? n.ToString() : n < 999_500 ? $"{n / 1000.0:0.#}k" : $"{n / 1_000_000.0:0.##}M";
+
     // The model in the accent, then how full the context is, green while compaction is out of reach, yellow when a turn
-    // like the last one would get there, and red once it's past; then the modes.
+    // like the last one would get there, and red once it's past; then the session's tokens, and the modes.
     static string StatusText(ReplStatus s)
     {
         var used = $"{s.Context * 100:0}% context";
@@ -286,7 +368,9 @@ internal sealed partial class ReplTui : IReplScreen
             ContextLevel.Near => Paint(t.Warning, used),
             _ => Paint(t.Success, used),
         };
-        return string.Join(" · ", [Paint(t.Accent, s.Model), $"turn {s.Turn}", used, .. s.Modes]);
+        string[] tokens = s.Tokens == 0 ? []
+            : [$"{Count(s.Tokens)} tokens" + (s.Cached > 0 && s.Input > 0 ? $" ({s.Cached * 100 / s.Input}% cached)" : "")];
+        return string.Join(" · ", [Paint(t.Accent, s.Model), $"turn {s.Turn}", used, .. tokens, .. s.Modes]);
     }
 
     public void Text(string delta) => _renderer.Text(delta);
@@ -351,6 +435,7 @@ internal sealed partial class ReplTui : IReplScreen
     });
 
     // Keys that mean the same everywhere: Ctrl+C, Ctrl+D, Esc (never quits), scrolling the transcript, and Ctrl+O.
+    // Alt+↑/↓ move between the messages sent, and Ctrl+G writes the draft in $EDITOR.
     void OnKey(object? sender, Key key)
     {
         _lastKey = DateTime.UtcNow;
@@ -372,6 +457,9 @@ internal sealed partial class ReplTui : IReplScreen
             : key == Key.Esc && !_panel.Visible ? Run(_prompt.Dismiss)
             : key == Key.PageUp || key == Key.PageDown ? Run(() => _view.Page(key == Key.PageUp ? -1 : 1))
             : key.KeyCode == (KeyCode.End | KeyCode.CtrlMask) ? Run(_view.Follow)
+            : key.KeyCode == (KeyCode.CursorUp | KeyCode.AltMask) ? Run(() => JumpToMessage(older: true))
+            : key.KeyCode == (KeyCode.CursorDown | KeyCode.AltMask) ? Run(() => JumpToMessage(older: false))
+            : key.KeyCode == (KeyCode.G | KeyCode.CtrlMask) && !_panel.Visible ? Run(EditDraft)
             : key.Handled;
 
         static bool Run(Action action)
@@ -386,8 +474,35 @@ internal sealed partial class ReplTui : IReplScreen
     {
         if (_status.Working)
             Interrupt?.Invoke();
-        _sent.Writer.TryWrite((null, false));
+        Quit();
     }
+
+    // What was queued would otherwise be read before the end.
+    void Quit()
+    {
+        lock (_queued)
+            _queued.Clear();
+        ShowQueue();
+        _sent.Writer.TryWrite(null);
+    }
+
+    // Alt+↑/↓: scrolls to the message sent before (or after) the one in view; past the last, back to following.
+    void JumpToMessage(bool older)
+    {
+        var sent = Sent(_transcript.Lines());
+        var from = _view.Anchor;
+        var at = older ? sent.FindLastIndex(i => i < from) : sent.FindIndex(i => i > from);
+        if (at >= 0)
+            _view.ShowLine(sent[at]);
+        else if (!older)
+            _view.Follow();
+        else
+            _status.Flash(sent.Count == 0 ? "No messages sent yet" : "That's the first message");
+    }
+
+    /// <summary>The transcript lines that start a message the user sent, oldest first.</summary>
+    internal static List<int> Sent(List<List<Span>> lines) =>
+        [.. lines.Select((line, i) => (Text: line.Count > 0 ? line[0].Text : "", i)).Where(l => l.Text.StartsWith("› ")).Select(l => l.i)];
 
     // Ctrl+C cancels the running turn, or else closes or clears what's open; twice in a row on an empty prompt exits.
     // An open question is answered as Esc would answer it first, so the turn behind it can stop.
@@ -409,7 +524,7 @@ internal sealed partial class ReplTui : IReplScreen
         else if (_prompt.Text.Length > 0)
             _prompt.Text = "";
         else if (DateTime.UtcNow - _lastInterrupt < TimeSpan.FromSeconds(2))
-            _sent.Writer.TryWrite((null, false));
+            Quit();
         else
         {
             _lastInterrupt = DateTime.UtcNow;
@@ -420,11 +535,19 @@ internal sealed partial class ReplTui : IReplScreen
     // Cancelling a turn drops what was sent to run after it.
     void DropQueued()
     {
-        var dropped = 0;
-        while (_sent.Reader.TryRead(out _))
-            dropped++;
-        if (dropped > 0)
-            _renderer.Line(Muted("  (what you sent during the turn was dropped)"));
+        int dropped;
+        lock (_queued)
+        {
+            dropped = _queued.Count;
+            _queued.Clear();
+        }
+        while (_sent.Reader.TryRead(out var text))
+            if (text is not null)
+                dropped++;
+        if (dropped == 0)
+            return;
+        ShowQueue();
+        _renderer.Line(Muted($"  (dropped {dropped} message{(dropped == 1 ? "" : "s")} queued for after the turn)"));
     }
 
     // The prompt's area grows with the draft (or the panel), and the transcript gets what's left.
@@ -434,7 +557,10 @@ internal sealed partial class ReplTui : IReplScreen
             _prompt.Viewport = _prompt.Viewport with { Y = 0 };
         var rows = _panel.Visible ? _panel.Needed() : Math.Clamp(_prompt.Rows(_app.Screen.Width - 2), 1, MaxPromptRows);
         var suggested = _panel.Visible ? 0 : Math.Min(_prompt.Suggestions.Count, PromptCompletion.MaxShown);
-        var frame = Arrange(_dock, _app.Screen.Height, rows, suggested);
+        var frame = Arrange(_dock, _app.Screen.Height, rows, suggested, _queue.Rows);
+        _queue.Visible = _queue.Rows > 0;
+        _queue.Y = frame.Queue;
+        _queue.Height = _queue.Rows;
         _suggest.Visible = suggested > 0;
         _suggest.Y = frame.Suggest;
         _suggest.Height = suggested;
@@ -449,19 +575,19 @@ internal sealed partial class ReplTui : IReplScreen
     }
 
     /// <summary>The row each part starts on, and how many rows the transcript gets.</summary>
-    internal readonly record struct Frame(int Transcript, int TranscriptHeight, int Suggest, int Rule, int Prompt, int Status);
+    internal readonly record struct Frame(int Transcript, int TranscriptHeight, int Queue, int Suggest, int Rule, int Prompt, int Status);
 
     /// <summary>
-    /// Lays out a screen <paramref name="height"/> rows tall, with <paramref name="rows"/> for the prompt (or panel) and
-    /// <paramref name="suggested"/> suggestions. Docked at the bottom: transcript, suggestions, rule, prompt, status line.
-    /// At the top it's the mirror image: status line, prompt, rule, suggestions, transcript.
+    /// Lays out a screen <paramref name="height"/> rows tall, with <paramref name="rows"/> for the prompt (or panel),
+    /// <paramref name="suggested"/> suggestions and <paramref name="queued"/> queued messages. Docked at the bottom:
+    /// transcript, queue, suggestions, rule, prompt, status line. At the top it's the mirror image.
     /// </summary>
-    internal static Frame Arrange(Dock dock, int height, int rows, int suggested)
+    internal static Frame Arrange(Dock dock, int height, int rows, int suggested, int queued = 0)
     {
-        var transcript = Math.Max(0, height - rows - 2 - suggested);
+        var transcript = Math.Max(0, height - rows - 2 - suggested - queued);
         return dock == Tui.Dock.Top
-            ? new(rows + 2 + suggested, transcript, rows + 2, rows + 1, 1, 0)
-            : new(0, transcript, transcript, transcript + suggested, transcript + suggested + 1, height - 1);
+            ? new(rows + 2 + suggested + queued, transcript, rows + 2 + suggested, rows + 2, rows + 1, 1, 0)
+            : new(0, transcript, transcript, transcript + queued, transcript + queued + suggested, transcript + queued + suggested + 1, height - 1);
     }
 
     void Redraw()
