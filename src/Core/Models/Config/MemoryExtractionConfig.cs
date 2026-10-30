@@ -10,6 +10,13 @@ namespace fuseraft.Core.Models.Config;
 public record MemoryExtractionConfig
 {
     /// <summary>
+    /// True to extract memories automatically on exit and before /clear, /switch, /provider setup
+    /// or compaction discards the conversation. Null or false leaves saving to <c>/memory save</c>.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AutoSave { get; init; }
+
+    /// <summary>
     /// Model alias or ID to use for extraction (e.g. a small/cheap model to keep the
     /// end-of-session extraction call inexpensive). Resolved by <c>ReplFactory.ResolveOverrideModel</c>:
     /// provider, endpoint, and API key are auto-detected from the ID prefix, or inherited from the
@@ -33,6 +40,6 @@ public record MemoryExtractionConfig
 
     /// <summary>True when no field is set, so the whole section can be dropped from the config file.</summary>
     [JsonIgnore]
-    public bool IsEmpty => string.IsNullOrWhiteSpace(Model) && string.IsNullOrWhiteSpace(Provider)
+    public bool IsEmpty => AutoSave is null && string.IsNullOrWhiteSpace(Model) && string.IsNullOrWhiteSpace(Provider)
         && string.IsNullOrWhiteSpace(Endpoint) && string.IsNullOrWhiteSpace(ApiKeyEnvVar);
 }

@@ -359,11 +359,11 @@ The `{AgentName}` component is sanitized so it is safe as a directory name. Agen
 
 **REPL auto-memory**
 
-The REPL always loads and saves memories automatically — no config flag is needed. Each REPL memory entry is identified by a UUID (stored in the file's frontmatter and used as its filename).
+The REPL always loads memories automatically. Saving new ones is manual by default — run `/memory save` — unless `memory.autoSave` is on. Each REPL memory entry is identified by a UUID (stored in the file's frontmatter and used as its filename).
 
 Memories are **scoped to the working directory** where they were created. A file at `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json` records the GUIDs of memories saved in that session, and on session start the REPL loads the entries listed by every session of the directory, and none from other directories.
 
-When the session ends, and before `/clear`, `/switch`, `/provider setup` or compaction discards the conversation, the model is asked to extract new memories from it. Each saved entry is written to the global store and its GUID is registered in the session's refs file. Use `/memory` commands to manage them. See [CLI Reference — `/memory`](cli-reference.md#memory-commands).
+On `/memory save` the model is asked to extract new memories from the conversation. With `fuseraft settings set memory.autoSave true`, this also happens when the session ends and before `/clear`, `/switch`, `/provider setup` or compaction discards the conversation. Each saved entry is written to the global store and its GUID is registered in the session's refs file. Use `/memory` commands to manage them. See [CLI Reference — `/memory`](cli-reference.md#memory-commands).
 
 By default this extraction call reuses the REPL's main chat model. Set `memory.model` in `~/.fuseraft/config` to run it on a different model instead (the same model also names new chats; see `repl.autoTitle`) — e.g. a smaller/cheaper one, since extraction doesn't need the same capability as the main conversation:
 

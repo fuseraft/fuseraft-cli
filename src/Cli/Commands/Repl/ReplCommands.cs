@@ -113,7 +113,7 @@ internal static partial class ReplCommands
             new("/replay [n|all]", "Re-display the last n turns in full (default 3) — the same view shown automatically when a session is resumed"),
             new("/assist", "Diagnose the conversation and inject a corrective message"),
             new("/goal <objective>", "Work until an independent audit confirms the objective is met (--max N audits, default 5; /goal resume continues an unfinished one; a goal paused on a question continues with your next message, /goal drop abandons it)"),
-            new("/exit", "Exit the REPL (auto-saves memories)"),
+            new("/exit", "Exit the REPL"),
         ]),
         new("Orchestration", [
             new("/run <task>", "Run a task using fuseraft run and inject the result as conversation context"),
