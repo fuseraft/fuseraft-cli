@@ -31,9 +31,9 @@ Every session gets an 8-character session ID (shown in the startup header) and a
 
 ## The prompt
 
-The REPL fills the terminal: the conversation scrolls above a prompt editor, and a status line at the bottom shows the model, the turn, how full the context is (green, then yellow as auto-compaction nears, red once it's past), and whether HITL or safe mode is on. Replies stream in styled as Markdown, with highlighted code blocks; each tool call shows as a line of its own (`↳ shell_run dotnet test`), each changed file as `✎ src/app.cs +4 -1`, and the model's thinking dims under a `∴` while it lasts. Ctrl+O opens any of the last 100 tool outputs (each beside the arguments it was called with), approval diffs or thoughts in full.
+The REPL fills the terminal: the conversation scrolls above a prompt editor, and a status line at the bottom shows the model, the turn, how full the context is (green, then yellow as auto-compaction nears, red once it's past), the tokens the session has used (and how many of its input tokens came from the provider's cache), and whether HITL or safe mode is on. Replies stream in styled as Markdown, with highlighted code blocks; each tool call shows as a line of its own (`↳ shell_run dotnet test`) that counts up while it runs and turns ✓ or ✗ with how long it took, each changed file as `✎ src/app.cs +4 -1`, and the model's thinking dims under a `∴` while it lasts. Ctrl+O opens any of the last 100 tool outputs (each beside the arguments it was called with), approval diffs or thoughts in full.
 
-While a turn runs you can keep typing: a message joins the turn right after its current tool calls, and a `/command` waits for the turn to end. Approvals and questions appear in place of the prompt. Name files with `@` (`explain @src/parser.py`) to attach them to your message, read through the same tools and rules the model uses. `/copy` copies the last reply (`/copy code` a code block from it), `/theme` changes the colors, and `/dock top` moves the prompt to the top. `--plain` (or piped input or output) gives you the line-based REPL instead.
+While a turn runs you can keep typing: a message joins the turn right after its current tool calls, and a `/command` waits for the turn to end, queued above the prompt. Approvals and questions appear in place of the prompt. Name files with `@` (`explain @src/parser.py`) to attach them to your message, read through the same tools and rules the model uses. `/copy` copies the last reply (`/copy code` a code block from it), `/theme` changes the colors, and `/dock top` moves the prompt to the top. `--plain` (or piped input or output) gives you the line-based REPL instead.
 
 In the line-based REPL each message you send follows a marker:
 
@@ -53,7 +53,7 @@ After each response, a compact status line reports what happened:
   ── turn 1 · ~3,200 tok · 2 tools
 ```
 
-Enter sends and Alt+Enter starts a new line; ↑/↓ walk your history, Tab completes slash commands, `$skills` and `@paths`, PgUp/PgDn scroll, Ctrl+F finds text in the conversation, Ctrl+R searches what you've sent, and Ctrl+O shows a tool's whole output. See the full key tables, for both the full-screen and the line-based REPL, in [CLI Reference — Input and line editing](cli-reference.md#fuseraft-repl).
+Enter sends and Alt+Enter starts a new line; ↑/↓ walk your history, Tab completes slash commands, `$skills` and `@paths`, PgUp/PgDn scroll, Ctrl+F finds text in the conversation, Ctrl+R searches what you've sent, Alt+↑/↓ move between your messages, Ctrl+G opens the draft in `$EDITOR`, and Ctrl+O shows a tool's whole output. See the full key tables, for both the full-screen and the line-based REPL, in [CLI Reference — Input and line editing](cli-reference.md#fuseraft-repl).
 
 ---
 
@@ -277,7 +277,7 @@ This is covered in full in [Sessions — REPL sessions](sessions.md#repl-session
 
 ## VS Code
 
-The [Fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) hosts the same REPL in a chat panel over a JSON bridge protocol — same commands, same safety model, streamed into the editor instead of a terminal. It draws a turn the way the full-screen REPL does: thinking that folds into one line, a line per tool call that turns ✓ or ✗ (click it for the arguments and output, or press Ctrl+O for the viewer), a subagent's calls nested under it, and `✎ path +added -removed` for each changed file, with the same status line underneath. You can type while a turn runs: a message joins the turn, and a `/command` waits for it to end. `@` suggests paths, ↑/↓ and Ctrl+R recall what you've sent, Ctrl+F finds text in the conversation, `!` commands stream their output into the panel, and `/copy` puts the reply on the VS Code clipboard. `/theme` and `/dock` don't apply there: the panel follows your VS Code theme.
+The [Fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) hosts the same REPL in a chat panel over a JSON bridge protocol — same commands, same safety model, streamed into the editor instead of a terminal. It draws a turn the way the full-screen REPL does: thinking that folds into one line, a line per tool call that counts up while it runs and turns ✓ or ✗ with how long it took (click it for the arguments and output, or press Ctrl+O for the viewer), a subagent's calls nested under it, and `✎ path +added -removed` for each changed file, with the same status line underneath. You can type while a turn runs: a message joins the turn, and a `/command` waits for it to end as a chip above the prompt (↑ on an empty prompt takes it back). `@` suggests paths, ↑/↓ and Ctrl+R recall what you've sent, Alt+↑/↓ jump between your messages, a long paste folds into `[pasted #1 · 40 lines]`, Ctrl+G opens the draft in an editor tab, Ctrl+F finds text in the conversation, `!` commands stream their output into the panel, and `/copy` puts the reply on the VS Code clipboard. `/theme` and `/dock` don't apply there: the panel follows your VS Code theme.
 
 ---
 

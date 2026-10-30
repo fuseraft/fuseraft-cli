@@ -79,9 +79,11 @@ internal sealed class Transcript : TextWriter
     /// <summary>
     /// Writes a whole line above what's still being streamed (the open line, or the whole message while
     /// <see cref="Stream"/> is redrawing it), so what the user sent mid-sentence doesn't split the model's sentence in two.
+    /// Returns the line, for <see cref="Rewrite"/>.
     /// </summary>
-    public void WriteLineAbove(string text)
+    public List<Span> WriteLineAbove(string text)
     {
+        List<Span> written;
         lock (_lines)
         {
             var from = _live ?? _lines.Count - 1;
@@ -92,6 +94,7 @@ internal sealed class Transcript : TextWriter
             var style = _style;
             _style = default;
             Parse(text + "\n");
+            written = _lines[^2];
             if (held.Count > 0)
             {
                 _lines.RemoveAt(_lines.Count - 1);
@@ -101,6 +104,40 @@ internal sealed class Transcript : TextWriter
                 _style = style;
                 _editedFrom = Math.Min(_editedFrom, from);
             }
+            Version++;
+        }
+        Changed?.Invoke();
+        return written;
+    }
+
+    /// <summary>Writes a whole line of its own, after the last if that isn't empty, and returns it for <see cref="Rewrite"/>.</summary>
+    public List<Span> AddLine(string text)
+    {
+        List<Span> written;
+        lock (_lines)
+        {
+            if (_live is null && _lines[^1].Count > 0)
+                _lines.Add([]);
+            WriteCore(text + "\n");
+            written = _lines[^2];
+        }
+        Changed?.Invoke();
+        return written;
+    }
+
+    /// <summary>Redraws <paramref name="line"/> as <paramref name="text"/>, if it's still in the transcript.</summary>
+    public void Rewrite(List<Span> line, string text)
+    {
+        var spans = new Transcript();
+        spans.Write(text);
+        lock (_lines)
+        {
+            var at = _lines.FindLastIndex(l => ReferenceEquals(l, line));
+            if (at < 0)
+                return;
+            line.Clear();
+            line.AddRange(spans._lines[0]);
+            _editedFrom = Math.Min(_editedFrom, at);
             Version++;
         }
         Changed?.Invoke();
@@ -231,17 +268,20 @@ internal sealed class Transcript : TextWriter
         if (string.IsNullOrEmpty(value))
             return;
         lock (_lines)
-        {
-            if (_live is not null)
-            {
-                _live = null;
-                if (_lines[^1].Count > 0)
-                    _lines.Add([]);
-            }
-            Parse(value);
-            Version++;
-        }
+            WriteCore(value);
         Changed?.Invoke();
+    }
+
+    void WriteCore(string value)
+    {
+        if (_live is not null)
+        {
+            _live = null;
+            if (_lines[^1].Count > 0)
+                _lines.Add([]);
+        }
+        Parse(value);
+        Version++;
     }
 
     public override void WriteLine(string? value) => Write(value + "\n");

@@ -326,3 +326,43 @@ internal sealed class SuggestView : View
         return true;
     }
 }
+
+/// <summary>What was sent during a turn to run after it, above the prompt, oldest first.</summary>
+internal sealed class QueueView : View
+{
+    public const int MaxShown = 3;
+
+    IReadOnlyList<string> _items = [];
+
+    /// <summary>Rows it needs: one per message, up to <see cref="MaxShown"/>.</summary>
+    public int Rows => Math.Min(_items.Count, MaxShown);
+
+    public void Show(IReadOnlyList<string> items)
+    {
+        _items = items;
+        SetNeedsDraw();
+    }
+
+    /// <summary>Row <paramref name="row"/>'s text: a message on one line, or how many more there are on the last row.</summary>
+    public static string Row(IReadOnlyList<string> items, int row) =>
+        row == MaxShown - 1 && items.Count > MaxShown ? $"  queued · {items.Count - row} more"
+        : "  queued › " + items[row].ReplaceLineEndings(" ⏎ ");
+
+    protected override bool OnDrawingContent(DrawContext? context)
+    {
+        var muted = Theme.StyleOf(Theme.Current.Muted);
+        const string hint = "↑ to edit the last";
+        for (var row = 0; row < Viewport.Height; row++)
+        {
+            if (row >= Rows)
+            {
+                Styled.Draw(this, row, [], Styled.Plain);
+                continue;
+            }
+            var text = Row(_items, row);
+            var gap = Viewport.Width - text.GetColumns() - hint.GetColumns();
+            Styled.Draw(this, row, row == 0 && gap >= 2 ? [new(text, muted), new(new string(' ', gap) + hint, muted)] : [new(text, muted)], Styled.Plain);
+        }
+        return true;
+    }
+}

@@ -27,6 +27,9 @@ internal sealed class PromptView : Editor
 
     public PromptCompletion? Completion { get; set; }
 
+    /// <summary>On ↑ in an empty prompt: the last message queued during the turn, taken back to edit, or null.</summary>
+    public Func<string?>? Unqueue { get; set; }
+
     public IReadOnlyList<Suggestion> Suggestions { get; private set; } = [];
 
     public int Selected { get; private set; }
@@ -133,6 +136,11 @@ internal sealed class PromptView : Editor
         {
             var start = document.GetLineByOffset(CaretOffset).Offset;
             document.Remove(start, CaretOffset - start);
+            return true;
+        }
+        if (key == Key.CursorUp && Text.Length == 0 && Unqueue?.Invoke() is { } queued)
+        {
+            Replace(queued);
             return true;
         }
         if (key == Key.CursorUp && line == 1 && _index > 0)

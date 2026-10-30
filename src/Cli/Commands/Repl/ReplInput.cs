@@ -6,7 +6,12 @@ namespace fuseraft.Cli.Commands.Repl;
 /// <summary>The status line's view of the session, between and during turns.</summary>
 /// <param name="Context">How full the context is, as a fraction of the budget.</param>
 /// <param name="Level">How near auto-compaction is.</param>
-internal sealed record ReplStatus(string Model, int Turn, double Context, ContextLevel Level, IReadOnlyList<string> Modes);
+/// <param name="Input">Input tokens the provider has reported this session, of which <paramref name="Cached"/> came from its cache.</param>
+internal sealed record ReplStatus(string Model, int Turn, double Context, ContextLevel Level, IReadOnlyList<string> Modes,
+    long Input = 0, long Output = 0, long Cached = 0)
+{
+    public long Tokens => Input + Output;
+}
 
 internal enum ContextLevel { Clear, Near, Compacting }
 

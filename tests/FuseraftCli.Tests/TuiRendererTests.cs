@@ -7,7 +7,16 @@ public sealed class TuiRendererTests
     private readonly Transcript _transcript = new();
     private readonly TuiRenderer _renderer;
 
-    public TuiRendererTests() => _renderer = new TuiRenderer(_transcript, () => 80);
+    private readonly ManualClock _clock = new();
+
+    public TuiRendererTests() => _renderer = new TuiRenderer(_transcript, () => 80, _clock);
+
+    private sealed class ManualClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = new(2026, 10, 29, 12, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
 
     private List<string> Texts() =>
         [.. _transcript.Lines().Select(line => string.Concat(line.Select(s => s.Text))).Where(l => l.Length > 0)];
@@ -22,7 +31,7 @@ public sealed class TuiRendererTests
         _renderer.End(turn: true);
         _renderer.Text("Next turn.");
 
-        Assert.Equal(["◆ Here is bold text", "  ↳ read_file src/a.cs", "◆ More.", "◆ Next turn."], Texts());
+        Assert.Equal(["◆ Here is bold text", "  ↳ read_file src/a.cs · stopped", "◆ More.", "◆ Next turn."], Texts());
     }
 
     [Fact]
@@ -153,5 +162,46 @@ public sealed class TuiRendererTests
         _renderer.Text(" there\nsecond line\n");
 
         Assert.Equal(["◆ Hi there", "second line"], Texts());
+    }
+
+    [Fact]
+    public void A_call_counts_up_while_it_runs_and_says_how_it_ended()
+    {
+        _renderer.ToolStarted("c1", "shell_run", "dotnet test");
+        _renderer.ToolStarted("c2", "read_file", "a.txt");
+        _renderer.ToolFinished("c2", "read_file", ok: true, "text");
+        _clock.Now += TimeSpan.FromSeconds(1);
+        _renderer.Tick();
+
+        Assert.Equal(["  ↳ shell_run dotnet test", "  ↳ read_file a.txt ✓"], Texts());
+
+        _clock.Now += TimeSpan.FromSeconds(4);
+        _renderer.Tick();
+        Assert.Equal("  ↳ shell_run dotnet test · 5s", Texts()[0]);
+
+        _clock.Now += TimeSpan.FromSeconds(9);
+        _renderer.ToolFinished("c1", "shell_run", ok: false, "[EXIT 1] 2 failed");
+        Assert.Equal(["  ↳ shell_run dotnet test ✗ 14s", "  ↳ read_file a.txt ✓", "    [EXIT 1] 2 failed"], Texts());
+    }
+
+    [Fact]
+    public void A_call_still_running_when_the_turn_ends_was_stopped()
+    {
+        _renderer.ToolStarted("c1", "shell_run", "sleep 60");
+        _renderer.End(turn: true);
+        _renderer.ToolFinished("c1", "shell_run", ok: true, "");
+
+        Assert.Equal(["  ↳ shell_run sleep 60 · stopped"], Texts());
+    }
+
+    [Fact]
+    public void A_call_line_is_redrawn_in_place_while_a_reply_streams_below_it()
+    {
+        _renderer.ToolStarted("c1", "read_file", "a.txt");
+        _renderer.Text("Reading ");
+        _renderer.ToolFinished("c1", "read_file", ok: true, "x");
+        _renderer.Text("it.");
+
+        Assert.Equal(["  ↳ read_file a.txt ✓", "◆ Reading it."], Texts());
     }
 }

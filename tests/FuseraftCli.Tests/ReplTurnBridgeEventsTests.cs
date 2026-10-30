@@ -183,7 +183,7 @@ public sealed class ReplTurnBridgeEventsTests : IDisposable
     public void StatusEvent_CarriesTheStatusLine()
     {
         var json = JsonSerializer.SerializeToElement(
-            ReplTurn.StatusEvent(new ReplStatus("grok-4.5", 3, 0.45678, ContextLevel.Near, ["hitl", "safe"])),
+            ReplTurn.StatusEvent(new ReplStatus("grok-4.5", 3, 0.45678, ContextLevel.Near, ["hitl", "safe"], Input: 12_000, Output: 800, Cached: 9_000)),
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
 
         Assert.Equal("status", json.GetProperty("type").GetString());
@@ -192,5 +192,8 @@ public sealed class ReplTurnBridgeEventsTests : IDisposable
         Assert.Equal(0.4568, json.GetProperty("context").GetDouble());
         Assert.Equal("near", json.GetProperty("level").GetString());
         Assert.Equal(["hitl", "safe"], json.GetProperty("modes").EnumerateArray().Select(m => m.GetString()));
+        Assert.Equal(12_000, json.GetProperty("input").GetInt64());
+        Assert.Equal(800, json.GetProperty("output").GetInt64());
+        Assert.Equal(9_000, json.GetProperty("cached").GetInt64());
     }
 }

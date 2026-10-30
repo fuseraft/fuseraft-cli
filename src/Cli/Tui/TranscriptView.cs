@@ -17,6 +17,7 @@ sealed class TranscriptView(Transcript transcript) : View
     int _top;
     bool _follow = true;
     int _reported;
+    int? _shown; // the line ShowLine last scrolled to, until the view is scrolled some other way
 
     /// <summary>Raised when <see cref="Below"/> changes: on a scroll, or when output arrives or goes while scrolled up.</summary>
     public Action? Scrolled { get; set; }
@@ -43,8 +44,27 @@ sealed class TranscriptView(Transcript transcript) : View
         var last = Math.Max(0, _rows.Count - Viewport.Height);
         _top = Math.Clamp(_starts[line] - Viewport.Height / 3, 0, last);
         _follow = _top >= last;
+        _shown = line;
         SetNeedsDraw();
         Scrolled?.Invoke();
+    }
+
+    /// <summary>
+    /// The transcript line the view is on: the one <see cref="ShowLine"/> went to, else the one a third of the way down,
+    /// or past the end while following.
+    /// </summary>
+    public int Anchor
+    {
+        get
+        {
+            Sync();
+            if (_shown is { } shown)
+                return shown;
+            if (_follow)
+                return int.MaxValue;
+            var at = _starts.BinarySearch(_top + Viewport.Height / 3);
+            return at >= 0 ? at : Math.Max(0, ~at - 1);
+        }
     }
 
     /// <summary>Raised when the user scrolls with the mouse.</summary>
@@ -57,6 +77,7 @@ sealed class TranscriptView(Transcript transcript) : View
 
     public void ScrollToTop()
     {
+        _shown = null;
         _follow = false;
         _top = 0;
         SetNeedsDraw();
@@ -65,6 +86,7 @@ sealed class TranscriptView(Transcript transcript) : View
 
     public void Follow()
     {
+        _shown = null;
         _follow = true;
         SetNeedsDraw();
         Scrolled?.Invoke();
@@ -75,6 +97,7 @@ sealed class TranscriptView(Transcript transcript) : View
         Sync();
         var last = Math.Max(0, _rows.Count - Viewport.Height);
         _top = Math.Clamp((_follow ? last : _top) + rows, 0, last);
+        _shown = null;
         _follow = _top >= last;
         SetNeedsDraw();
         Scrolled?.Invoke();
