@@ -4,7 +4,7 @@ using fuseraft.Core.Interfaces;
 namespace fuseraft.Cli;
 
 /// <summary>
-/// Human approval service for the REPL's VS Code JSON-bridge mode (<c>fuseraft repl --vscode</c>).
+/// Human approval service for the JSON bridges (<c>fuseraft repl --vscode</c>, <c>fuseraft run --bridge</c>).
 /// <see cref="ConsoleHumanApprovalService"/> writes prompts via <c>AnsiConsole</c>/<c>Console.ReadLine</c>,
 /// which the webview's JSON-line parser silently discards (non-JSON stdout) and can never answer
 /// (it only ever writes JSON messages to stdin) — so under <c>/hitl on</c> every shell command
@@ -17,7 +17,10 @@ namespace fuseraft.Cli;
 /// Whether the webview answers <c>question</c> events (ask_user). An extension that predates them would
 /// never reply and the turn would hang, so the extension opts in with <see cref="QuestionsEnvVar"/>.
 /// </param>
-public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump, bool questions = false) : IHumanApprovalService
+/// <param name="promptRoutes">
+/// Whether route approvals are asked over the bridge (<c>run --bridge</c>). The REPL has no routes to approve.
+/// </param>
+public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump, bool questions = false, bool promptRoutes = false) : IHumanApprovalService
 {
     /// <summary>Set to "1" by an extension that renders <c>question</c> events and replies with <c>question_response</c>.</summary>
     public const string QuestionsEnvVar = "FUSERAFT_VSCODE_QUESTIONS";
@@ -74,8 +77,12 @@ public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump, bool
     public Task<string?> PromptBlockerResolutionAsync(string agentName, string blockerMessage) =>
         Task.FromResult<string?>(null);
 
-    public Task<bool> PromptRouteApprovalAsync(string keyword, string sourceAgent, string targetAgent) =>
-        Task.FromResult(true);
+    public async Task<bool> PromptRouteApprovalAsync(string keyword, string sourceAgent, string targetAgent)
+    {
+        if (!promptRoutes) return true;
+        ReplJsonBridge.Emit(new { type = "approval_request", kind = "route_approval", keyword, sourceAgent, targetAgent });
+        return await stdinPump.ReadApprovalResponseAsync();
+    }
 
     public Task<string?> PromptPostSessionAsync() => Task.FromResult<string?>(null);
 

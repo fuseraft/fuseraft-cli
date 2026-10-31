@@ -36,6 +36,7 @@ fuseraft run [task] [options]
 | `--spec <path>` | — | Path to a spec file (Markdown, plain text, or JSON) that anchors all agents to an agreed specification. The spec is injected into every agent's system prompt as the authoritative source of truth and appended to the task at turn 0. Ignored when resuming. See [Spec-Driven Development](spec-driven.md). |
 | `--snapshot` | off | Capture per-turn postmortem snapshots to `~/.fuseraft/snapshots/<project>/<session>/`. Writes `turns.jsonl` (one record per agent turn: content, tool calls, token usage) and `manifest.json` (run summary: task, success/failure, elapsed). Useful for debugging and postmortem analysis. |
 | `--json` | off | Suppress the banner, turn panels, and spinner; send all human-readable status to stderr; print one JSON summary object to stdout when the session ends. For scripted/automated invocations. Same effect as `Output.Json: true` in the config (this flag always wins). See [`--json` output](#--json-output) below. |
+| `--bridge` | off | Stream the session as JSONL events on stdout and read approvals and interrupts on stdin, for tools built on fuseraft. Shell commands, file writes and other mutating actions wait for an `approval_response`. Human-readable status goes to stderr. Can't be combined with `--hitl`. See [Wire Protocol — Live sessions](protocol.md#live-sessions). |
 | `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
 **Examples**
@@ -1161,6 +1162,7 @@ fuseraft sessions [options]
 | `--project <fragment>` | — | Filter by working directory fragment (e.g. `brewer` or `fuseraft-cli`). |
 | `--cleanup` | off | Delete sessions older than `--older-than`, removing both index entries and session artifact directories. |
 | `--older-than <age>` | `30d` | Age threshold for `--cleanup`. Accepts `Nd` (days), `Nw` (weeks), `Nh` (hours). |
+| `--show <id>` | — | Show one orchestration session's messages. With `--json`, prints the session and its messages as one JSON object. |
 | `--repl` | off | List REPL chats instead of orchestration sessions. Can't be combined with `--prune`, `--cleanup` or `--delete`. |
 | `--json` | off | Print the listing as one JSON object (see [Wire Protocol](protocol.md#resource-queries)). Listing only. |
 

@@ -71,6 +71,31 @@ public sealed class ReplJsonBridgeApprovalTests
     }
 
     [Fact]
+    public async Task PromptRouteApprovalAsync_ReplDefault_ApprovesWithoutAsking()
+    {
+        // A denial is waiting on stdin, but the REPL has no routes to gate, so it's never read.
+        var pump = new ReplStdinPump(
+            new StringReader("""{"type":"approval_response","approved":false}""" + "\n"), () => null);
+        pump.Start();
+        var service = new JsonBridgeHumanApprovalService(pump);
+
+        Assert.True(await service.PromptRouteApprovalAsync("HANDOFF", "Dev", "Tester"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PromptRouteApprovalAsync_RunBridge_RelaysAnswerFromStdin(bool approved)
+    {
+        var pump = new ReplStdinPump(
+            new StringReader($$"""{"type":"approval_response","approved":{{(approved ? "true" : "false")}}}""" + "\n"), () => null);
+        pump.Start();
+        var service = new JsonBridgeHumanApprovalService(pump, promptRoutes: true);
+
+        Assert.Equal(approved, await service.PromptRouteApprovalAsync("HANDOFF", "Dev", "Tester"));
+    }
+
+    [Fact]
     public async Task PromptToolActionAsync_RelaysParsedApprovalFromStdin()
     {
         var pump = new ReplStdinPump(

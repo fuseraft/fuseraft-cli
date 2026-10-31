@@ -22,12 +22,21 @@ public static class WireProtocol
     internal static string SerializeList<T>(IEnumerable<T> items) =>
         JsonSerializer.Serialize(new { protocolVersion = Version, items = items.ToArray() }, JsonOpts);
 
+    internal static string SerializeItem<T>(T item) =>
+        JsonSerializer.Serialize(new { protocolVersion = Version, item }, JsonOpts);
+
     internal static string SerializeError(string message) =>
         JsonSerializer.Serialize(new { protocolVersion = Version, error = message }, JsonOpts);
 
     internal static int WriteList<T>(IEnumerable<T> items)
     {
         Writer.WriteLine(SerializeList(items));
+        return 0;
+    }
+
+    internal static int WriteItem<T>(T item)
+    {
+        Writer.WriteLine(SerializeItem(item));
         return 0;
     }
 
