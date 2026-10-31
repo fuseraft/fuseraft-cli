@@ -7,6 +7,7 @@ using Spectre.Console.Cli;
 using fuseraft.Cli;
 using fuseraft.Cli.Commands;
 using fuseraft.Cli.Display;
+using fuseraft.Cli.Protocol;
 using fuseraft.Cli.Telemetry;
 using fuseraft.Cli.Tui;
 using fuseraft.Core;
@@ -81,6 +82,18 @@ public sealed class ReplSettings : CommandSettings
 
 public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<ReplSettings>
 {
+    // The bridge's handshake: the first event a client sees, and the one carrying the protocol version.
+    internal static object ReadyEvent(string sessionId, string modelId, string? title, string? autoTitle) => new
+    {
+        type            = "ready",
+        protocolVersion = WireProtocol.Version,
+        sessionId,
+        model           = modelId,
+        title,
+        autoTitle,
+        midTurnCommands = ReplCommands.MidTurnCommands,
+    };
+
     private static readonly (string EnvVar, string ModelId)[] AutoDetectOrder =
     [
         ("ANTHROPIC_API_KEY",  "claude-sonnet-4-6"),
@@ -893,7 +906,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
 
         if (jsonMode)
-            ReplJsonBridge.Emit(new { type = "ready", sessionId, model = modelId, title = ctx.Title, autoTitle = ctx.AutoTitle, midTurnCommands = ReplCommands.MidTurnCommands });
+            ReplJsonBridge.Emit(ReadyEvent(sessionId, modelId, ctx.Title, ctx.AutoTitle));
 
         // Write a seed snapshot immediately so this session appears in the sessions list
         // even if the process dies before the first turn completes.

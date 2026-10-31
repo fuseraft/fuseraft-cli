@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli.Commands.Repl;
@@ -7,12 +8,20 @@ using fuseraft.Infrastructure.Chat;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Storage;
 using fuseraft.Cli;
+using fuseraft.Cli.Protocol;
 
 namespace fuseraft.Cli.Commands;
 
-public sealed class ModelsCommand : AsyncCommand
+public sealed class ModelsSettings : CommandSettings
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
+    [CommandOption("--json")]
+    [Description("Print one JSON object to stdout instead of a list (see docs/protocol.md). Never starts the setup wizard.")]
+    public bool Json { get; set; }
+}
+
+public sealed class ModelsCommand : AsyncCommand<ModelsSettings>
+{
+    public override async Task<int> ExecuteAsync(CommandContext context, ModelsSettings settings, CancellationToken cancellationToken)
     {
         var keyStore = ApiKeyStoreFactory.Create();
         var (userCfg, legacyKey) = UserConfigStore.Load();
@@ -20,7 +29,7 @@ public sealed class ModelsCommand : AsyncCommand
         if (!string.IsNullOrEmpty(legacyKey))
         {
             userCfg!.ApiKey = legacyKey;
-            if (await KeyStorePersistence.TryStoreAsync(keyStore, legacyKey))
+            if (await KeyStorePersistence.TryStoreAsync(keyStore, legacyKey) && !settings.Json)
                 AnsiConsole.MarkupLine($"[dim]API key migrated to {Markup.Escape(keyStore.StoreName)}.[/]");
             UserConfigStore.Save(userCfg);
         }
@@ -33,6 +42,8 @@ public sealed class ModelsCommand : AsyncCommand
         if (userCfg is null || !userCfg.IsConfigured)
         {
             bool isInteractive = !Console.IsInputRedirected && !OrchestratorConfigLoader.VsCodeMode;
+            if (settings.Json)
+                return WireProtocol.WriteError("fuseraft is not configured. Run 'fuseraft setup' to set an API key.");
             if (!isInteractive)
             {
                 AnsiConsole.MarkupLine("[yellow]fuseraft is not configured. Run 'fuseraft setup' to set an API key.[/]");
@@ -63,6 +74,7 @@ public sealed class ModelsCommand : AsyncCommand
         }
         catch (Exception ex)
         {
+            if (settings.Json) return WireProtocol.WriteError($"Could not resolve provider config: {ex.Message}");
             AnsiConsole.MarkupLine($"[red]✗ Could not resolve provider config:[/] {Markup.Escape(ex.Message)}");
             return 1;
         }
@@ -86,12 +98,17 @@ public sealed class ModelsCommand : AsyncCommand
         }
         catch (Exception ex)
         {
+            if (settings.Json) return WireProtocol.WriteError(ex.Message);
             AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
             return 1;
         }
 
         if (pendingSave)
             UserConfigStore.Save(userCfg);
+
+        if (settings.Json)
+            return WireProtocol.WriteList(modelIds.Select(m =>
+                new WireModel(m, m.Equals(userCfg.ModelId, StringComparison.OrdinalIgnoreCase))));
 
         AnsiConsole.MarkupLine($"  [dim]Available models from[/] [bold]{Markup.Escape(endpoint)}[/] [dim]({modelIds.Count})[/]");
         AnsiConsole.WriteLine();
