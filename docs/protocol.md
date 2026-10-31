@@ -41,10 +41,17 @@ A command that returns one thing uses `"item":{ ... }` in place of `items`. An e
 | `fuseraft sessions --show <id> --json` | [SessionDetail](#sessiondetail) (as `item`) | An unknown or malformed ID is an error envelope. |
 | `fuseraft sessions --repl --json` | [ReplSession](#replsession) | REPL chats, newest first. `--project` filters on the chat's directory. |
 | `fuseraft memory list --json` | [Memory](#memory) | `--agent <name>` targets an agent's store. |
+| `fuseraft memory agents --json` | [MemoryAgent](#memoryagent) | Agents with at least one memory. |
 | `fuseraft context list --json` | [ContextItem](#contextitem) | `--dir` picks the project. |
 | `fuseraft schedule list --json` | [ScheduledJob](#scheduledjob) | Ordered by next run. |
 | `fuseraft plugins --json` | [Plugin](#plugin) | `--plugin <name>` filters; no match is an error envelope. |
 | `fuseraft models --json` | [Model](#model) | Queries the configured provider. Never starts the setup wizard; unconfigured is an error envelope. |
+| `fuseraft config --list --json` | [ConfigSummary](#configsummary) | `--dir` picks the directory (default `.fuseraft/config`). Files in an `agents/` folder are skipped. |
+| `fuseraft validate <path> --json` | [Validation](#validation) (as `item`) | Exits `1` when the config has errors, but still prints the item, not an error envelope. Can't be combined with `--diagram` or `--show-paths`. |
+| `fuseraft init --list-templates --json` | [Template](#template) | |
+| `fuseraft init [path] --json` | [InitResult](#initresult) (as `item`) | Writes the config, like `--no-interactive`. Run it in the project directory, since it also sets up `.fuseraft/` and `.gitignore` there. An unknown template, or files that exist without `--force`, is an error envelope. |
+
+Commands that only change something report success by exit status: `memory delete`, `context add` / `remove`, `schedule add` / `remove` / `enable` / `disable`, `sessions --delete`.
 
 ### Session
 
@@ -104,6 +111,13 @@ A REPL chat.
 | `description` | string | One-line summary. |
 | `body` | string | The memory's content. |
 
+### MemoryAgent
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agent` | string | Pass to `fuseraft memory list --agent <agent>`. |
+| `count` | int | |
+
 ### ContextItem
 
 | Field | Type | Description |
@@ -128,6 +142,41 @@ A REPL chat.
 | `due` | bool | Enabled and its next run time has passed. |
 | `createdAt` | timestamp | |
 | `lastRun`, `nextRun` | timestamp \| null | |
+
+### ConfigSummary
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | string | Absolute. |
+| `name`, `description` | string \| null | Null when the file didn't load. |
+| `agents` | array | Agent names. |
+| `selectionType` | string \| null | `Selection.Type`. |
+| `error` | string \| null | Why the file didn't load; null when it did. |
+
+### Validation
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `path` | string | Absolute. |
+| `valid` | bool | No issue has level `error`. |
+| `issues` | array | `{level, message}`; `level` is `error` or `warning`. |
+| `config` | [ConfigSummary](#configsummary) \| null | Null when the file didn't parse. |
+
+### Template
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | string | Pass to `fuseraft init --template <key>`. |
+| `label`, `description` | string | |
+
+### InitResult
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `template`, `model` | string | |
+| `endpoint` | string \| null | |
+| `configPath` | string | Absolute path of the config written. |
+| `agentFiles` | array | Absolute paths of the agent files written alongside it. |
 
 ### Plugin
 

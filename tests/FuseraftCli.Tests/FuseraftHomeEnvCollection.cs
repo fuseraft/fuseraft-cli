@@ -7,6 +7,7 @@ namespace FuseraftCli.Tests;
 /// unless grouped like this — without it, e.g. <see cref="FuseraftPathsHomeOverrideTests"/>
 /// setting <c>FUSERAFT_HOME</c> to null could interleave with <see cref="UserConfigStoreLegacyKeyFileTests"/>
 /// expecting its own override, causing the latter to read the real <c>~/.fuseraft/config</c>.
+/// Tests that swap the process-wide <c>WireProtocol.Writer</c> join it too, for the same reason.
 /// </summary>
 [CollectionDefinition("FuseraftHomeEnv")]
 public sealed class FuseraftHomeEnvCollection;

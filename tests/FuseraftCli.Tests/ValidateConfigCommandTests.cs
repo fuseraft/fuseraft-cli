@@ -5,12 +5,14 @@ using System.Linq;
 using System.Text.Json;
 using Xunit;
 using fuseraft.Cli.Commands;
+using fuseraft.Cli.Protocol;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
 using Spectre.Console.Cli;
 
 namespace fuseraft.Tests;
 
+[Collection("FuseraftHomeEnv")] // --json tests swap the process-wide WireProtocol.Writer
 public class ValidateConfigCommandTests : IDisposable
 {
     private readonly List<string> _tempFiles = new();
@@ -1756,6 +1758,85 @@ public class ValidateConfigCommandTests : IDisposable
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    private const string ValidJsonConfig = """
+        {
+          "Orchestration": {
+            "Name": "Test",
+            "Agents": [
+              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
+            ],
+            "Selection": {"Type": "sequential"},
+            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
+          }
+        }
+        """;
+
+    private static async Task<(int Exit, JsonElement Root)> ValidateJsonAsync(ValidateConfigSettings settings)
+    {
+        var original = WireProtocol.Writer;
+        var sw = new StringWriter();
+        WireProtocol.Writer = sw;
+        int exit;
+        try { exit = await new ValidateConfigCommand(new PluginRegistry()).ExecuteAsync(null!, settings); }
+        finally { WireProtocol.Writer = original; }
+        return (exit, JsonDocument.Parse(sw.ToString()).RootElement.Clone());
+    }
+
+    [Fact]
+    public async Task Json_ValidConfig_ReportsSummary()
+    {
+        var path = CreateTempFile(ValidJsonConfig);
+
+        var (exit, root) = await ValidateJsonAsync(new ValidateConfigSettings { Path = path, Json = true });
+
+        Assert.Equal(0, exit);
+        var item = root.GetProperty("item");
+        Assert.True(item.GetProperty("valid").GetBoolean());
+        Assert.Equal(Path.GetFullPath(path), item.GetProperty("path").GetString());
+        var config = item.GetProperty("config");
+        Assert.Equal("Test", config.GetProperty("name").GetString());
+        Assert.Equal("A", Assert.Single(config.GetProperty("agents").EnumerateArray()).GetString());
+        Assert.Equal("sequential", config.GetProperty("selectionType").GetString());
+    }
+
+    [Fact]
+    public async Task Json_Errors_AreItemsNotEnvelopeErrors()
+    {
+        var path = CreateTempFile("""
+            {"Orchestration": {"Name": "Empty", "Agents": [], "Selection": {"Type": "sequential"}}}
+            """);
+
+        var (exit, root) = await ValidateJsonAsync(new ValidateConfigSettings { Path = path, Json = true });
+
+        Assert.Equal(1, exit);
+        var item = root.GetProperty("item");
+        Assert.False(item.GetProperty("valid").GetBoolean());
+        Assert.Contains(item.GetProperty("issues").EnumerateArray(), i =>
+            i.GetProperty("level").GetString() == "error" && i.GetProperty("message").GetString()!.Contains("No agents"));
+    }
+
+    [Fact]
+    public async Task Json_UnparseableFile_HasNoConfigSummary()
+    {
+        var path = CreateTempFile("invalid { json");
+
+        var (exit, root) = await ValidateJsonAsync(new ValidateConfigSettings { Path = path, Json = true });
+
+        Assert.Equal(1, exit);
+        var item = root.GetProperty("item");
+        Assert.False(item.GetProperty("valid").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("config").ValueKind);
+    }
+
+    [Fact]
+    public async Task Json_WithDiagram_IsRejected()
+    {
+        var (exit, root) = await ValidateJsonAsync(new ValidateConfigSettings { Path = "x.yaml", Json = true, Diagram = true });
+
+        Assert.Equal(1, exit);
+        Assert.Contains("--diagram", root.GetProperty("error").GetString());
+    }
 
     private string CreateTempFile(string content)
     {

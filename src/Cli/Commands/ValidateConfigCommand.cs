@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli.Diagram;
+using fuseraft.Cli.Protocol;
 using fuseraft.Core.Models;
 using fuseraft.Core.Models.Config;
 using fuseraft.Infrastructure;
@@ -37,6 +38,10 @@ public sealed class ValidateConfigSettings : CommandSettings
     [CommandOption("--session-id")]
     [Description("Session ID to use when previewing interpolated paths (default: a synthetic preview ID).")]
     public string? SessionId { get; set; }
+
+    [CommandOption("--json")]
+    [Description("Print one JSON object to stdout with every issue found (see docs/protocol.md). Exits 1 when the config has errors.")]
+    public bool Json { get; set; }
 }
 
 /// <summary>
@@ -48,10 +53,29 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
     internal Task<int> ExecuteAsync(CommandContext context, ValidateConfigSettings settings) =>
         ExecuteAsync(context, settings, CancellationToken.None);
 
+    private OrchestrationConfig? _config;
+
     public override async Task<int> ExecuteAsync(CommandContext context, ValidateConfigSettings settings, CancellationToken cancellationToken)
     {
         var issues = new List<(string Level, string Message)>();
+        if (!settings.Json)
+            return await ValidateAsync(settings, issues);
 
+        if (settings.Diagram || settings.ShowPaths)
+            return WireProtocol.WriteError("--json can't be combined with --diagram or --show-paths.");
+
+        var console = AnsiConsole.Console;
+        AnsiConsole.Console = WireProtocol.StderrConsole;
+        int exit;
+        try { exit = await ValidateAsync(settings, issues); }
+        finally { AnsiConsole.Console = console; }
+
+        WireProtocol.WriteItem(WireValidation.From(settings.Path, issues, _config));
+        return exit;
+    }
+
+    private async Task<int> ValidateAsync(ValidateConfigSettings settings, List<(string Level, string Message)> issues)
+    {
         AnsiConsole.MarkupLine($"Validating [dim]{Markup.Escape(settings.Path)}[/]...");
         AnsiConsole.WriteLine();
 
@@ -99,6 +123,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         try
         {
             config = OrchestratorConfigLoader.LoadConfig(settings.Path);
+            _config = config;
         }
         catch (Exception ex)
         {

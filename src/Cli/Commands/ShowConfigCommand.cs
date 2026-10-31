@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Protocol;
 
 namespace fuseraft.Cli.Commands;
 
@@ -13,6 +14,14 @@ public sealed class ShowConfigSettings : CommandSettings
     [CommandOption("-l|--list")]
     [Description("List all config files (.json, .yaml, .yml) found under .fuseraft/config/.")]
     public bool List { get; set; }
+
+    [CommandOption("--dir <directory>")]
+    [Description("With --list, search this directory instead of .fuseraft/config/.")]
+    public string? Dir { get; set; }
+
+    [CommandOption("--json")]
+    [Description("With --list, print one JSON object to stdout instead of a table (see docs/protocol.md).")]
+    public bool Json { get; set; }
 }
 
 /// <summary>
@@ -22,33 +31,57 @@ public sealed class ShowConfigCommand : Command<ShowConfigSettings>
 {
     public override int Execute(CommandContext context, ShowConfigSettings settings, CancellationToken cancellationToken)
     {
+        if (settings.Json && !settings.List)
+            return WireProtocol.WriteError("--json applies only to --list.");
+
         if (settings.List)
-            return ListConfigs();
+            return settings.Json
+                ? ListConfigsJson(settings.Dir ?? DefaultConfigDir)
+                : ListConfigs(settings.Dir ?? DefaultConfigDir);
 
         return ShowConfig(settings.Path);
     }
 
+    private const string DefaultConfigDir = ".fuseraft/config";
+
     // List mode
 
-    private static int ListConfigs()
-    {
-        var configDir = ".fuseraft/config";
-        if (!Directory.Exists(configDir))
-        {
-            AnsiConsole.MarkupLine("[yellow]No .fuseraft/config/ directory found.[/]");
-            return 1;
-        }
-
-        var files = Directory.GetFiles(configDir, "*.*", SearchOption.AllDirectories)
+    private static List<string> FindConfigFiles(string configDir) =>
+        Directory.GetFiles(configDir, "*.*", SearchOption.AllDirectories)
             .Where(f => f.EndsWith(".json",  StringComparison.OrdinalIgnoreCase)
                      || f.EndsWith(".yaml",  StringComparison.OrdinalIgnoreCase)
                      || f.EndsWith(".yml",   StringComparison.OrdinalIgnoreCase))
             .OrderBy(f => f)
             .ToList();
 
+    private static int ListConfigsJson(string configDir)
+    {
+        if (!Directory.Exists(configDir))
+            return WireProtocol.WriteError($"Directory not found: {configDir}");
+
+        // AgentFile targets live under agents/ and aren't runnable configs on their own.
+        return WireProtocol.WriteList(FindConfigFiles(configDir)
+            .Where(f => !string.Equals(Path.GetFileName(Path.GetDirectoryName(f)), "agents", StringComparison.OrdinalIgnoreCase))
+            .Select(f =>
+            {
+                try { return WireConfigSummary.From(f, OrchestratorConfigLoader.LoadConfig(f)); }
+                catch (Exception ex) { return WireConfigSummary.Failed(f, ex.Message); }
+            }));
+    }
+
+    private static int ListConfigs(string configDir)
+    {
+        if (!Directory.Exists(configDir))
+        {
+            AnsiConsole.MarkupLine($"[yellow]No {Markup.Escape(configDir.TrimEnd('/'))}/ directory found.[/]");
+            return 1;
+        }
+
+        var files = FindConfigFiles(configDir);
+
         if (files.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]No config files in .fuseraft/config/.[/]");
+            AnsiConsole.MarkupLine($"[yellow]No config files in {Markup.Escape(configDir.TrimEnd('/'))}/.[/]");
             return 0;
         }
 
