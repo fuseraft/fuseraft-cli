@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Protocol;
 using fuseraft.Infrastructure;
 
 namespace fuseraft.Cli.Commands.Context;
@@ -12,6 +13,10 @@ public sealed class ContextListSettings : CommandSettings
     [CommandOption("--dir")]
     [Description("Project directory containing .fuseraft/ (default: current directory).")]
     public string? Dir { get; set; }
+
+    [CommandOption("--json")]
+    [Description("Print one JSON object to stdout instead of a table (see docs/protocol.md).")]
+    public bool Json { get; set; }
 }
 
 public sealed class ContextListCommand : AsyncCommand<ContextListSettings>
@@ -21,6 +26,9 @@ public sealed class ContextListCommand : AsyncCommand<ContextListSettings>
         var contextDir = ContextHelpers.ResolveContextDir(settings.Dir);
         var store      = new ContextStore(contextDir);
         var index      = await store.LoadIndexAsync();
+
+        if (settings.Json)
+            return WireProtocol.WriteList(index.Items.OrderBy(x => x.Key).Select(x => WireContextItem.From(x.Value)));
 
         if (index.Items.Count == 0)
         {

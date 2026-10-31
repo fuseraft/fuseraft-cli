@@ -2,6 +2,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using fuseraft.Cli.Commands.Repl;
+using fuseraft.Cli.Protocol;
 
 namespace fuseraft.Cli.Serve;
 
@@ -94,6 +95,7 @@ public sealed class ServeSocketListener(
             var pump = new ReplStdinPump(reader, getActiveCts: () => null);
             pump.Start();
             var sink = new SocketAttachSink(writer, pump);
+            sink.Emit(new { type = "hello", protocolVersion = WireProtocol.Version });
 
             approvalService.RegisterConnection(sink);
             try

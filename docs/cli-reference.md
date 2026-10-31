@@ -323,29 +323,7 @@ The session ID is shown on every startup so you can note it down for later resum
 
 > **VS Code webview panel** — When the fuseraft VS Code extension opens a REPL panel it spawns the CLI with `--vscode --no-banner` and piped stdin/stdout. The CLI detects the redirected stdin and switches to JSON bridge mode automatically. In this mode the startup header and all ANSI output are suppressed; the session communicates over a JSONL protocol instead:
 >
-> | Direction | Event | Payload fields |
-> |-----------|-------|----------------|
-> | CLI → VS Code | `ready` | `sessionId`, `model` |
-> | CLI → VS Code | `token` | `text` (streaming chunk) |
-> | CLI → VS Code | `tool_call` | `name`, `args?` |
-> | CLI → VS Code | `approval_request` | `kind`, plus `command` for `kind: "shell_command"` or `plugin`/`action`/`detail` for `kind: "tool_action"` (HITL approval gate — see below) |
-> | CLI → VS Code | `question` | `question`, `options[]`, `allowOther` (an `ask_user` question; only sent when the extension set `FUSERAFT_VSCODE_QUESTIONS=1` — see below) |
-> | CLI → VS Code | `message_end` | `turnIndex`, `toolCalls[]` |
-> | CLI → VS Code | `cancelled` | — (turn was interrupted; see below) |
-> | CLI → VS Code | `retrying` | `attempt`, `max` (transient stream disconnect, auto-retrying) |
-> | CLI → VS Code | `warning` | `text` |
-> | CLI → VS Code | `error` | `text` |
-> | CLI → VS Code | `info` | `text` |
-> | CLI → VS Code | `text` | `text` (pre-rendered slash-command output) |
-> | CLI → VS Code | `file_changes` | `changes[]` (`{sigil, path}`) |
-> | CLI → VS Code | `plan` | `steps[]` |
-> | CLI → VS Code | `step_status` | `step`, `total`, `status`, `stepsLeft` |
-> | CLI → VS Code | `compacted` | — (history replaced with a compact summary) |
-> | CLI → VS Code | `session_end` | — |
-> | VS Code → CLI | `user_input` | `text` |
-> | VS Code → CLI | `approval_response` | `approved` (bool; answers a pending `approval_request`) |
-> | VS Code → CLI | `question_response` | `answer` (string, or `null` to skip; answers a pending `question`) |
-> | VS Code → CLI | `interrupt` | — (Windows only; see below) |
+> Every event and input line, with all of their fields, is documented in [Wire Protocol — Live sessions](protocol.md#live-sessions). The first event is `ready`, which carries the `protocolVersion`.
 >
 > Non-JSON lines emitted by the CLI (e.g. from slash-command output) are silently ignored by the extension.
 >
@@ -1183,6 +1161,8 @@ fuseraft sessions [options]
 | `--project <fragment>` | — | Filter by working directory fragment (e.g. `brewer` or `fuseraft-cli`). |
 | `--cleanup` | off | Delete sessions older than `--older-than`, removing both index entries and session artifact directories. |
 | `--older-than <age>` | `30d` | Age threshold for `--cleanup`. Accepts `Nd` (days), `Nw` (weeks), `Nh` (hours). |
+| `--repl` | off | List REPL chats instead of orchestration sessions. Can't be combined with `--prune`, `--cleanup` or `--delete`. |
+| `--json` | off | Print the listing as one JSON object (see [Wire Protocol](protocol.md#resource-queries)). Listing only. |
 
 The listing is read from `~/.fuseraft/sessions/index.json` — a lightweight per-session metadata file kept in sync by the session store. No checkpoint files are opened, so listing is fast regardless of message history size.
 
@@ -1235,6 +1215,7 @@ fuseraft plugins [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-p, --plugin <name>` | — | Filter to plugins whose name contains this substring (case-insensitive). |
+| `--json` | off | Print one JSON object instead of tables (see [Wire Protocol](protocol.md#resource-queries)). |
 
 **Examples**
 
@@ -1807,6 +1788,7 @@ fuseraft memory list [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--agent <agent>` | — | Target the named agent's memory store (`~/.fuseraft/memory/agents/<agent>`) instead of the REPL memory store. |
+| `--json` | off | Print one JSON object instead of a table, including each memory's body (see [Wire Protocol](protocol.md#resource-queries)). |
 
 **Examples**
 
@@ -2043,6 +2025,7 @@ fuseraft context list [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--dir <path>` | Current directory | Project directory containing `.fuseraft/`. |
+| `--json` | off | Print one JSON object instead of a table (see [Wire Protocol](protocol.md#resource-queries)). |
 
 **Examples**
 
@@ -2148,6 +2131,8 @@ fuseraft schedule list
 ```
 
 Displays a table with name, cron expression, next run time (UTC), last run time, and enabled status. Jobs that are currently due are highlighted in yellow with a `(due)` indicator.
+
+Pass `--json` to print one JSON object instead (see [Wire Protocol](protocol.md#resource-queries)).
 
 **Examples**
 
@@ -2652,6 +2637,8 @@ Reads `~/.fuseraft/config` to resolve the provider endpoint and API key, then ca
 If `~/.fuseraft/config` is missing or incomplete, the command runs the same interactive setup wizard as `fuseraft repl` — prompting for a provider URL and API key, then a model picked from the live list — and saves the result before fetching the model list. Use `fuseraft settings show` to inspect the rest of the file (sampling, REPL, telemetry, and skill-curation defaults) without making a network call.
 
 The output ends with a hint pointing at `fuseraft repl --model <id>` (and `--save` to make it the default) — see [`fuseraft repl`](#fuseraft-repl) above.
+
+Pass `--json` to print one JSON object instead, marking the configured model `current` (see [Wire Protocol](protocol.md#resource-queries)). With `--json` an unconfigured install is an error rather than a setup wizard.
 
 **Example**
 

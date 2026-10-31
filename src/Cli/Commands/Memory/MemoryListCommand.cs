@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Protocol;
 using fuseraft.Infrastructure.Memory;
 
 namespace fuseraft.Cli.Commands.Memory;
@@ -13,6 +14,10 @@ public sealed class MemoryListSettings : CommandSettings
     [CommandOption("--agent <agent>")]
     [Description("Target the named agent's memory store (~/.fuseraft/memory/agents/<agent>) instead of the REPL memory store.")]
     public string? Agent { get; init; }
+
+    [CommandOption("--json")]
+    [Description("Print one JSON object to stdout instead of a table (see docs/protocol.md).")]
+    public bool Json { get; init; }
 }
 
 public sealed class MemoryListCommand : AsyncCommand<MemoryListSettings>
@@ -28,6 +33,11 @@ public sealed class MemoryListCommand : AsyncCommand<MemoryListSettings>
         var label = string.IsNullOrEmpty(settings.Agent) ? "REPL" : $"agent '{settings.Agent}'";
 
         var entries = await store.LoadAllAsync(cancellationToken);
+        if (settings.Json)
+            return WireProtocol.WriteList(entries
+                .OrderBy(e => e.Type).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(WireMemory.From));
+
         if (entries.Count == 0)
         {
             AnsiConsole.MarkupLine($"[dim]No memories stored for {label}.[/]");

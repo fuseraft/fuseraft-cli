@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Protocol;
 using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Cli.Commands;
@@ -11,6 +12,10 @@ public sealed class PluginsSettings : CommandSettings
     [CommandOption("-p|--plugin")]
     [Description("Show details for a single plugin. Omit to list all.")]
     public string? PluginName { get; set; }
+
+    [CommandOption("--json")]
+    [Description("Print one JSON object to stdout instead of tables (see docs/protocol.md).")]
+    public bool Json { get; set; }
 }
 
 /// <summary>
@@ -22,7 +27,7 @@ public sealed class PluginsCommand(PluginRegistry registry) : Command<PluginsSet
     {
         var names = registry.RegisteredPlugins.OrderBy(n => n).ToList();
 
-        if (names.Count == 0)
+        if (names.Count == 0 && !settings.Json)
         {
             AnsiConsole.MarkupLine("[yellow]No plugins registered.[/]");
             return 0;
@@ -37,10 +42,14 @@ public sealed class PluginsCommand(PluginRegistry registry) : Command<PluginsSet
 
             if (names.Count == 0)
             {
+                if (settings.Json) return WireProtocol.WriteError($"No plugin matching '{filter}'.");
                 AnsiConsole.MarkupLine($"[yellow]No plugin matching '[bold]{Markup.Escape(filter)}[/]'.[/]");
                 return 1;
             }
         }
+
+        if (settings.Json)
+            return WireProtocol.WriteList(names.Select(ToWire).OfType<WirePlugin>());
 
         foreach (var name in names)
             RenderPlugin(name);
@@ -101,6 +110,14 @@ public sealed class PluginsCommand(PluginRegistry registry) : Command<PluginsSet
 
         AnsiConsole.Write(builtInTable);
         AnsiConsole.WriteLine();
+    }
+
+    private WirePlugin? ToWire(string name)
+    {
+        if (registry.TryGetAIFunctions(name, out var aiFunctions))
+            return WirePlugin.From(name, "mcp", aiFunctions.OrderBy(f => f.Name));
+        if (!registry.TryGetAll(name, out var plugins)) return null;
+        return WirePlugin.From(name, "builtin", plugins.SelectMany(PluginRegistry.GetFunctionsFromObject));
     }
 
     private int CountFunctions(string name)
