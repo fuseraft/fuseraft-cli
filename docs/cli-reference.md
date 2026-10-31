@@ -2765,7 +2765,7 @@ fuseraft settings set <key> [value]
 
 ### `fuseraft settings show`
 
-Prints every section of the file as tables: Provider (including whether an API key is stored in the OS keychain — the key itself is never shown — and the request timeout, stream idle timeout and retry budget), Sampling defaults, REPL defaults (including the compaction and tool-loop thresholds), Telemetry default, Skill curation, Model overrides (memory extraction and subagent model, with any connection override), Subagent limits (round caps and timeouts), and connected MCP server names. Values left at their built-in default show as `(default …)`. If no config exists yet, prints a pointer to `/provider setup` or `settings set` instead of erroring.
+Prints the whole file as one aligned list, grouped into Provider, Sampling, REPL, Memory, Subagents, Telemetry, Skills, and MCP servers. Each row is labelled with the same dotted key `fuseraft settings set` takes (e.g. `repl.autoCompactThreshold`), so a value can be changed by copying its key; the few rows that aren't settable that way (whether an API key is stored in the OS keychain — the key itself is never shown — model-override connections, skill-curation details, MCP server names) carry a plain label instead. Values left at their built-in default are dimmed and marked `(default)`. If no config exists yet, prints a pointer to `/provider setup` or `settings set` instead of erroring.
 
 ```bash
 fuseraft settings show
