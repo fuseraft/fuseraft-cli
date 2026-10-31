@@ -4,11 +4,13 @@
 [![Latest release](https://img.shields.io/github/v/release/fuseraft/fuseraft-cli)](https://github.com/fuseraft/fuseraft-cli/releases)
 [![License: MIT](https://img.shields.io/github/license/fuseraft/fuseraft-cli)](LICENSE.md)
 
-<img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — an AI assistant for your terminal that scales into multi-agent pipelines">
+<img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — model-agnostic coding agent">
 
 fuseraft is a terminal AI assistant: run `fuseraft` and start chatting with a model that can read and edit files, run shell commands, search your codebase, and use git — resumable sessions, ~50 slash commands, and safety guardrails on by default. Bring your own key (BYOK) to Anthropic, xAI, OpenAI, Azure, Ollama, or any OpenAI-compatible provider.
 
 When one agent isn't enough, fuseraft scales into declarative, multi-agent pipelines defined in YAML, where routing validators mechanically enforce that each agent did what it claimed — tool-call records, file presence, shell exit codes — before the pipeline advances. Claims are not evidence; artifacts and command results are. Built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
+
+<img src="docs/.assets/fuseraft-repl.png" alt="A fuseraft REPL session in the terminal">
 
 ---
 
