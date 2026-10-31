@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using fuseraft.Cli.Protocol;
 using fuseraft.Infrastructure;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -34,6 +35,14 @@ public sealed class InitSettings : CommandSettings
     [CommandOption("-f|--force")]
     [Description("Overwrite the config and all agent files without prompting, even if they already exist.")]
     public bool Force { get; set; }
+
+    [CommandOption("--list-templates")]
+    [Description("List the team templates and exit.")]
+    public bool ListTemplates { get; set; }
+
+    [CommandOption("--json")]
+    [Description("Print one JSON object to stdout naming the files written, or the template list with --list-templates (see docs/protocol.md). Implies --no-interactive.")]
+    public bool Json { get; set; }
 }
 
 /// <summary>
@@ -80,15 +89,50 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         ("DEEPSEEK_API_KEY",  "deepseek-chat"),
     ];
 
+    private string? _error;
+    private WireInitResult? _result;
+
     public override async Task<int> ExecuteAsync(
         CommandContext context, InitSettings settings, CancellationToken cancellationToken)
+    {
+        if (settings.ListTemplates)
+            return settings.Json
+                ? WireProtocol.WriteList(Templates.Select(t => new WireTemplate(t.Key, t.Label, t.Description)))
+                : PrintTemplates();
+
+        if (!settings.Json)
+            return await GenerateAsync(settings, cancellationToken);
+
+        settings.NoInteractive = true;
+        var console = AnsiConsole.Console;
+        AnsiConsole.Console = WireProtocol.StderrConsole;
+        int exit;
+        try { exit = await GenerateAsync(settings, cancellationToken); }
+        finally { AnsiConsole.Console = console; }
+
+        return exit == 0 && _result is not null
+            ? WireProtocol.WriteItem(_result)
+            : WireProtocol.WriteError(_error ?? "fuseraft init failed.");
+    }
+
+    private static int PrintTemplates()
+    {
+        var table = new Table().Border(TableBorder.Simple)
+            .AddColumn("[bold]Template[/]").AddColumn("[bold]Name[/]").AddColumn("[bold]Description[/]");
+        foreach (var t in Templates)
+            table.AddRow(Markup.Escape(t.Key), Markup.Escape(t.Label), Markup.Escape(t.Description));
+        AnsiConsole.Write(table);
+        return 0;
+    }
+
+    private async Task<int> GenerateAsync(InitSettings settings, CancellationToken cancellationToken)
     {
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]fuseraft config generator[/]");
         AnsiConsole.MarkupLine("[dim]Generates a ready-to-run YAML orchestration config.[/]");
         AnsiConsole.WriteLine();
 
-        var templateKey = ResolveTemplate(settings);
+        var templateKey = ResolveTemplate(settings, out _error);
         if (templateKey is null) return 1;
 
         var model    = ResolveModel(settings);
@@ -117,6 +161,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
                     !AnsiConsole.Confirm("[yellow]Overwrite?[/]"))
                 {
                     AnsiConsole.MarkupLine("[yellow]Aborted.[/] Pass --force to overwrite without prompting.");
+                    _error = $"{existing.Count} file(s) already exist: {string.Join(", ", existing)}. Pass --force to overwrite.";
                     return 1;
                 }
             }
@@ -135,6 +180,9 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
         await EnsureGitignoreEntryAsync(cancellationToken);
         var knowledgeScaffold = await ScaffoldKnowledgeAsync(settings.NoBoilerplate, cancellationToken);
+
+        _result = new WireInitResult(templateKey, model, endpoint, Path.GetFullPath(output),
+            [.. generated.AgentFiles.Select(af => Path.GetFullPath(Path.Combine(configDir, af.RelativePath)))]);
 
         var selected        = Array.Find(Templates, t => t.Key == templateKey)!;
         var endpointDisplay = string.IsNullOrWhiteSpace(endpoint) ? "[dim](default)[/]" : Markup.Escape(endpoint);
@@ -161,8 +209,9 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
         return 0;
     }
 
-    private string? ResolveTemplate(InitSettings settings)
+    private string? ResolveTemplate(InitSettings settings, out string? error)
     {
+        error = null;
         var key = settings.Template?.Trim().ToLowerInvariant();
         if (key is null)
         {
@@ -183,6 +232,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 
         if (Array.Find(Templates, t => t.Key == key) is null)
         {
+            error = $"Unknown template '{key}'. Valid: {string.Join(", ", Templates.Select(t => t.Key))}";
             AnsiConsole.MarkupLine(
                 $"[red]✗ Unknown template:[/] '{key}'. " +
                 $"Valid: {string.Join(", ", Templates.Select(t => t.Key))}");

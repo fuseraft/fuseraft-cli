@@ -8,6 +8,7 @@ using fuseraft.Infrastructure.Memory;
 
 namespace FuseraftCli.Tests;
 
+[Collection("FuseraftHomeEnv")] // swaps the process-wide WireProtocol.Writer
 public sealed class SessionsCommandTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"fuseraft-sessions-{Guid.NewGuid():N}");

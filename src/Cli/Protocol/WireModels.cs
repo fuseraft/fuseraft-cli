@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using fuseraft.Core.Models.Agents;
 using fuseraft.Core.Models.Config;
 using fuseraft.Core.Models.Knowledge;
+using fuseraft.Core.Models.Orchestration;
 using fuseraft.Core.Models.Session;
 using fuseraft.Infrastructure.Context;
 
@@ -47,6 +48,46 @@ public sealed record WireAgentMessage(
 }
 
 public sealed record WireToolCall(string Name, string? ArgsSummary, bool Succeeded);
+
+/// <summary>A config file from <c>fuseraft config --list --json</c>; <c>Error</c> is set when it doesn't load.</summary>
+public sealed record WireConfigSummary(
+    string Path, string? Name, string? Description, IReadOnlyList<string> Agents, string? SelectionType, string? Error)
+{
+    public static WireConfigSummary From(string path, OrchestrationConfig c) => new(
+        System.IO.Path.GetFullPath(path), c.Name, c.Description,
+        [.. c.Agents.Select(a => a.Name)], c.Selection.Type, null);
+
+    public static WireConfigSummary Failed(string path, string error) =>
+        new(System.IO.Path.GetFullPath(path), null, null, [], null, error);
+}
+
+/// <summary>
+/// The result of <c>fuseraft validate --json</c>. <c>Valid</c> is false when any issue's <c>Level</c> is
+/// <c>error</c>; <c>Config</c> is null when the file didn't load far enough to summarise.
+/// </summary>
+public sealed record WireValidation(string Path, bool Valid, IReadOnlyList<WireIssue> Issues, WireConfigSummary? Config)
+{
+    public static WireValidation From(
+        string path, IEnumerable<(string Level, string Message)> issues, OrchestrationConfig? config)
+    {
+        var list = issues.Select(i => new WireIssue(i.Level, i.Message)).ToList();
+        return new(System.IO.Path.GetFullPath(path), list.All(i => i.Level != "error"), list,
+            config is null ? null : WireConfigSummary.From(path, config));
+    }
+}
+
+/// <summary>A validation finding; <c>Level</c> is <c>error</c> or <c>warning</c>.</summary>
+public sealed record WireIssue(string Level, string Message);
+
+/// <summary>A team template from <c>fuseraft init --list-templates --json</c>.</summary>
+public sealed record WireTemplate(string Key, string Label, string Description);
+
+/// <summary>The files <c>fuseraft init --json</c> wrote, as absolute paths.</summary>
+public sealed record WireInitResult(
+    string Template, string Model, string? Endpoint, string ConfigPath, IReadOnlyList<string> AgentFiles);
+
+/// <summary>An agent with stored memories, from <c>fuseraft memory agents --json</c>.</summary>
+public sealed record WireMemoryAgent(string Agent, int Count);
 
 /// <summary>A REPL chat from <c>fuseraft sessions --repl --json</c>.</summary>
 public sealed record WireReplSession(

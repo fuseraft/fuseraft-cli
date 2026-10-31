@@ -7,6 +7,7 @@ namespace FuseraftCli.Tests;
 /// The JSON envelope every <c>--json</c> command writes. Clients (VS Code, fuseraft-server, CI) parse
 /// these exact keys, so a failure here means a breaking wire change, not a test to update casually.
 /// </summary>
+[Collection("FuseraftHomeEnv")] // WriteList_WritesOneLineAndReturnsZero swaps the process-wide WireProtocol.Writer
 public sealed class WireProtocolTests
 {
     private sealed record Sample(string SessionId, int TurnCount);
