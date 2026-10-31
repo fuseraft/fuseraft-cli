@@ -1257,6 +1257,7 @@ fuseraft validate <path> [options]
 | `--strict` | off | Fail if any agent references a plugin not in the default built-in registry. |
 | `--diagram` | off | Print a Mermaid flowchart of the workflow after validation. |
 | `--check-connectivity` / `-c` | off | Make a minimal live test call to each unique provider endpoint to verify the API key is valid and the endpoint is reachable. See below. |
+| `--json` | off | Print one JSON object listing every issue instead of the report (see [Wire Protocol](protocol.md#resource-queries)). The exit code is the same. Can't be combined with `--diagram` or `--show-paths`. |
 
 **Checks performed**
 
@@ -1358,6 +1359,8 @@ fuseraft config [path] [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-l, --list` | off | List all `.json`, `.yaml`, and `.yml` files found under `.fuseraft/config/` instead of displaying a single file. |
+| `--dir <directory>` | `.fuseraft/config` | With `--list`, search this directory instead. |
+| `--json` | off | With `--list`, print one JSON object instead of a table (see [Wire Protocol](protocol.md#resource-queries)). |
 
 **Examples**
 
@@ -1398,6 +1401,8 @@ fuseraft init [output] [options]
 | `--no-interactive` | off | Skip all prompts and generate with the supplied options and defaults. |
 | `--no-boilerplate` | off | Skip `architecture.yaml` and `knowledge/lifecycle.yaml` — for small or single-purpose projects that won't use `fuseraft arch check` or `fuseraft knowledge gc`. |
 | `-f, --force` | off | Overwrite the config and all agent files without prompting, even if they already exist. |
+| `--list-templates` | off | List the templates and exit. |
+| `--json` | off | Print one JSON object naming the files written, or the templates with `--list-templates` (see [Wire Protocol](protocol.md#resource-queries)). Implies `--no-interactive`. |
 
 **Overwrite behavior**
 
@@ -1802,6 +1807,16 @@ fuseraft memory list
 fuseraft memory list --agent reviewer
 ```
 
+### `fuseraft memory agents`
+
+List the agents that have stored memories, with how many each has.
+
+```
+fuseraft memory agents [--json]
+```
+
+`--json` prints one JSON object instead of a table (see [Wire Protocol](protocol.md#resource-queries)). Use `fuseraft memory list --agent <agent>` to see an agent's memories.
+
 ### `fuseraft memory delete`
 
 Delete a stored REPL or agent memory by name, or wipe the entire store.
@@ -2174,6 +2189,19 @@ Deletes the YAML file and any associated `.lock` file.
 ```bash
 fuseraft schedule remove nightly-audit
 ```
+
+---
+
+### `fuseraft schedule enable` / `disable`
+
+Turn a job on or off without removing it.
+
+```
+fuseraft schedule enable <name>
+fuseraft schedule disable <name>
+```
+
+`schedule run` skips a disabled job unless it's named with `--name`. Enabling a job sets its next run to the next cron occurrence from now, so a run missed while it was disabled doesn't fire on the next tick.
 
 ---
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Spectre.Console;
 
 namespace fuseraft.Cli.Protocol;
 
@@ -18,6 +19,12 @@ public static class WireProtocol
 
     // Console.Out rather than AnsiConsole so Spectre never wraps or styles a JSON line.
     internal static TextWriter Writer { get; set; } = Console.Out;
+
+    // Commands with --json send their human-readable output here so stdout carries only the envelope.
+    internal static readonly IAnsiConsole StderrConsole = AnsiConsole.Create(new AnsiConsoleSettings
+    {
+        Out = new AnsiConsoleOutput(Console.Error),
+    });
 
     internal static string SerializeList<T>(IEnumerable<T> items) =>
         JsonSerializer.Serialize(new { protocolVersion = Version, items = items.ToArray() }, JsonOpts);

@@ -283,7 +283,8 @@ app.Configure(cfg =>
         .WithExample(["init"])
         .WithExample(["init", ".fuseraft/config/my-team.json"])
         .WithExample(["init", "--template", "swe", "--model", "claude-sonnet-4-6"])
-        .WithExample(["init", "--template", "solo", "--no-interactive"]);
+        .WithExample(["init", "--template", "solo", "--no-interactive"])
+        .WithExample(["init", "--list-templates"]);
 
     cfg.AddCommand<ReplCommand>("repl")
         .WithDescription("Start an interactive REPL chat session with a single model (no config needed).")
@@ -327,6 +328,14 @@ app.Configure(cfg =>
         branch.AddCommand<ScheduleRemoveCommand>("remove")
             .WithDescription("Remove a scheduled job.")
             .WithExample(["schedule", "remove", "nightly-audit"]);
+
+        branch.AddCommand<ScheduleEnableCommand>("enable")
+            .WithDescription("Enable a scheduled job; it next runs at its next cron occurrence.")
+            .WithExample(["schedule", "enable", "nightly-audit"]);
+
+        branch.AddCommand<ScheduleDisableCommand>("disable")
+            .WithDescription("Disable a scheduled job without removing it.")
+            .WithExample(["schedule", "disable", "nightly-audit"]);
 
         branch.AddCommand<ScheduleRunCommand>("run")
             .WithDescription("Execute all due jobs, or force-run a specific job by name.")
@@ -450,6 +459,10 @@ app.Configure(cfg =>
             .WithDescription("List stored REPL/agent memories.")
             .WithExample(["memory", "list"])
             .WithExample(["memory", "list", "--agent", "reviewer"]);
+
+        branch.AddCommand<MemoryAgentsCommand>("agents")
+            .WithDescription("List the agents that have stored memories.")
+            .WithExample(["memory", "agents"]);
 
         branch.AddCommand<MemoryDeleteCommand>("delete")
             .WithDescription("Delete a stored REPL/agent memory by name, or wipe the store with --all.")
