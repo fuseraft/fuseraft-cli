@@ -1814,7 +1814,7 @@ internal static class ReplTurn
                     foreach (var call in chunk.Contents.OfType<FunctionCallContent>())
                     {
                         callNames[call.CallId ?? string.Empty] = call.Name;
-                        screen?.ToolStarted(call.CallId ?? string.Empty, call.Name, TuiRenderer.Summarize(call.Arguments),
+                        screen?.ToolStarted(call.CallId ?? string.Empty, call.Name, TuiRenderer.Summarize(call.Arguments, ctx.Cwd),
                             arguments: TuiRenderer.FormatArguments(call.Arguments));
                     }
 
@@ -1870,7 +1870,7 @@ internal static class ReplTurn
                                 type    = "tool_call",
                                 id      = funcCall.CallId,
                                 name    = funcCall.Name,
-                                summary = TuiRenderer.Summarize(funcCall.Arguments),
+                                summary = TuiRenderer.Summarize(funcCall.Arguments, ctx.Cwd),
                                 args,
                             });
                         }
@@ -2464,16 +2464,7 @@ internal static class ReplTurn
 
     private static string MakeRelativePath(string path, string cwd)
     {
-        try
-        {
-            var abs = Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(cwd, path));
-            if (abs.StartsWith(cwd, StringComparison.OrdinalIgnoreCase))
-            {
-                var rel = abs[cwd.Length..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                return string.IsNullOrEmpty(rel) ? abs : rel;
-            }
-            return abs;
-        }
+        try { return DisplayPath.Relative(Path.GetFullPath(path, cwd), cwd); }
         catch { return path; }
     }
 

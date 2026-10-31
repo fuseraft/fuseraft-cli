@@ -128,7 +128,7 @@ public sealed class ConsoleHumanApprovalService : IHumanApprovalService
 
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[{ThemeDetector.Warning}]⏸ FileSystem action requested:[/] [dim]{Markup.Escape(action)}[/]");
-        AnsiConsole.Write(DiffRenderer.Render(path, oldContent, newContent));
+        AnsiConsole.Write(DiffRenderer.Render(DisplayPath.Relative(path, Directory.GetCurrentDirectory()), oldContent, newContent));
         ReplInput.Screen?.Keep($"{action} {path}", Tui.UnifiedDiff.Build(oldContent, newContent).Text, diff: true);
         var answer = ReplInput.Approve("Allow?", alwaysLabel);
         AnsiConsole.MarkupLine(answer != ApprovalAnswer.No ? "[dim]Action allowed.[/]" : "[dim]Action blocked.[/]");

@@ -155,6 +155,16 @@ public sealed class TuiRendererTests
     }
 
     [Fact]
+    public void Summarize_shows_an_absolute_path_under_the_root_relative_to_it()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "proj");
+        var args = new Dictionary<string, object?> { ["path"] = Path.Combine(root, "themes", "ember.json") };
+
+        Assert.Equal(Path.Combine("themes", "ember.json"), TuiRenderer.Summarize(args, root));
+        Assert.Equal(Path.Combine(root, "themes", "ember.json"), TuiRenderer.Summarize(args));
+    }
+
+    [Fact]
     public void A_message_that_starts_blank_gets_the_mark_on_its_first_line_of_text()
     {
         _renderer.Text("\n\n");
