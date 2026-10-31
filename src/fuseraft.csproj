@@ -35,7 +35,7 @@
     <PackageReference Include="Anthropic.SDK" Version="5.10.0" />
 
     <!-- A2A protocol — the RemoteAgent client, and the server that serve hosts with its a2a option -->
-    <PackageReference Include="A2A" Version="1.0.0-preview2" />
+    <PackageReference Include="A2A" Version="1.0.0-preview3" />
     <PackageReference Include="Microsoft.Agents.AI.A2A" Version="1.22.0-preview.260918.1" />
     <PackageReference Include="Microsoft.Agents.AI.Hosting.A2A.AspNetCore" Version="1.22.0-preview.260918.1" />
 
