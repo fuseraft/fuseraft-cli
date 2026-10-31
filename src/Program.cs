@@ -415,7 +415,7 @@ app.Configure(cfg =>
         branch.SetDescription("View or edit the global config (~/.fuseraft/config): provider, sampling, REPL, telemetry, and skill-curation defaults.");
 
         branch.AddCommand<SettingsShowCommand>("show")
-            .WithDescription("Display the global config as rich tables.")
+            .WithDescription("Display the global config, keyed by the names settings set takes.")
             .WithExample(["settings", "show"]);
 
         branch.AddCommand<SettingsSetCommand>("set")
