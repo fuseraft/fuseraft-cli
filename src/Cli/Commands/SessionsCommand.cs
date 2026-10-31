@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Protocol;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
 
@@ -31,6 +32,14 @@ public sealed class SessionsSettings : CommandSettings
     [CommandOption("--older-than <age>")]
     [Description("Age threshold for --cleanup (e.g. 7d, 2w, 24h). Defaults to 30d when omitted.")]
     public string? OlderThan { get; set; }
+
+    [CommandOption("--repl")]
+    [Description("List REPL chats instead of orchestration sessions.")]
+    public bool Repl { get; set; }
+
+    [CommandOption("--json")]
+    [Description("Print one JSON object to stdout instead of a table (see docs/protocol.md). Listing only.")]
+    public bool Json { get; set; }
 }
 
 /// <summary>
@@ -40,6 +49,19 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
 {
     public override async Task<int> ExecuteAsync(CommandContext context, SessionsSettings settings, CancellationToken cancellationToken)
     {
+        if (settings.Json && (settings.Prune || settings.Cleanup || settings.Delete is not null))
+            return WireProtocol.WriteError("--json applies only to listing sessions, not --prune, --cleanup, or --delete.");
+
+        if (settings.Repl)
+        {
+            if (settings.Prune || settings.Cleanup || settings.Delete is not null)
+            {
+                AnsiConsole.MarkupLine("[red]✗ --repl only lists chats; it can't be combined with --prune, --cleanup, or --delete.[/]");
+                return 1;
+            }
+            return await ListReplAsync(settings, cancellationToken);
+        }
+
         // Prune orphaned sessions (config file no longer exists on disk).
         if (settings.Prune)
         {
@@ -163,6 +185,9 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
 
         var list = visible.ToList();
 
+        if (settings.Json)
+            return WireProtocol.WriteList(list.Select(WireSession.From));
+
         if (list.Count == 0)
         {
             AnsiConsole.MarkupLine(settings.All
@@ -206,6 +231,45 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
                 $"[dim]{list.Count} incomplete session(s). " +
                 $"Resume with: [bold]fuseraft run --resume <id>[/][/]");
 
+        return 0;
+    }
+
+    private static async Task<int> ListReplAsync(SessionsSettings settings, CancellationToken ct)
+    {
+        IEnumerable<ReplSessionSnapshot> chats = await ReplSessionSnapshot.ListAsync(ct);
+        if (!string.IsNullOrWhiteSpace(settings.Project))
+            chats = chats.Where(s => s.Cwd.Contains(settings.Project, StringComparison.OrdinalIgnoreCase));
+
+        var list = chats.Select(WireReplSession.From).ToList();
+        if (settings.Json)
+            return WireProtocol.WriteList(list);
+
+        if (list.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[dim]No REPL chats found.[/]");
+            return 0;
+        }
+
+        var table = new Table()
+            .Border(TableBorder.Rounded)
+            .AddColumn("[bold]Session ID[/]")
+            .AddColumn("[bold]Chat[/]")
+            .AddColumn("[bold]Turns[/]")
+            .AddColumn("[bold]Project[/]")
+            .AddColumn("[bold]Model[/]")
+            .AddColumn("[bold]Last Updated[/]");
+
+        foreach (var s in list)
+            table.AddRow(
+                $"[bold]{s.SessionId}[/]",
+                Markup.Escape(StringHelpers.Truncate(s.Title ?? s.AutoTitle ?? s.FirstUserMessage.ReplaceLineEndings(" "), 45)),
+                s.TurnIndex.ToString(),
+                Markup.Escape(ProjectLabel(s.Cwd)),
+                Markup.Escape(s.ModelId),
+                s.LastUpdatedAt.ToString("yyyy-MM-dd HH:mm"));
+
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine($"[dim]{list.Count} chat(s). Resume with: [bold]fuseraft repl --resume <id>[/][/]");
         return 0;
     }
 

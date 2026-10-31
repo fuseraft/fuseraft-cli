@@ -126,6 +126,9 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
         var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
         switch (type)
         {
+            case "hello":
+                break;
+
             case "queued":
             {
                 var position = GetNullableInt(root, "position");

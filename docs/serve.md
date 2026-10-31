@@ -178,6 +178,7 @@ One daemon serves one working directory — there's no multi-tenant mode for sev
 ## See also
 
 - [CLI Reference — `fuseraft serve`](cli-reference.md#fuseraft-serve) and [`fuseraft attach`](cli-reference.md#fuseraft-attach) — every flag and the full MCP tool signatures
+- [Wire Protocol](protocol.md#live-sessions) — the attach socket's JSONL events, for building your own client
 - [Security — `fuseraft serve` trust model](security.md#fuseraft-serve-trust-model) — the unauthenticated MCP endpoint, the A2A token, unattended policy, approval routing
 - [Configuration — `RemoteAgent`](configuration.md) — the caller's side of an A2A agent
 - [Scripting & Automation — dispatch into a resident daemon](scripting.md#or-dispatch-into-a-resident-fuseraft-serve-daemon) — using `serve` instead of shelling out to `fuseraft run` per event

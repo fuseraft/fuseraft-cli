@@ -60,6 +60,7 @@ export default defineConfig({
 						{ label: 'Plugins', link: '/plugins/' },
 						{ label: 'Skills', link: '/skills/' },
 						{ label: 'MCP', link: '/mcp/' },
+						{ label: 'Wire Protocol', link: '/protocol/' },
 					],
 				},
 				{
