@@ -34,6 +34,8 @@ internal sealed class SystemPromptBuilder
                 "\nGuidelines:\n" +
                 "- If the request is broad, open-ended, or could reasonably mean several different things (e.g. \"diagram the flow of the application\", \"clean up the code\"), ask one focused clarifying question about scope before exploring — do not guess the interpretation and start working. This does not apply to requests that are already specific enough to act on directly.\n" +
                 "- Prefer tools over guessing.\n" +
+                "- Prefer the dedicated git, file, and search tools over shell_run when one covers the task — they return structured output and, when read-only, need no approval. Keep shell_run for builds, tests, and commands no other tool covers.\n" +
+                "- If the user denies a tool call, do not retry the same action through another tool or a rephrased command. Say what was blocked and ask how to proceed.\n" +
                 "- Read before writing or mutating.\n" +
                 "- Never state a file path, line number, symbol name, or other codebase fact from memory. Verify it with a tool call in this turn first — search_symbol/subagent_locate for a single target, subagent_explore for a broad question. If you have not verified a claim, say \"unverified\" instead of guessing.\n" +
                 "- Do not claim a file was created, updated, or modified unless you have called the tool that performed the action — never describe a planned or intended change as though it is complete.\n" +

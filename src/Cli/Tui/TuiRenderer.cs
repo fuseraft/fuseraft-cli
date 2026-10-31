@@ -1,4 +1,5 @@
 using System.Text.Json;
+using fuseraft.Cli.Display;
 using fuseraft.Infrastructure.Mcp;
 using Repl = fuseraft.Cli.Commands.Repl;
 
@@ -251,8 +252,8 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width, TimePr
         return string.Join("\n", rows.Select((row, i) => (i == 0 ? "  ∴ " : "    ") + Paint(T.Muted, row)));
     }
 
-    /// <summary>A tool call's arguments in a few words: the one that says most (a command, a query, a path), else the first.</summary>
-    public static string Summarize(IDictionary<string, object?>? args)
+    /// <summary>A tool call's arguments in a few words: the one that says most (a command, a query, a path), else the first. An absolute path under <paramref name="root"/> is shown relative to it.</summary>
+    public static string Summarize(IDictionary<string, object?>? args, string? root = null)
     {
         if (args is not { Count: > 0 })
             return "";
@@ -261,6 +262,8 @@ internal sealed class TuiRenderer(Transcript transcript, Func<int> width, TimePr
         var value = telling.Select(k => args.FirstOrDefault(a => a.Key.Equals(k, StringComparison.OrdinalIgnoreCase)).Value)
             .FirstOrDefault(v => v is not null) ?? args.First().Value;
         var text = (value?.ToString() ?? "").ReplaceLineEndings(" ").Trim();
+        if (root is not null && Path.IsPathFullyQualified(text))
+            text = DisplayPath.Relative(text, root);
         return text.Length > 100 ? text[..97] + "..." : text;
     }
 
