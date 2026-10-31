@@ -68,7 +68,8 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         ("telemetry.serviceName",   "Requires telemetry.otlpEndpoint to already be set"),
         ("skillCuration.enabled",   "true/false"),
         ("skills.searchDepth",      "Directory levels scanned inside each skill for resources/scripts, 1-10 (default 5), or \"\" to reset"),
-        ("memory.model",            "Model ID for the end-of-session memory-extraction call (e.g. a cheap model), or \"\" to use the main chat model"),
+        ("memory.autoSave",         "true/false — extract memories automatically on exit and before /clear, /switch or compaction (default false; /memory save always works)"),
+        ("memory.model",            "Model ID for the memory-extraction call (e.g. a cheap model), or \"\" to use the main chat model"),
         ("memory.provider",         "Provider for memory.model (openai, anthropic, ...), or \"\" to auto-detect"),
         ("memory.endpoint",         "Base URL for memory.model; reuses the main provider's API key unless memory.apiKeyEnvVar is set"),
         ("memory.apiKeyEnvVar",     "Env var holding the API key for memory.model"),
@@ -154,6 +155,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
             "skillcuration.enabled"    => AssignBool(v => config.SkillCuration = (config.SkillCuration ?? new SkillCurationConfig()) with { Enabled = v }, value),
             "skills.searchdepth"       => AssignIntRange(v => config.Skills = (config.Skills ?? new SkillsConfig()) with { SearchDepth = v }, value, 1, SkillsConfig.MaxSearchDepth),
 
+            "memory.autosave"          => AssignBool(v => UpdateMemory(config, m => m with { AutoSave = v }), value),
             "memory.model"             => Assign(() => UpdateMemory(config, m => m with { Model = Blank(value) })),
             "memory.provider"          => Assign(() => UpdateMemory(config, m => m with { Provider = Blank(value) })),
             "memory.endpoint"          => Assign(() => UpdateMemory(config, m => m with { Endpoint = Blank(value) })),

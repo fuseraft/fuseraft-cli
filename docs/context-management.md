@@ -123,8 +123,8 @@ type priority alone.
 **Memory scoping:** In a project directory that has `.fuseraft/`, only memories saved in that
 directory are loaded. Directories without `.fuseraft/` fall back to all global memories.
 
-**REPL:** Memory is always active in the REPL — no config flag needed. Memories are extracted
-automatically at the end of each session and scoped to the working directory via
+**REPL:** Memories are always loaded in the REPL. New ones are extracted on `/memory save`, or
+automatically at the end of each session with `memory.autoSave` on, and are scoped to the working directory via
 `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json`. Use `/memory` commands to inspect or delete them.
 
 See [Configuration — Memory](configuration.md#memory) for the full field reference.

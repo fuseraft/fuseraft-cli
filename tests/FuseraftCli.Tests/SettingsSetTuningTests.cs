@@ -247,6 +247,16 @@ public sealed class SettingsSetTuningTests : IDisposable
     }
 
     [Fact]
+    public async Task MemoryAutoSave_PersistsTrueAndFalse()
+    {
+        await SetAsync("memory.autoSave", "true");
+        Assert.True(Saved().Memory!.AutoSave);
+
+        await SetAsync("memory.autoSave", "false");
+        Assert.False(Saved().Memory!.AutoSave);
+    }
+
+    [Fact]
     public async Task OverrideSections_DoNotWriteUnsetFieldsOrDerivedProperties()
     {
         await SetAsync("subagent.endpoint", "https://litellm.example/v1");

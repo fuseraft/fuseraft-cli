@@ -1010,18 +1010,20 @@ When a session has stalled — the agent keeps making the same mistake, misunder
 
 ### Memory commands
 
-The REPL automatically maintains a persistent memory store at `~/.fuseraft/memory/repl/`. Each entry is identified by a UUID and stored as `memory_{guid}.md`. Memories are **scoped to the working directory** where they were created: when a memory is saved, its GUID is registered in `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json`, and a session loads the memories registered by every session of its directory. Memories from other directories are never loaded.
+The REPL maintains a persistent memory store at `~/.fuseraft/memory/repl/`. Each entry is identified by a UUID and stored as `memory_{guid}.md`. Memories are **scoped to the working directory** where they were created: when a memory is saved, its GUID is registered in `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json`, and a session loads the memories registered by every session of its directory. Memories from other directories are never loaded.
 
 Names are unique within a directory: saving a memory under a name the directory already has updates that entry in place, while another project can keep its own memory of the same name.
 
-At session start, the directory's memories are injected into the system prompt. The model is prompted to extract key facts from the conversation, and they are saved automatically:
+At session start, the directory's memories are injected into the system prompt. New memories are saved when you run `/memory save`, which prompts the model to extract key facts from the conversation.
+
+Automatic saving is off by default. Turn it on with `fuseraft settings set memory.autoSave true`, and the REPL also extracts memories:
 
 - when the session ends (via `/exit` or Ctrl+C), giving up after 60 seconds;
 - before the conversation is discarded: `/clear`, `/switch`, `/provider setup`, and compaction (`/compact` or automatic), which extracts from the older turns while it summarizes them.
 
 The extractor is told to save only what will still be true later: standing preferences you state as general rules, lessons about what worked, and decisions or constraints the code doesn't show. It skips task progress, descriptions of the code, and instructions meant for one reply. It also keeps the set small: it updates an existing memory on the same topic rather than adding a near-duplicate, and removes memories it merged into another, that the conversation showed wrong, or that only tracked finished work. Saves and removals are both reported, e.g. `Memory: 2 entries saved, 1 removed.`
 
-Extraction runs only when there are turns it hasn't seen, so resuming a session and exiting without a new turn doesn't extract it again. When the extraction call fails, the REPL says so and tries again at the next of these points.
+With automatic saving on, extraction runs only when there are turns it hasn't seen, so resuming a session and exiting without a new turn doesn't extract it again. When the extraction call fails, the REPL says so and tries again at the next of these points.
 
 This extraction call uses the REPL's main chat model by default. Set `memory.model` (see [`fuseraft settings`](#fuseraft-settings)) to run it on a different — e.g. cheaper — model instead; the same model also names new chats (`repl.autoTitle`):
 
@@ -1052,7 +1054,7 @@ Provider selection follows the same rules as the subagent model above: by ID pre
   saving memory…  2 entries saved.
 ```
 
-Each memory file lives at `~/.fuseraft/memory/repl/memory_{guid}.md`. Use `/memory save` mid-session if you want to capture facts before the session ends naturally.
+Each memory file lives at `~/.fuseraft/memory/repl/memory_{guid}.md`. Use `/memory save` whenever the conversation has produced something worth keeping.
 
 **Agent reliability guardrails**
 
@@ -2820,7 +2822,8 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
 | `skillCuration.enabled` | `true`/`false` |
 | `skills.searchDepth` | Directory levels scanned inside each skill for resources and scripts, 1–10 (default `5`; `3` reaches `references/components/x.md`), or `""` to reset |
-| `memory.model` | Model ID for the REPL's end-of-session memory-extraction call, or `""` to use the main chat model |
+| `memory.autoSave` | `true`/`false` — extract memories automatically on exit and before `/clear`, `/switch`, `/provider setup` or compaction discards the conversation (default `false`; `/memory save` always works) |
+| `memory.model` | Model ID for the REPL's memory-extraction call, or `""` to use the main chat model |
 | `memory.provider` / `memory.endpoint` / `memory.apiKeyEnvVar` | Connection for `memory.model`: provider, base URL, and API-key env var. `endpoint` reuses the main provider's key unless `apiKeyEnvVar` is set. Only apply with `memory.model` |
 | `subagent.model` | Model ID for `/explore`, `/locate`, `/delegate` subagents, or `""` to use the main chat model |
 | `subagent.provider` / `subagent.endpoint` / `subagent.apiKeyEnvVar` | Connection for `subagent.model`, as for `memory.*` above. Only apply with `subagent.model` |

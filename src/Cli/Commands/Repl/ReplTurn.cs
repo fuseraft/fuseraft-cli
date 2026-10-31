@@ -2195,13 +2195,13 @@ internal static class ReplTurn
     /// <summary>
     /// Saves memories before the history is thrown away (/clear, /switch, /provider setup, or
     /// compaction folding old turns into a summary), so those turns aren't lost to memory.
-    /// Never throws. <paramref name="quiet"/> keeps it off the console, for callers that are
+    /// Only with <c>memory.autoSave</c> on. Never throws. <paramref name="quiet"/> keeps it off the console, for callers that are
     /// showing their own progress line.
     /// </summary>
     internal static async Task SaveMemoriesBeforeDiscardAsync(
         ReplSessionContext ctx, bool quiet = false, CancellationToken ct = default)
     {
-        if (!HasUnextractedTurns(ctx)) return;
+        if (ctx.UserCfg?.Memory?.AutoSave != true || !HasUnextractedTurns(ctx)) return;
         var show = !quiet && !ctx.JsonMode;
         try
         {
