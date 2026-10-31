@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using ModelContextProtocol.Server;
 using Spectre.Console;
 using fuseraft.Core;
 using fuseraft.Core.Events;
@@ -37,7 +36,7 @@ public sealed class ServeHost(
     PluginRegistry pluginRegistry,
     ISessionStore sessionStore,
     string configPath,
-    int httpPort,
+    ServeHttpOptions httpOptions,
     string? socketPathOverride,
     bool unattendedAllow,
     IReadOnlyList<string> autoObjectiveIds,
@@ -106,7 +105,10 @@ public sealed class ServeHost(
             var queue = new ServeTaskQueue();
             var objectiveManager = new ObjectiveManager(new ObjectiveStore(FuseraftPaths.LocalObjectives));
 
-            mcpApp = BuildMcpApp(queue, httpPort);
+            socketListener = new ServeSocketListener(socketPath, queue, approvalService,
+                loggerFactory.CreateLogger<ServeSocketListener>());
+
+            mcpApp = ServeHttpHost.Build(httpOptions, queue, socketListener.HandleStreamAsync);
             await mcpApp.StartAsync(shutdownCts.Token);
             var boundPort = new Uri(mcpApp.Urls.First()).Port;
 
@@ -124,13 +126,14 @@ public sealed class ServeHost(
                 a2aUrls = [.. hosted.Select(h => ServeA2AHost.AgentUrl(a2aOptions, h.cfg.Name, a2aPort))];
             }
 
-            socketListener = new ServeSocketListener(socketPath, queue, approvalService,
-                loggerFactory.CreateLogger<ServeSocketListener>());
             socketListener.Start(shutdownCts.Token);
 
+            var httpAuth = string.IsNullOrEmpty(httpOptions.Token) ? "no token" : $"bearer token from {ServeHttpHost.TokenVariable}";
             AnsiConsole.MarkupLine($"[dim]fuseraft serve[/] — [bold]{Markup.Escape(built.Config.Name)}[/]");
-            AnsiConsole.MarkupLine($"[dim]  MCP (dispatch_task/get_status/get_result) → http://localhost:{boundPort}/mcp[/]");
+            AnsiConsole.MarkupLine($"[dim]  MCP (dispatch_task/get_status/get_result) → {Markup.Escape(ServeHttpHost.LocalUrl(httpOptions, boundPort, "http", "/mcp"))}[/]");
             AnsiConsole.MarkupLine($"[dim]  Attach socket → {Markup.Escape(socketPath)}  (fuseraft attach)[/]");
+            AnsiConsole.MarkupLine($"[dim]  Attach WebSocket → {Markup.Escape(ServeHttpHost.LocalUrl(httpOptions, boundPort, "ws", ServeHttpHost.AttachPath))}  (fuseraft attach --url)[/]");
+            AnsiConsole.MarkupLine($"[dim]  HTTP on {Markup.Escape(httpOptions.Bind)}, {httpAuth} (--bind)[/]");
             if (a2aOptions is null)
                 AnsiConsole.MarkupLine("[dim]  A2A: off (--a2a)[/]");
             else
@@ -158,7 +161,14 @@ public sealed class ServeHost(
             // especially ReleasePidFile: skipping it leaks the pidfile and blocks every future
             // `fuseraft serve` invocation for this project.
             TryCleanup(() => socketListener?.Stop());
-            if (mcpApp is not null) await TryCleanupAsync(() => mcpApp.DisposeAsync().AsTask());
+            // Stopping first fires ApplicationStopping, which ends attached WebSocket connections
+            // instead of leaving shutdown to wait on them.
+            if (mcpApp is not null)
+            {
+                using var stopTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await TryCleanupAsync(() => mcpApp.StopAsync(stopTimeout.Token));
+                await TryCleanupAsync(() => mcpApp.DisposeAsync().AsTask());
+            }
             if (a2aApp is not null) await TryCleanupAsync(() => a2aApp.DisposeAsync().AsTask());
             if (built is not null)
             {
@@ -564,36 +574,6 @@ public sealed class ServeHost(
 
     private static string? Truncate(string? content) =>
         content is { Length: > 500 } ? content[..500] + "…" : content;
-
-    // -------------------------------------------------------------------------
-    // MCP HTTP host
-    // -------------------------------------------------------------------------
-
-    private static WebApplication BuildMcpApp(ServeTaskQueue queue, int port)
-    {
-        var mcpTools = new ServeMcpTools(queue);
-        var toolNames = new (string Method, string ToolName)[]
-        {
-            (nameof(ServeMcpTools.DispatchTask), "dispatch_task"),
-            (nameof(ServeMcpTools.GetStatus),    "get_status"),
-            (nameof(ServeMcpTools.GetResult),    "get_result"),
-        };
-        var tools = toolNames.Select(t =>
-        {
-            var method = typeof(ServeMcpTools).GetMethod(t.Method)!;
-            var function = AIFunctionFactory.Create(method, mcpTools, new AIFunctionFactoryOptions { Name = t.ToolName });
-            return McpServerTool.Create(function);
-        });
-
-        var builder = WebApplication.CreateSlimBuilder([]);
-        builder.WebHost.UseUrls($"http://localhost:{port}");
-        builder.Logging.ClearProviders();
-        builder.Services.AddMcpServer().WithHttpTransport().WithTools(tools);
-
-        var app = builder.Build();
-        app.MapMcp("/mcp");
-        return app;
-    }
 
     // -------------------------------------------------------------------------
     // Single-instance guard

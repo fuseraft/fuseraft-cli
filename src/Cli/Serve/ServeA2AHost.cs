@@ -105,7 +105,11 @@ public static class ServeA2AHost
 
     /// <summary>The <c>RemoteAgent.Url</c> a caller on this machine would use for an agent.</summary>
     public static string AgentUrl(ServeA2AOptions options, string agentName, int boundPort) =>
-        $"http://{(IsLoopback(options.Bind) || IsAnyAddress(options.Bind) ? "localhost" : UrlHost(options.Bind))}:{boundPort}/{Uri.EscapeDataString(agentName)}";
+        $"http://{LocalUrlHost(options.Bind)}:{boundPort}/{Uri.EscapeDataString(agentName)}";
+
+    /// <summary>The host a caller on this machine would put in a URL for a listener bound to <paramref name="bind"/>.</summary>
+    internal static string LocalUrlHost(string bind) =>
+        IsLoopback(bind) || IsAnyAddress(bind) ? "localhost" : UrlHost(bind);
 
     internal static AgentCard Card(AgentConfig config, string url) => new()
     {
@@ -119,7 +123,7 @@ public static class ServeA2AHost
         SupportedInterfaces = [new() { Url = url, ProtocolBinding = ProtocolBindingNames.JsonRpc, ProtocolVersion = "1.0" }],
     };
 
-    private static Func<HttpContext, RequestDelegate, Task> RequireBearer(string token)
+    internal static Func<HttpContext, RequestDelegate, Task> RequireBearer(string token)
     {
         var expected = Encoding.UTF8.GetBytes("Bearer " + token);
         return async (ctx, next) =>
@@ -138,7 +142,7 @@ public static class ServeA2AHost
     private static bool IsAnyAddress(string bind) =>
         bind is "*" or "+" || (IPAddress.TryParse(bind.Trim('[', ']'), out var ip) && (ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any)));
 
-    private static string UrlHost(string bind) =>
+    internal static string UrlHost(string bind) =>
         IPAddress.TryParse(bind.Trim('[', ']'), out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
             ? $"[{ip}]"
             : bind;

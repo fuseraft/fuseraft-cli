@@ -2316,6 +2316,7 @@ fuseraft serve [options]
 | `-c, --config <path>` | `.fuseraft/config/orchestration.yaml` | Orchestration config the daemon runs for its whole lifetime. |
 | `--work-dir <path>` | config's `Security.FileSystemSandboxPath`, else current directory | Working directory for the daemon's whole lifetime. |
 | `--http-port <port>` | derived from the project path (like `--socket`) | Port for the MCP (streamable-HTTP) endpoint at `/mcp`. Fixed rather than OS-assigned because another agent needs a stable address to configure ahead of time, unlike a human who can read a printed URL — but per-project rather than one hardcoded number for every project, so two daemons for two different projects don't collide on the same default port. |
+| `--bind <address>` | `localhost` | Address the HTTP listener (MCP at `/mcp`, attach WebSocket at `/attach`) listens on: `localhost`, an interface IP, or `0.0.0.0` for every interface. Anything but loopback requires the `FUSERAFT_SERVE_TOKEN` environment variable. When it's set, every request to `/mcp` and `/attach` must send `Authorization: Bearer <token>`. |
 | `--socket <path>` | `~/.fuseraft/run/<project-hash>.sock` | Unix domain socket `fuseraft attach` connects to. Lives in a short, flat directory (not under the per-project state tree) because AF_UNIX socket paths are capped at 108 bytes on Linux. |
 | `--unattended-policy <deny\|allow>` | `deny` | What happens to a mutating tool call (shell/write/git-push/etc.) when nobody is attached. `deny` — a task dispatched by another agent with no human watching is denied by default. `allow` — auto-approve, for trusted unattended pipelines. |
 | `--auto-objective <id>` | — | Objective ID (e.g. `OBJ-0001`, from `fuseraft objective list`) whose `RemainingTasks` the daemon pulls from and runs on its own whenever idle, instead of only running tasks it's explicitly dispatched. Repeatable. |
@@ -2330,7 +2331,7 @@ Only one daemon may run per project at a time, enforced by a pidfile at `~/.fuse
 - **No extra trust.** A self-picked task has no attach-connection origin, so its mutating tool calls are still gated by `--unattended-policy` exactly like an MCP-dispatched task — self-initiated work doesn't get a free pass. Pair `--auto-objective` with `--unattended-policy allow` if you actually want it to get things done unattended.
 - **Failure-skip, not infinite retry.** A task that fails 3 times in a row (in-memory count, reset on success, not persisted) stops being auto-picked — it's still visible in `RemainingTasks` for you to inspect, fix, or re-run explicitly via `dispatch_task`, but the daemon won't keep burning API calls retrying it unattended.
 
-**MCP tool surface** (at `http://localhost:<port>/mcp`, streamable-HTTP, localhost-only, unauthenticated — the same trust model as `--devui`):
+**MCP tool surface** (at `http://localhost:<port>/mcp`, streamable-HTTP; localhost-only and unauthenticated unless `--bind` and `FUSERAFT_SERVE_TOKEN` say otherwise):
 
 | Tool | Description |
 |------|-------------|
@@ -2348,6 +2349,9 @@ fuseraft serve
 
 # Point at a specific config, allow trusted unattended pipelines to skip approval
 fuseraft serve --config .fuseraft/config/devops-team.yaml --unattended-policy allow
+
+# Accept attach and MCP clients from other machines
+FUSERAFT_SERVE_TOKEN=... fuseraft serve --bind 0.0.0.0
 
 # Host the Tester agent for teams on other machines
 FUSERAFT_A2A_TOKEN=... fuseraft serve --a2a --a2a-bind 0.0.0.0 --a2a-agent Tester
@@ -2379,6 +2383,7 @@ fuseraft attach [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--socket <path>` | `~/.fuseraft/run/<project-hash>.sock` | Path to the daemon's attach socket. Must match the daemon's actual socket (same project directory, or an explicit `--socket` passed to both). |
+| `--url <ws-url>` | — | Attach over WebSocket instead, e.g. `ws://build-box.lan:24601/attach` (the daemon prints its URL). Sends `FUSERAFT_SERVE_TOKEN` as a bearer token when it's set. Can't be combined with `--socket`. |
 
 Any number of clients may attach concurrently. Every attached connection sees the daemon's live progress (which agent is working, which tool it's calling) regardless of who dispatched the running task — it's a shared view, like several people watching one dashboard. Approval prompts for mutating tool calls, however, go only to the connection that actually dispatched the task in question; a connection that's just watching is never asked to approve someone else's (or an agent's) action.
 

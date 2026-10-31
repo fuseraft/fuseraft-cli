@@ -12,7 +12,7 @@ There are two parts:
 
 ## Versioning
 
-The current protocol version is **1**. Every JSON document fuseraft emits for this protocol carries it as `protocolVersion`: the envelope of every `--json` command, the `ready` event of `repl --vscode` and `run --bridge`, and the `hello` event on the serve socket.
+The current protocol version is **1**. Every JSON document fuseraft emits for this protocol carries it as `protocolVersion`: the envelope of every `--json` command, the `ready` event of `repl --vscode` and `run --bridge`, and the `hello` event on the serve socket and WebSocket.
 
 - **Additive changes don't bump the version.** New fields, new event types, new `approval_request` kinds and new commands can arrive in any release. Clients must ignore fields and event types they don't recognize.
 - **Breaking changes do.** Removing or renaming a field or event, or changing what one means, increments `protocolVersion`. A client should check it and refuse (or degrade) on a version it wasn't built for.
@@ -202,6 +202,7 @@ A live session is a stream of JSONL: one JSON object per line, each with a `type
 | **stdio** | Spawn `fuseraft repl --vscode --no-banner` with piped stdin/stdout. One process is one chat. | `ready` |
 | **run bridge** | Spawn `fuseraft run --bridge -c <config> "<task>"` (or `--resume <id>`) with piped stdin/stdout. One process is one orchestration session, and it exits when the session ends. | `ready` |
 | **serve socket** | Connect to the Unix socket of a running `fuseraft serve` (the path `fuseraft attach` uses). Many clients can attach to one daemon. | `hello` |
+| **serve WebSocket** | Open a WebSocket to `ws://<host>:<port>/attach` on a running `fuseraft serve` (the MCP port). Same events and inputs as the serve socket; each text message is one line. Send `Authorization: Bearer <token>` when the daemon has `FUSERAFT_SERVE_TOKEN` set. A handshake with an `Origin` header is refused. | `hello` |
 
 Ignore any stdout line that doesn't parse as JSON. Slash-command output can occasionally leak through as plain text.
 
@@ -294,8 +295,9 @@ On stdio, `question` is only sent when the client spawned the CLI with `FUSERAFT
 | `agent_starting` | `agent` | |
 | `tool_calling` | `agent`, `tool`, `argsSummary` | |
 | `token_budget_warning` | `agent`, `inputTokens`, `warnThreshold` | |
+| `a2a_call` | `agent`, `sessionId` | An A2A caller started a call to a hosted agent (`--a2a`). |
 | `result` | `sessionId`, `succeeded`, `errorMessage`, `lastAgent`, `lastMessage` | Your task finished. |
 
 Progress events are broadcast to every attached client. Approval prompts go only to the client that dispatched the task.
 
-The daemon also exposes `dispatch_task`, `get_task_status` and `get_task_result` as MCP tools over HTTP, and can host an A2A endpoint. See [Serve](serve.md).
+The daemon also exposes `dispatch_task`, `get_status` and `get_result` as MCP tools over HTTP, and can host an A2A endpoint. See [Serve](serve.md).
