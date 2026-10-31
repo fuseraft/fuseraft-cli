@@ -8,11 +8,11 @@ Tools built on fuseraft talk to it **out of process**: they spawn the CLI or con
 There are two parts:
 
 - **[Resource queries](#resource-queries)** — one-shot `--json` flags on the list commands (sessions, memory, context, schedules, plugins, models).
-- **[Live sessions](#live-sessions)** — a JSONL event stream for driving a chat or a daemon, over stdio (`fuseraft repl --vscode`) or the `fuseraft serve` Unix socket.
+- **[Live sessions](#live-sessions)** — a JSONL event stream for driving a chat (`fuseraft repl --vscode`), an orchestration run (`fuseraft run --bridge`), or a daemon (the `fuseraft serve` Unix socket).
 
 ## Versioning
 
-The current protocol version is **1**. Every JSON document fuseraft emits for this protocol carries it as `protocolVersion`: the envelope of every `--json` command, the `ready` event on stdio, and the `hello` event on the serve socket.
+The current protocol version is **1**. Every JSON document fuseraft emits for this protocol carries it as `protocolVersion`: the envelope of every `--json` command, the `ready` event of `repl --vscode` and `run --bridge`, and the `hello` event on the serve socket.
 
 - **Additive changes don't bump the version.** New fields, new event types, new `approval_request` kinds and new commands can arrive in any release. Clients must ignore fields and event types they don't recognize.
 - **Breaking changes do.** Removing or renaming a field or event, or changing what one means, increments `protocolVersion`. A client should check it and refuse (or degrade) on a version it wasn't built for.
@@ -33,11 +33,12 @@ On failure the command exits with status `1` and prints an error envelope instea
 {"protocolVersion":1,"error":"fuseraft is not configured. Run 'fuseraft setup' to set an API key."}
 ```
 
-An empty result is `"items":[]`, never a missing field. Diagnostics may still appear on stderr, so parse stdout only.
+A command that returns one thing uses `"item":{ ... }` in place of `items`. An empty result is `"items":[]`, never a missing field. Diagnostics may still appear on stderr, so parse stdout only.
 
 | Command | Item type | Notes |
 |---------|-----------|-------|
 | `fuseraft sessions --json` | [Session](#session) | Incomplete sessions only; add `--all` for completed ones. `--project` filters. `--json` can't be combined with `--prune`, `--cleanup` or `--delete`. |
+| `fuseraft sessions --show <id> --json` | [SessionDetail](#sessiondetail) (as `item`) | An unknown or malformed ID is an error envelope. |
 | `fuseraft sessions --repl --json` | [ReplSession](#replsession) | REPL chats, newest first. `--project` filters on the chat's directory. |
 | `fuseraft memory list --json` | [Memory](#memory) | `--agent <name>` targets an agent's store. |
 | `fuseraft context list --json` | [ContextItem](#contextitem) | `--dir` picks the project. |
@@ -58,6 +59,25 @@ An orchestration session (`fuseraft run`).
 | `startedAt`, `lastUpdatedAt` | timestamp | |
 | `isComplete` | bool | |
 | `turnCount` | int | |
+
+### SessionDetail
+
+A [Session](#session)'s `sessionId`, `task`, `workingDirectory`, `configPath`, `startedAt`, `lastUpdatedAt` and `isComplete`, plus `messages`: an array of [AgentMessage](#agentmessage).
+
+### AgentMessage
+
+One message in an orchestration session. It's used both in [SessionDetail](#sessiondetail) and in `run --bridge`'s `agent_message` event.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `agentName` | string | The agent; `Human` for a human's message, `Orchestrator` for an injected correction. |
+| `role` | string | `assistant` for an agent's turn, `user` for injected text. |
+| `content` | string | |
+| `turnIndex` | int | |
+| `timestamp` | timestamp | |
+| `inputTokens`, `outputTokens` | int \| null | Null when the provider didn't report usage. |
+| `isCompactionSummary` | bool | The message is a summary that replaced earlier turns. |
+| `toolCalls` | array | `{name, argsSummary, succeeded}` for each tool call in the turn. |
 
 ### ReplSession
 
@@ -131,6 +151,7 @@ A live session is a stream of JSONL: one JSON object per line, each with a `type
 | Transport | How to connect | First event |
 |-----------|----------------|-------------|
 | **stdio** | Spawn `fuseraft repl --vscode --no-banner` with piped stdin/stdout. One process is one chat. | `ready` |
+| **run bridge** | Spawn `fuseraft run --bridge -c <config> "<task>"` (or `--resume <id>`) with piped stdin/stdout. One process is one orchestration session, and it exits when the session ends. | `ready` |
 | **serve socket** | Connect to the Unix socket of a running `fuseraft serve` (the path `fuseraft attach` uses). Many clients can attach to one daemon. | `hello` |
 
 Ignore any stdout line that doesn't parse as JSON. Slash-command output can occasionally leak through as plain text.
@@ -139,7 +160,8 @@ Ignore any stdout line that doesn't parse as JSON. Slash-command output can occa
 
 | Event | Fields | |
 |-------|--------|---|
-| `ready` | `protocolVersion`, `sessionId`, `model`, `title`, `autoTitle`, `midTurnCommands[]` | stdio. The chat is ready for input. `midTurnCommands` lists the slash commands that may be sent while a reply is still streaming. |
+| `ready` | `protocolVersion`, `sessionId`, `model`, `title`, `autoTitle`, `midTurnCommands[]` | `repl --vscode`. The chat is ready for input. `midTurnCommands` lists the slash commands that may be sent while a reply is still streaming. |
+| `ready` | `protocolVersion`, `sessionId`, `task`, `config`, `resumed`, `agents[]` | `run --bridge`. The session is about to start. |
 | `hello` | `protocolVersion` | Serve socket. Sent as soon as you connect. |
 
 ### Input (client → fuseraft)
@@ -180,6 +202,20 @@ There are no request IDs. A response is simply the next matching line on stdin, 
 | `text` / `info` / `warning` / `error` | `text` | Messages for the user. `text` is pre-rendered Markdown. |
 | `session_end` | — | The process is about to exit. |
 
+### Run events (run bridge)
+
+| Event | Fields | |
+|-------|--------|---|
+| `agent_starting` | `agent` | |
+| `tool_calling` | `agent`, `tool`, `argsSummary` | |
+| `token_budget_warning` | `agent`, `inputTokens`, `warnThreshold` | |
+| `agent_message` | `message` ([AgentMessage](#agentmessage)), `elapsedMs` | One completed turn. Messages with `agentName: "Orchestrator"` are routing corrections; most UIs hide them. |
+| `result` | `sessionId`, `task`, `config`, `succeeded`, `errorMessage`, `exitCode`, `turns`, `elapsedSeconds`, `inputTokens`, `outputTokens` | The last event. The process exits with `exitCode`. A run that fails before it starts sends only `result`, with `sessionId` null. |
+
+Input is `approval_response` and `interrupt`; `user_input` isn't read. An interrupt (or `SIGINT`) cancels the session, which then sends `result` with `succeeded: false`. A cancelled session can be continued with `run --bridge --resume <id>`.
+
+`--bridge` gates shell commands, file writes and other mutating tool actions with `approval_request`, the same way `fuseraft serve` does. It never pauses after each turn, so it can't be combined with `--hitl`.
+
 ### Prompts
 
 | Event | Fields | Answer with |
@@ -194,7 +230,7 @@ There are no request IDs. A response is simply the next matching line on stdin, 
 | `shell_command` | `command` |
 | `tool_action` | `plugin`, `action`, `detail` |
 | `file_write` | `plugin`, `action`, `path`, `oldContent`, `newContent`. Render it as a diff. |
-| `route_approval` | `keyword`, `sourceAgent`, `targetAgent` (serve only: an agent handoff that needs a human) |
+| `route_approval` | `keyword`, `sourceAgent`, `targetAgent` (serve and run bridge: an agent handoff that needs a human) |
 
 New kinds may be added. If a client doesn't recognize a kind, it should show the raw event and ask, or deny it. It must never auto-approve.
 

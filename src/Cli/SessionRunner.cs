@@ -46,7 +46,8 @@ public sealed class SessionRunner(
     SessionMetrics? sessionMetrics = null,
     bool quiet = false,
     SnapshotWriter? postmortemWriter = null,
-    AdaptiveTrimTracker? adaptiveTrimTracker = null)
+    AdaptiveTrimTracker? adaptiveTrimTracker = null,
+    Action<AgentMessage, TimeSpan>? onMessage = null)
 {
     // Session-lifetime assistant-turn counter. Only ever increments — never reset after
     // compaction. Used solely for the MaxIterations hard cap.
@@ -666,6 +667,7 @@ public sealed class SessionRunner(
             MessageRenderer.RenderMessage(msg, elapsed, showTools);
             try { telemetry?.RecordTurn(msg, elapsed, modelIdByAgent.GetValueOrDefault(msg.AgentName)); } catch { }
             try { devUI?.BroadcastMessage(msg, elapsed); } catch { }
+            try { onMessage?.Invoke(msg, elapsed); } catch { }
             if (await RecordMessageAsync(msg, messages, checkpoint, cancellationToken))
             {
                 compactionNeeded = true;
@@ -814,6 +816,7 @@ public sealed class SessionRunner(
 
                 try { telemetry?.RecordTurn(msg, elapsed, modelIdByAgent.GetValueOrDefault(msg.AgentName)); } catch { }
                 try { devUI?.BroadcastMessage(msg, elapsed); } catch { }
+                try { onMessage?.Invoke(msg, elapsed); } catch { }
                 if (await RecordMessageAsync(msg, messages, checkpoint, cancellationToken, statusActive: statusUpdate is not null))
                 {
                     compactionNeeded = true;
