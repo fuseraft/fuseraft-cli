@@ -22,7 +22,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'fuseraft',
-			description: 'A terminal AI assistant that scales into multi-agent pipelines, built on Microsoft Agent Framework.',
+			description: 'A model-agnostic coding agent for the terminal that scales into multi-agent pipelines, built on Microsoft Agent Framework.',
 			logo: { src: './src/assets/logo.svg' },
 			favicon: '/favicon.svg',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/fuseraft/fuseraft-cli' }],

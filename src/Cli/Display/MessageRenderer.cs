@@ -63,7 +63,7 @@ public static class MessageRenderer
             : string.Empty;
 
         var content = new Markup(
-            $"[bold]fuseraft[/] [dim]- terminal AI assistant (v{Markup.Escape(semver)})[/]\n" +
+            $"[bold]fuseraft[/] [dim]- model-agnostic coding agent (v{Markup.Escape(semver)})[/]\n" +
             $"\n" +
             $"[dim]Model:[/]    {Markup.Escape(modelId)}\n" +
             $"[dim]Path:[/]     {Markup.Escape(displayPath)}\n" +
