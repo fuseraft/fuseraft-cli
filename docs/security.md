@@ -640,9 +640,16 @@ If `fuseraft run --work-dir` points at a directory you did not author, any skill
 
 ## `fuseraft serve` trust model
 
-`fuseraft serve` (see [CLI Reference](cli-reference.md#fuseraft-serve)) starts a resident daemon with two front doors: an MCP server over HTTP for other agents, and a Unix domain socket for a human (`fuseraft attach`). With `--a2a` it adds a third: one A2A endpoint per agent.
+`fuseraft serve` (see [CLI Reference](cli-reference.md#fuseraft-serve)) starts a resident daemon with two front doors: an HTTP listener for other agents (MCP at `/mcp`) and remote attach clients (a WebSocket at `/attach`), and a Unix domain socket for a local human (`fuseraft attach`). With `--a2a` it adds a third: one A2A endpoint per agent.
 
-**The MCP endpoint is unauthenticated and localhost-only** — the same trust model as `--devui`. Any process on the same machine that can reach `localhost:<port>` can call `dispatch_task` and enqueue work; there is no token, API key, or additional access control layer. This is a deliberate scope decision for a local development tool, not an oversight, but it means the MCP endpoint is not suitable for exposure beyond one machine's own local processes — do not put it behind a reverse proxy or port-forward it without adding your own authentication in front of it. To reach a daemon's agents from another machine, use the A2A endpoints below instead.
+**By default the HTTP listener is unauthenticated and localhost-only.** Any process on the same machine that can reach `localhost:<port>` can call `dispatch_task` or attach and dispatch work. Two checks keep web pages out while it's unauthenticated:
+
+- **Host check.** On loopback, a request whose `Host` isn't `localhost`, `127.0.0.1` or `[::1]` gets 421. This stops a page that rebinds its own domain to `127.0.0.1` (DNS rebinding).
+- **No browser WebSockets.** A WebSocket handshake to `/attach` that carries an `Origin` header gets 403. Browsers always send one, and WebSockets aren't covered by CORS, so without this any page you visit could attach.
+
+**To reach the listener from another machine, set a token.** With `--bind` set to anything but loopback, `fuseraft serve` refuses to start unless `FUSERAFT_SERVE_TOKEN` is set. Once it's set (on any bind), every request to `/mcp` and `/attach` must send `Authorization: Bearer <token>`, compared in constant time. It's a separate secret from `FUSERAFT_A2A_TOKEN`, so you can share hosted agents without handing out the ability to dispatch whole tasks. The same limits apply as for the A2A token below: it isn't encryption (use a TLS proxy or an SSH tunnel across an untrusted network) and it isn't per-caller.
+
+An attached client is a human front door. A task it dispatches routes approval prompts back to it, so anyone holding the token can approve that task's shell commands and file writes. Treat the token like shell access to the daemon's working directory.
 
 **The A2A endpoints (`--a2a`) can leave the machine, so they can require a token.** They listen on `localhost` by default. With `--a2a-bind` set to anything else, `fuseraft serve` refuses to start unless `FUSERAFT_A2A_TOKEN` is set, and then every request — agent cards included — must send `Authorization: Bearer <token>` (compared in constant time). What the token doesn't do:
 

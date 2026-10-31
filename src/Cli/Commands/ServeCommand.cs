@@ -23,6 +23,11 @@ public sealed class ServeSettings : CommandSettings
     [Description("Port for the MCP (streamable-HTTP) endpoint. Other agents need a stable address to configure, unlike a human reading a printed URL, so this defaults to a fixed-per-project (not OS-assigned ephemeral) port derived from the project path, so two daemons for two different projects don't collide on the same default port.")]
     public int? HttpPort { get; set; }
 
+    [CommandOption("--bind")]
+    [Description("Address the MCP and attach WebSocket endpoints listen on: 'localhost' (default), an interface IP, or 0.0.0.0 for every interface. Anything but loopback requires FUSERAFT_SERVE_TOKEN; clients send it as 'Authorization: Bearer <token>'.")]
+    [DefaultValue("localhost")]
+    public string Bind { get; set; } = "localhost";
+
     [CommandOption("--socket")]
     [Description("Path to the Unix domain socket `fuseraft attach` connects to. Defaults to ~/.fuseraft/run/<project-hash>.sock.")]
     public string? Socket { get; set; }
@@ -117,6 +122,13 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
         var projectSlug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
         var httpPort    = settings.HttpPort ?? FuseraftPaths.DefaultDaemonHttpPort(projectSlug);
 
+        var http = new ServeHttpOptions(settings.Bind, httpPort, Environment.GetEnvironmentVariable(ServeHttpHost.TokenVariable));
+        if (ServeHttpHost.Validate(http) is { } httpProblem)
+        {
+            AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(httpProblem)}");
+            return 1;
+        }
+
         ServeA2AOptions? a2a = null;
         if (settings.A2A)
         {
@@ -142,7 +154,7 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
 
         var host = new ServeHost(
             loggerFactory, pluginRegistry, activeStore,
-            configPath, httpPort, settings.Socket, unattendedAllow,
+            configPath, http, settings.Socket, unattendedAllow,
             settings.AutoObjective ?? [], a2a);
 
         try

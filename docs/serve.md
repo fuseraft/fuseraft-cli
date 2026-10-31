@@ -19,6 +19,8 @@ fuseraft serve
 fuseraft serve — MyProject
   MCP (dispatch_task/get_status/get_result) → http://localhost:24601/mcp
   Attach socket → /home/user/.fuseraft/run/1f92641edb0442bd.sock  (fuseraft attach)
+  Attach WebSocket → ws://localhost:24601/attach  (fuseraft attach --url)
+  HTTP on localhost, no token (--bind)
   A2A: off (--a2a)
   Unattended mutating actions: denied (--unattended-policy)
   Auto-dispatch: off (--auto-objective)
@@ -39,7 +41,7 @@ Every dispatched task — however it arrives — funnels through the same queue,
 
 ### Another agent, over MCP
 
-`fuseraft serve` hosts an MCP server at `/mcp` (streamable HTTP, localhost-only) exposing three tools. Any MCP client — another fuseraft instance, Claude Code, anything that speaks the protocol — can call them directly:
+`fuseraft serve` hosts an MCP server at `/mcp` (streamable HTTP, localhost-only unless you [bind it elsewhere with a token](#from-another-machine-over-websocket)) exposing three tools. Any MCP client — another fuseraft instance, Claude Code, anything that speaks the protocol — can call them directly:
 
 ```
 dispatch_task(task: "Add input validation to the signup form")
@@ -77,6 +79,22 @@ All 42 tests passed.
 ```
 
 A second person attached at the same time sees the `agent_starting`/`tool_calling` lines scroll by live — but never the approval prompt for a task they didn't dispatch (see [The safety model](#the-safety-model)).
+
+### From another machine, over WebSocket
+
+The same attach protocol is also served as a WebSocket at `/attach`, on the MCP port. Use it when the Unix socket isn't reachable: from another machine, from a container, or from a host such as fuseraft-server.
+
+```bash
+# On the daemon's machine
+export FUSERAFT_SERVE_TOKEN=$(openssl rand -hex 32)
+fuseraft serve --bind 0.0.0.0
+
+# Anywhere else
+export FUSERAFT_SERVE_TOKEN=...   # the same value
+fuseraft attach --url ws://build-box.lan:24601/attach
+```
+
+Each WebSocket text message is one line of the attach protocol, so a client sees exactly what a socket client sees, starting with `hello`. Over loopback no token is needed, as with the Unix socket. Binding beyond loopback (`--bind`) requires `FUSERAFT_SERVE_TOKEN`, and then both `/attach` and `/mcp` require `Authorization: Bearer <token>`. Browsers are refused: a handshake carrying an `Origin` header gets 403, so a web page you visit can't open the daemon's socket.
 
 ---
 
@@ -171,7 +189,7 @@ See [Security — `fuseraft serve` trust model](security.md#fuseraft-serve-trust
 
 ## Not yet supported
 
-One daemon serves one working directory — there's no multi-tenant mode for several projects behind a single process. The A2A endpoints host individual agents, not the whole team as one agent, and don't stream. `--socket` is Unix-domain only; there's no Windows named-pipe equivalent yet.
+One daemon serves one working directory — there's no multi-tenant mode for several projects behind a single process. The A2A endpoints host individual agents, not the whole team as one agent, and don't stream. `--socket` is Unix-domain only; there's no Windows named-pipe equivalent yet, so on Windows attach over `--url`. Browser clients can't attach directly, since they can't send the token and an `Origin` header is refused.
 
 ---
 

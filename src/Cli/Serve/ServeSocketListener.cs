@@ -86,9 +86,15 @@ public sealed class ServeSocketListener(
 
     private async Task HandleConnectionAsync(Socket socket, CancellationToken ct)
     {
+        await using var stream = new NetworkStream(socket, ownsSocket: true);
+        await HandleStreamAsync(stream, ct);
+    }
+
+    /// <summary>Runs one attach connection over any line stream; the WebSocket endpoint uses this too.</summary>
+    internal async Task HandleStreamAsync(Stream stream, CancellationToken ct)
+    {
         try
         {
-            await using var stream = new NetworkStream(socket, ownsSocket: true);
             using var reader = new StreamReader(stream);
             await using var writer = new StreamWriter(stream) { AutoFlush = true };
 

@@ -1,9 +1,11 @@
 using System.ComponentModel;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Text.Json;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli.Commands.Repl;
+using fuseraft.Cli.Serve;
 using fuseraft.Core;
 
 namespace fuseraft.Cli.Commands;
@@ -13,6 +15,19 @@ public sealed class AttachSettings : CommandSettings
     [CommandOption("--socket")]
     [Description("Path to the daemon's attach socket. Defaults to ~/.fuseraft/run/<project-hash>.sock.")]
     public string? Socket { get; set; }
+
+    [CommandOption("--url")]
+    [Description("Attach over WebSocket instead, e.g. ws://host:port/attach (printed by `fuseraft serve`). Sends FUSERAFT_SERVE_TOKEN as a bearer token when it's set.")]
+    public string? Url { get; set; }
+
+    public override ValidationResult Validate()
+    {
+        if (Url is not null && Socket is not null)
+            return ValidationResult.Error("Use either --socket or --url, not both.");
+        if (Url is not null && !(Uri.TryCreate(Url, UriKind.Absolute, out var uri) && uri.Scheme is "ws" or "wss"))
+            return ValidationResult.Error($"--url must be a ws:// or wss:// URL, got: {Url}");
+        return ValidationResult.Success();
+    }
 }
 
 /// <summary>
@@ -38,30 +53,14 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
 {
     public override async Task<int> ExecuteAsync(CommandContext context, AttachSettings settings, CancellationToken cancellationToken)
     {
-        var projectSlug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
-        var socketPath  = settings.Socket ?? FuseraftPaths.DaemonSocketPath(projectSlug);
+        var (stream, target) = settings.Url is not null
+            ? await ConnectWebSocketAsync(settings.Url, cancellationToken)
+            : await ConnectSocketAsync(settings.Socket, cancellationToken);
+        if (stream is null) return 1;
 
-        if (!File.Exists(socketPath))
-        {
-            AnsiConsole.MarkupLine($"[red]✗ No daemon socket found at:[/] {Markup.Escape(socketPath)}");
-            AnsiConsole.MarkupLine("[dim]Start one with `fuseraft serve`.[/]");
-            return 1;
-        }
+        AnsiConsole.MarkupLine($"[dim]Attached → {Markup.Escape(target)}. Type a task and press Enter. Ctrl+C to detach.[/]");
 
-        using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-        try
-        {
-            await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath), cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            AnsiConsole.MarkupLine($"[red]✗ Could not connect:[/] {Markup.Escape(ex.Message)}");
-            return 1;
-        }
-
-        AnsiConsole.MarkupLine($"[dim]Attached → {Markup.Escape(socketPath)}. Type a task and press Enter. Ctrl+C to detach.[/]");
-
-        await using var stream = new NetworkStream(socket, ownsSocket: true);
+        await using var _ = stream;
         using var reader = new StreamReader(stream);
         await using var writer = new StreamWriter(stream) { AutoFlush = true };
 
@@ -96,7 +95,10 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
         while (true)
         {
             AnsiConsole.Markup("[bold]>[/] ");
-            var task = await consolePump.ReadInputAsync();
+            // Stop waiting at the prompt when the daemon goes away, rather than on the next Enter.
+            var read = consolePump.ReadInputAsync();
+            if (await Task.WhenAny(read, readerLoop) == readerLoop) break;
+            var task = await read;
             if (task is null) break; // stdin closed
             if (string.IsNullOrWhiteSpace(task)) continue;
 
@@ -109,6 +111,50 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
         }
 
         return 0;
+    }
+
+    private static async Task<(Stream? Stream, string Target)> ConnectSocketAsync(string? socketOverride, CancellationToken ct)
+    {
+        var socketPath = socketOverride ?? FuseraftPaths.DaemonSocketPath(FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory()));
+        if (!File.Exists(socketPath))
+        {
+            AnsiConsole.MarkupLine($"[red]✗ No daemon socket found at:[/] {Markup.Escape(socketPath)}");
+            AnsiConsole.MarkupLine("[dim]Start one with `fuseraft serve`.[/]");
+            return (null, socketPath);
+        }
+
+        var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        try
+        {
+            await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath), ct);
+        }
+        catch (Exception ex)
+        {
+            socket.Dispose();
+            AnsiConsole.MarkupLine($"[red]✗ Could not connect:[/] {Markup.Escape(ex.Message)}");
+            return (null, socketPath);
+        }
+        return (new NetworkStream(socket, ownsSocket: true), socketPath);
+    }
+
+    private static async Task<(Stream? Stream, string Target)> ConnectWebSocketAsync(string url, CancellationToken ct)
+    {
+        var socket = new ClientWebSocket();
+        if (Environment.GetEnvironmentVariable(ServeHttpHost.TokenVariable) is { Length: > 0 } token)
+            socket.Options.SetRequestHeader("Authorization", "Bearer " + token);
+        try
+        {
+            await socket.ConnectAsync(new Uri(url), ct);
+        }
+        catch (Exception ex)
+        {
+            socket.Dispose();
+            AnsiConsole.MarkupLine($"[red]✗ Could not connect:[/] {Markup.Escape(ex.Message)}");
+            if (ex is WebSocketException { InnerException: null } && Environment.GetEnvironmentVariable(ServeHttpHost.TokenVariable) is null or "")
+                AnsiConsole.MarkupLine($"[dim]If the daemon was started with {ServeHttpHost.TokenVariable}, set it here too.[/]");
+            return (null, url);
+        }
+        return (new WebSocketLineStream(socket, ownsSocket: true), url);
     }
 
     /// <summary>Renders one JSONL line from the daemon; resolves <paramref name="pendingResult"/> on "result".</summary>
