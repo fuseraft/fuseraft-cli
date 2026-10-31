@@ -1,9 +1,11 @@
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Display;
 using fuseraft.Cli.Protocol;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
+using fuseraft.Orchestration;
 
 namespace fuseraft.Cli.Commands;
 
@@ -33,6 +35,10 @@ public sealed class SessionsSettings : CommandSettings
     [Description("Age threshold for --cleanup (e.g. 7d, 2w, 24h). Defaults to 30d when omitted.")]
     public string? OlderThan { get; set; }
 
+    [CommandOption("--show <id>")]
+    [Description("Show one orchestration session's messages.")]
+    public string? Show { get; set; }
+
     [CommandOption("--repl")]
     [Description("List REPL chats instead of orchestration sessions.")]
     public bool Repl { get; set; }
@@ -51,6 +57,23 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
     {
         if (settings.Json && (settings.Prune || settings.Cleanup || settings.Delete is not null))
             return WireProtocol.WriteError("--json applies only to listing sessions, not --prune, --cleanup, or --delete.");
+
+        if (settings.Show is { } showId)
+        {
+            var session = await TryLoadAsync(showId, cancellationToken);
+            if (session is null)
+            {
+                if (settings.Json) return WireProtocol.WriteError($"Session not found: {showId}");
+                AnsiConsole.MarkupLine($"[red]✗ Session not found:[/] {Markup.Escape(showId)}");
+                return 1;
+            }
+            if (settings.Json) return WireProtocol.WriteItem(WireSessionDetail.From(session));
+
+            AnsiConsole.MarkupLine($"[bold]{Markup.Escape(session.SessionId)}[/]  [dim]{Markup.Escape(StringHelpers.Truncate(session.Task, 80))}[/]");
+            foreach (var msg in session.Messages.Where(m => m.AgentName != AgentNames.Orchestrator))
+                MessageRenderer.RenderMessage(msg, TimeSpan.Zero, showToolCalls: false);
+            return 0;
+        }
 
         if (settings.Repl)
         {
@@ -160,7 +183,7 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
                 return 0;
             }
 
-            var checkpoint = await sessionStore.LoadAsync(target, cancellationToken);
+            var checkpoint = await TryLoadAsync(target, cancellationToken);
             if (checkpoint is null)
             {
                 AnsiConsole.MarkupLine($"[red]✗ Session not found:[/] {Markup.Escape(target)}");
@@ -232,6 +255,13 @@ public sealed class SessionsCommand(ISessionStore sessionStore) : AsyncCommand<S
                 $"Resume with: [bold]fuseraft run --resume <id>[/][/]");
 
         return 0;
+    }
+
+    // The store rejects a malformed ID with ArgumentException; to the user that's just "not found".
+    private async Task<SessionCheckpoint?> TryLoadAsync(string sessionId, CancellationToken ct)
+    {
+        try { return await sessionStore.LoadAsync(sessionId, ct); }
+        catch (ArgumentException) { return null; }
     }
 
     private static async Task<int> ListReplAsync(SessionsSettings settings, CancellationToken ct)

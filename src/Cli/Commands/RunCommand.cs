@@ -7,8 +7,10 @@ using AgentGovernance.Sre;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using fuseraft.Cli.Commands.Repl;
 using fuseraft.Cli.DevUI;
 using fuseraft.Cli.Display;
+using fuseraft.Cli.Protocol;
 using fuseraft.Cli.Telemetry;
 using fuseraft.Core;
 using fuseraft.Core.Interfaces;
@@ -89,6 +91,10 @@ public sealed class RunSettings : CommandSettings
     [CommandOption("--json")]
     [Description("Suppress interactive console output (banner, turn panels, spinner) — human-readable status still goes to stderr — and print one JSON summary object to stdout when the session ends. Same effect as Output.Json: true in the config; this flag always wins.")]
     public bool Json { get; set; }
+
+    [CommandOption("--bridge")]
+    [Description("Stream the session as JSONL events on stdout and read approvals and interrupts as JSONL on stdin, for tools built on fuseraft (see docs/protocol.md). Human-readable status goes to stderr. Can't be combined with --hitl.")]
+    public bool Bridge { get; set; }
 }
 
 /// <summary>
@@ -99,8 +105,11 @@ public sealed class RunSettings : CommandSettings
 public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry pluginRegistry, ISessionStore sessionStore)
     : AsyncCommand<RunSettings>
 {
+    private bool _bridge;
+
     public override async Task<int> ExecuteAsync(CommandContext context, RunSettings settings, CancellationToken cancellationToken)
     {
+        _bridge = settings.Bridge;
         // --json redirects all human-readable Spectre output to stderr so stdout stays a clean
         // channel for the single JSON summary object printed at the end of the run. The config
         // file can also enable this (Output.Json: true), but that isn't known until after the
@@ -124,8 +133,16 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Output.Json with a failure before the config finishes loading — Output.Json genuinely
         // can't be read from a config that hasn't loaded yet, so that path falls back to
         // exit-code-only signalling (stdout stays empty, never wrong).
-        if (settings.Json)
+        if (settings.Json || settings.Bridge)
             RedirectAnsiConsoleToStderr();
+
+        // The bridge has no event for --hitl's after-every-turn prompt yet; refuse rather than stall on one.
+        if (settings.Bridge && settings.HumanInTheLoop)
+        {
+            StderrConsole.MarkupLine("[red]✗ --bridge can't be combined with --hitl.[/]");
+            EmitJsonErrorSummary(null, "--bridge can't be combined with --hitl.", 1);
+            return 1;
+        }
 
         // Determine the config path early so we can build the right session store before
         // loading the full config. When resuming, checkpoint.ConfigPath will refine this later.
@@ -141,7 +158,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             if (!Directory.Exists(workDir))
             {
                 StderrConsole.MarkupLine($"[red]✗ Work directory not found:[/] {Markup.Escape(workDir)}");
-                EmitJsonErrorIfNeeded(settings.Json, configPath, $"Work directory not found: {workDir}", 1);
+                EmitJsonErrorIfNeeded(settings.Json || settings.Bridge, configPath, $"Work directory not found: {workDir}", 1);
                 return 1;
             }
             Directory.SetCurrentDirectory(workDir);
@@ -160,7 +177,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             if (activeStore is InMemorySessionStore)
             {
                 StderrConsole.MarkupLine("[yellow]⚠ CheckpointMode is 'memory' — sessions are not persisted and cannot be resumed.[/]");
-                EmitJsonErrorIfNeeded(settings.Json, configPath, "CheckpointMode is 'memory' — sessions are not persisted and cannot be resumed.", 1);
+                EmitJsonErrorIfNeeded(settings.Json || settings.Bridge, configPath, "CheckpointMode is 'memory' — sessions are not persisted and cannot be resumed.", 1);
                 return 1;
             }
 
@@ -173,7 +190,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             {
                 // ResolveCheckpointAsync already printed the specific reason (not found /
                 // already complete) via StderrConsole.
-                EmitJsonErrorIfNeeded(settings.Json, configPath, $"Could not resolve session to resume: {settings.Resume}", 1);
+                EmitJsonErrorIfNeeded(settings.Json || settings.Bridge, configPath, $"Could not resolve session to resume: {settings.Resume}", 1);
                 return 1;
             }
 
@@ -205,14 +222,14 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             if (!File.Exists(absSpec))
             {
                 StderrConsole.MarkupLine($"[red]✗ Spec file not found:[/] {Markup.Escape(absSpec)}");
-                EmitJsonErrorIfNeeded(settings.Json, configPath, $"Spec file not found: {absSpec}", 1);
+                EmitJsonErrorIfNeeded(settings.Json || settings.Bridge, configPath, $"Spec file not found: {absSpec}", 1);
                 return 1;
             }
             specContent = (await File.ReadAllTextAsync(absSpec, cancellationToken)).Trim();
             if (string.IsNullOrWhiteSpace(specContent))
             {
                 StderrConsole.MarkupLine($"[red]✗ Spec file is empty:[/] {Markup.Escape(absSpec)}");
-                EmitJsonErrorIfNeeded(settings.Json, configPath, $"Spec file is empty: {absSpec}", 1);
+                EmitJsonErrorIfNeeded(settings.Json || settings.Bridge, configPath, $"Spec file is empty: {absSpec}", 1);
                 return 1;
             }
             StderrConsole.MarkupLine($"[dim]Spec → {Markup.Escape(absSpec)}[/]");
@@ -222,19 +239,27 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // Console.ReadLine() either returns immediately (read as denial) or hangs — see
         // NonInteractiveHumanApprovalService's doc comment for why SessionRunner's escalation
         // is unconditional even without --hitl. Match EvalCommand's fallback for the same case.
-        IHumanApprovalService approvalService = Console.IsInputRedirected
-            ? new NonInteractiveHumanApprovalService()
-            : new ConsoleHumanApprovalService();
+        // The bridge owns stdin from here on: approvals and interrupts both arrive on it. Like
+        // `fuseraft serve`, it builds with hitlMode so shell/file/tool actions are gated, but never
+        // pauses after each turn (SessionRunner's hitlMode stays settings.HumanInTheLoop, i.e. off).
+        CancellationTokenSource? bridgeCts = null;
+        ReplStdinPump? bridgePump = settings.Bridge ? new ReplStdinPump(Console.In, () => bridgeCts) : null;
+        bridgePump?.Start();
+        IHumanApprovalService approvalService = bridgePump is not null
+            ? new JsonBridgeHumanApprovalService(bridgePump, promptRoutes: true)
+            : Console.IsInputRedirected
+                ? new NonInteractiveHumanApprovalService()
+                : new ConsoleHumanApprovalService();
 
         OrchestratorBuildResult built;
         try
         {
-            built = await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop, sessionId: pendingSessionId, specContent: specContent, noReplan: settings.NoReplan);
+            built = await OrchestratorBuilder.BuildAsync(configPath, loggerFactory, pluginRegistry, approvalService, settings.HumanInTheLoop || settings.Bridge, sessionId: pendingSessionId, specContent: specContent, noReplan: settings.NoReplan);
         }
         catch (Exception ex)
         {
             StderrConsole.MarkupLine($"[red]✗ Config error:[/] {Markup.Escape(ex.Message)}");
-            EmitJsonErrorIfNeeded(settings.Json, configPath, $"Config error: {ex.Message}", 1);
+            EmitJsonErrorIfNeeded(settings.Json || settings.Bridge, configPath, $"Config error: {ex.Message}", 1);
             return 1;
         }
 
@@ -243,7 +268,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // The config can also request JSON mode (Output.Json: true) for orchestrations that are
         // always invoked by scripts. Apply the same stderr redirect if the CLI flag didn't
         // already trigger it above.
-        var jsonMode = settings.Json || config.Output?.Json == true;
+        var jsonMode = settings.Json || settings.Bridge || config.Output?.Json == true;
         if (jsonMode && !settings.Json)
             RedirectAnsiConsoleToStderr();
 
@@ -586,6 +611,27 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             }
         };
 
+        if (settings.Bridge)
+        {
+            bridgeCts = cts;
+            ReplJsonBridge.Emit(new
+            {
+                type            = "ready",
+                protocolVersion = WireProtocol.Version,
+                sessionId       = checkpoint.SessionId,
+                task,
+                config          = configPath,
+                resumed         = !isNewSession,
+                agents          = config.Agents.Select(a => a.Name).ToArray(),
+            });
+            orchestrator.AgentStarting += agent =>
+                ReplJsonBridge.Emit(new { type = "agent_starting", agent });
+            orchestrator.ToolCalling += (agent, tool, argsSummary) =>
+                ReplJsonBridge.Emit(new { type = "tool_calling", agent, tool, argsSummary });
+            orchestrator.TokenBudgetWarning += (agent, inputTokens, warnThreshold) =>
+                ReplJsonBridge.Emit(new { type = "token_budget_warning", agent, inputTokens, warnThreshold });
+        }
+
         // DevUI — start before the main loop so the browser can connect early.
         DevUIServer? devUI = null;
         if (settings.DevUI)
@@ -608,7 +654,15 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             sessionMetrics: sessionMetrics,
             postmortemWriter: snapshotWriter,
             quiet: jsonMode,
-            adaptiveTrimTracker: adaptiveTrimTracker);
+            adaptiveTrimTracker: adaptiveTrimTracker,
+            onMessage: settings.Bridge
+                ? (msg, elapsed) => ReplJsonBridge.Emit(new
+                    {
+                        type      = "agent_message",
+                        message   = WireAgentMessage.From(msg),
+                        elapsedMs = (long)elapsed.TotalMilliseconds,
+                    })
+                : null);
 
         if (!isNewSession && eventEmitter is not null)
             _ = eventEmitter.EmitAsync(EventTypes.ResumeStarted,
@@ -777,8 +831,14 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     /// can parse both with the same schema; fields that don't apply yet (no session ever started)
     /// are zeroed/nulled rather than omitted.
     /// </summary>
-    private static void EmitJsonErrorSummary(string? configPath, string errorMessage, int exitCode)
+    private void EmitJsonErrorSummary(string? configPath, string errorMessage, int exitCode)
     {
+        if (_bridge)
+        {
+            EmitBridgeResult(null, null, configPath, false, errorMessage, exitCode, 0, TimeSpan.Zero, 0, 0);
+            return;
+        }
+
         var summary = new
         {
             session_id      = (string?)null,
@@ -802,7 +862,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     /// Named separately from the unconditional overload so early-return call sites read as a
     /// single, self-explanatory statement.
     /// </summary>
-    private static void EmitJsonErrorIfNeeded(bool jsonFlag, string? configPath, string errorMessage, int exitCode)
+    private void EmitJsonErrorIfNeeded(bool jsonFlag, string? configPath, string errorMessage, int exitCode)
     {
         if (jsonFlag)
             EmitJsonErrorSummary(configPath, errorMessage, exitCode);
@@ -813,7 +873,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
     /// scripts invoked via <c>--json</c> / <c>Output.Json</c> that need a structured result
     /// instead of parsing the transcript or console output.
     /// </summary>
-    private static void EmitJsonSummary(
+    private void EmitJsonSummary(
         string sessionId,
         string task,
         string configPath,
@@ -822,6 +882,14 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         string? transcriptPath,
         int exitCode)
     {
+        if (_bridge)
+        {
+            EmitBridgeResult(sessionId, task, configPath, result.Succeeded, result.ErrorMessage, exitCode,
+                result.Messages.Count(m => m.Role == MessageRole.Assistant), result.Elapsed,
+                result.Messages.Sum(m => m.Usage?.InputTokens ?? 0), result.Messages.Sum(m => m.Usage?.OutputTokens ?? 0));
+            return;
+        }
+
         var summary = new
         {
             session_id      = sessionId,
@@ -848,6 +916,25 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
 
         Console.Out.WriteLine(JsonSerializer.Serialize(summary, JsonSummaryOptions));
     }
+
+    // The bridge's last event: the --json summary's fields, in the protocol's camelCase.
+    private static void EmitBridgeResult(
+        string? sessionId, string? task, string? configPath, bool succeeded, string? errorMessage,
+        int exitCode, int turns, TimeSpan elapsed, int inputTokens, int outputTokens) =>
+        ReplJsonBridge.Emit(new
+        {
+            type           = "result",
+            sessionId,
+            task,
+            config         = configPath,
+            succeeded,
+            errorMessage,
+            exitCode,
+            turns,
+            elapsedSeconds = Math.Round(elapsed.TotalSeconds, 2),
+            inputTokens,
+            outputTokens,
+        });
 
     // Helpers
 

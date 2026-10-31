@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using fuseraft.Core.Models.Agents;
 using fuseraft.Core.Models.Config;
 using fuseraft.Core.Models.Knowledge;
 using fuseraft.Core.Models.Session;
@@ -19,6 +20,33 @@ public sealed record WireSession(
         e.SessionId, e.Task, e.WorkingDirectory, e.ConfigPath,
         e.StartedAt, e.LastUpdatedAt, e.IsComplete, e.TurnCount);
 }
+
+/// <summary>An orchestration session with its messages, from <c>fuseraft sessions --show &lt;id&gt; --json</c>.</summary>
+public sealed record WireSessionDetail(
+    string SessionId, string Task, string? WorkingDirectory, string ConfigPath,
+    DateTime StartedAt, DateTime LastUpdatedAt, bool IsComplete, IReadOnlyList<WireAgentMessage> Messages)
+{
+    public static WireSessionDetail From(SessionCheckpoint c) => new(
+        c.SessionId, c.Task, c.WorkingDirectory, c.ConfigPath, c.StartedAt, c.LastUpdatedAt, c.IsComplete,
+        [.. c.Messages.Select(WireAgentMessage.From)]);
+}
+
+/// <summary>
+/// One orchestration message — in a session's history and in <c>fuseraft run --bridge</c>'s
+/// <c>agent_message</c> event. <c>Role</c> is <c>assistant</c> for an agent's turn and <c>user</c> for
+/// injected text (a human redirect, or an <c>Orchestrator</c> correction).
+/// </summary>
+public sealed record WireAgentMessage(
+    string AgentName, string Role, string Content, int TurnIndex, DateTime Timestamp,
+    int? InputTokens, int? OutputTokens, bool IsCompactionSummary, IReadOnlyList<WireToolCall> ToolCalls)
+{
+    public static WireAgentMessage From(AgentMessage m) => new(
+        m.AgentName, m.Role, m.Content, m.TurnIndex, m.Timestamp,
+        m.Usage?.InputTokens, m.Usage?.OutputTokens, m.IsCompactionSummary,
+        [.. (m.ToolCalls ?? []).Select(t => new WireToolCall(t.Name, t.ArgsSummary, t.Succeeded))]);
+}
+
+public sealed record WireToolCall(string Name, string? ArgsSummary, bool Succeeded);
 
 /// <summary>A REPL chat from <c>fuseraft sessions --repl --json</c>.</summary>
 public sealed record WireReplSession(
