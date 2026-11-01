@@ -23,7 +23,12 @@ public sealed class ServeQueueJournalTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         foreach (var app in _apps) await app.DisposeAsync();
-        Directory.Delete(_dir, recursive: true);
+        // A save started by a task finishing can still be writing its temporary file.
+        for (var attempt = 0; ; attempt++)
+        {
+            try { Directory.Delete(_dir, recursive: true); return; }
+            catch (IOException) when (attempt < 20) { await Task.Delay(50); }
+        }
     }
 
     [Fact]
@@ -102,7 +107,7 @@ public sealed class ServeQueueJournalTests : IAsyncLifetime
     }
 
     [Fact]
-    public void ATaskThatKeepsInterruptingTheDaemon_IsFailedInsteadOfResumed()
+    public async Task ATaskThatKeepsInterruptingTheDaemon_IsFailedInsteadOfResumed()
     {
         File.WriteAllText(JournalPath, $$"""
             {"tasks":[{"sessionId":"abc12345","task":"crashy","running":true,"interruptions":{{ServeTaskQueue.MaxInterruptions}},"createdAt":"2026-11-01T00:00:00Z"}],"results":[]}
@@ -115,6 +120,7 @@ public sealed class ServeQueueJournalTests : IAsyncLifetime
         Assert.Equal(ServeTaskStatus.Failed, record.Status);
         Assert.Contains("isn't resumed again", record.ErrorMessage);
         Assert.False(daemon.Queue.Reader.TryRead(out _));
+        await Eventually(() => !File.ReadAllText(JournalPath).Contains("abc12345"));
     }
 
     [Fact]
