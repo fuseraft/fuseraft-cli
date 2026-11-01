@@ -567,24 +567,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         if (config.SkillCuration?.Enabled == true && checkpoint.Messages.Count == 0)
             await InjectSkillContextAsync(task, config.SkillCuration, checkpoint, cancellationToken);
 
-        // If the checkpoint carries an explicit resume executor hint (written before a prior
-        // compaction or crash), push it to the orchestrator so the first StreamAsync starts
-        // from the correct agent.  This covers the --resume path as well as in-session restarts.
-        if (checkpoint.ResumeExecutorId is not null)
-            orchestrator.SetResumeExecutorId(checkpoint.ResumeExecutorId);
-
-        // Restore the state machine's current state so --resume picks up at the correct
-        // workflow state (e.g. "Testing") instead of restarting from the initial state.
-        // checkpoint.CurrentStateName is saved at every compaction and at every abort.
-        if (checkpoint.CurrentStateName is not null)
-            orchestrator.SetResumeStateName(checkpoint.CurrentStateName);
-        if (orchestrator is AgentOrchestrator agentOrch && checkpoint.StateMachineState is { } smState)
-            agentOrch.SetResumeSnapshot(smState);
-
-        // Restore Magentic loop-counter state so the orchestrator resumes at the correct
-        // round without replaying the planning phase.
-        if (orchestrator is MagenticOrchestrator magentic && checkpoint.MagenticState is { } magState)
-            magentic.SetResumeState(magState);
+        ApplyResumeState(orchestrator, checkpoint);
 
         // Cancellation
         using var cts = new CancellationTokenSource();
@@ -1018,6 +1001,29 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         }
 
         return globalStore;
+    }
+
+    /// <summary>Points the orchestrator at where <paramref name="checkpoint"/> left off: its agent, workflow state and Magentic round.</summary>
+    internal static void ApplyResumeState(IOrchestrator orchestrator, SessionCheckpoint checkpoint)
+    {
+        // If the checkpoint carries an explicit resume executor hint (written before a prior
+        // compaction or crash), push it to the orchestrator so the first StreamAsync starts
+        // from the correct agent.  This covers the --resume path as well as in-session restarts.
+        if (checkpoint.ResumeExecutorId is not null)
+            orchestrator.SetResumeExecutorId(checkpoint.ResumeExecutorId);
+
+        // Restore the state machine's current state so --resume picks up at the correct
+        // workflow state (e.g. "Testing") instead of restarting from the initial state.
+        // checkpoint.CurrentStateName is saved at every compaction and at every abort.
+        if (checkpoint.CurrentStateName is not null)
+            orchestrator.SetResumeStateName(checkpoint.CurrentStateName);
+        if (orchestrator is AgentOrchestrator agentOrch && checkpoint.StateMachineState is { } smState)
+            agentOrch.SetResumeSnapshot(smState);
+
+        // Restore Magentic loop-counter state so the orchestrator resumes at the correct
+        // round without replaying the planning phase.
+        if (orchestrator is MagenticOrchestrator magentic && checkpoint.MagenticState is { } magState)
+            magentic.SetResumeState(magState);
     }
 
     private static async Task<SessionCheckpoint?> ResolveCheckpointAsync(

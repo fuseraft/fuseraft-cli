@@ -151,6 +151,7 @@ public static class FuseraftPaths
     // `fuseraft serve` — one daemon per project. The pidfile is project_slug-templated like
     // everything else under state/; the socket is NOT (see DaemonSocketPath below).
     public const string LocalDaemonPidFile        = "~/.fuseraft/state/{project_slug}/serve.pid";
+    public const string LocalDaemonQueueFile      = "~/.fuseraft/state/{project_slug}/serve-queue.json";
 
     /// <summary>
     /// Directory for `fuseraft serve`'s Unix domain sockets. Deliberately flat and short —

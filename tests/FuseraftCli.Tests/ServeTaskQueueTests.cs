@@ -46,7 +46,7 @@ public sealed class ServeTaskQueueTests
     private sealed class FakeSink : IServeAttachSink
     {
         public void Emit(object payload) { }
-        public Task<bool> ReadApprovalResponseAsync() => Task.FromResult(true);
+        public Task<bool> RequestApprovalAsync(object request) => Task.FromResult(true);
     }
 
     [Fact]

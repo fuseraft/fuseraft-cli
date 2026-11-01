@@ -1,6 +1,7 @@
 using System.Net;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using A2A;
 using Microsoft.Agents.AI;
@@ -16,8 +17,12 @@ using fuseraft.Core.Models.Agents;
 
 namespace fuseraft.Cli.Serve;
 
-/// <summary>How <c>fuseraft serve --a2a</c> listens; <see cref="Token"/> comes from <see cref="ServeA2AHost.TokenVariable"/>.</summary>
-public sealed record ServeA2AOptions(string Bind, int Port, string? Token, IReadOnlyList<string> AgentNames);
+/// <summary>
+/// How <c>fuseraft serve --a2a</c> listens; <see cref="Token"/> comes from <see cref="ServeA2AHost.TokenVariable"/>,
+/// and with a <see cref="Certificate"/> it serves HTTPS.
+/// </summary>
+public sealed record ServeA2AOptions(
+    string Bind, int Port, string? Token, IReadOnlyList<string> AgentNames, X509Certificate2? Certificate = null);
 
 /// <summary>
 /// Hosts a <c>fuseraft serve</c> daemon's agents over A2A, one endpoint per agent at
@@ -67,7 +72,7 @@ public static class ServeA2AHost
         Func<string, CancellationToken, Task<IAsyncDisposable>> runGate)
     {
         var builder = WebApplication.CreateSlimBuilder([]);
-        builder.WebHost.UseUrls($"http://{UrlHost(options.Bind)}:{options.Port}");
+        ServeTls.Listen(builder.WebHost, UrlHost(options.Bind), options.Port, options.Certificate);
         builder.Logging.ClearProviders();
 
         foreach (var (config, agent) in agents)
@@ -105,7 +110,7 @@ public static class ServeA2AHost
 
     /// <summary>The <c>RemoteAgent.Url</c> a caller on this machine would use for an agent.</summary>
     public static string AgentUrl(ServeA2AOptions options, string agentName, int boundPort) =>
-        $"http://{LocalUrlHost(options.Bind)}:{boundPort}/{Uri.EscapeDataString(agentName)}";
+        $"{(options.Certificate is null ? "http" : "https")}://{LocalUrlHost(options.Bind)}:{boundPort}/{Uri.EscapeDataString(agentName)}";
 
     /// <summary>The host a caller on this machine would put in a URL for a listener bound to <paramref name="bind"/>.</summary>
     internal static string LocalUrlHost(string bind) =>

@@ -143,7 +143,12 @@ public sealed class WebSocketLineStream(
         if (disposing)
         {
             _sendLock.Dispose();
-            if (ownsSocket) socket.Dispose();
+            if (ownsSocket)
+            {
+                // Disposing alone leaves a pending receive waiting; aborting ends it.
+                socket.Abort();
+                socket.Dispose();
+            }
         }
         base.Dispose(disposing);
     }

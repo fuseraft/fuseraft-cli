@@ -4,19 +4,16 @@ using fuseraft.Core.Interfaces;
 namespace fuseraft.Cli.Serve;
 
 /// <summary>
-/// Receiving end of messages emitted by <see cref="ServeHumanApprovalService"/> to a human
-/// attached over the socket (<c>fuseraft attach</c>). Implemented by the per-connection handler
-/// in <see cref="ServeSocketListener"/>, which wraps the socket's <c>NetworkStream</c> in the
-/// same JSONL protocol <c>ReplJsonBridge</c>/<c>ReplStdinPump</c> use for the VS Code webview.
-/// One generic <see cref="Emit"/> method is used for both approval requests (targeted at one
-/// connection — see <see cref="ServeHumanApprovalService.SetCurrentTaskOrigin"/>) and live
-/// progress events (broadcast to every connection) — the wire shape is identical either way,
-/// just a JSON line with a <c>type</c> discriminator; only the routing differs.
+/// An attach client as <see cref="ServeHumanApprovalService"/> sees it (a <see cref="ServeAttachClient"/>): live
+/// progress goes through <see cref="Emit"/> to every client, and an approval request only to the client that
+/// dispatched the running task.
 /// </summary>
 public interface IServeAttachSink
 {
     void Emit(object payload);
-    Task<bool> ReadApprovalResponseAsync();
+
+    /// <summary>Sends <paramref name="request"/> and waits for the answer; throws when the client can't answer.</summary>
+    Task<bool> RequestApprovalAsync(object request);
 }
 
 /// <summary>
@@ -32,8 +29,8 @@ public interface IServeAttachSink
 /// <b>Approval requests</b> (the three mutating-action gates) go only to the <em>originator</em>
 /// of the task currently running (<see cref="SetCurrentTaskOrigin"/>, set by <c>ServeHost</c>
 /// right before invoking the orchestrator for that task) — never to a bystander who merely
-/// happens to be attached. A task with no attach-connection origin (dispatched over MCP, or
-/// whose dispatching connection has since disconnected) falls through to the unattended policy.
+/// happens to be attached. A task with no attach-client origin (dispatched over MCP, or whose
+/// client disconnected and didn't reconnect in time) falls through to the unattended policy.
 /// </description></item>
 /// </list>
 ///
@@ -61,7 +58,7 @@ public sealed class ServeHumanApprovalService(bool allowWhenUnattended) : IHuman
     private readonly List<IServeAttachSink> _connections = [];
     private IServeAttachSink? _currentTaskOrigin;
 
-    // Serializes GateAsync's emit+read round-trip. IServeAttachSink's wire protocol has no
+    // Serializes GateAsync's request+answer round-trip. IServeAttachSink's wire protocol has no
     // per-request correlation ID — a response is just "the next line on the channel" — which was
     // fine when only one mutating-action gate could ever be awaiting a response at a time. That
     // stopped being true once orchestrators that run agent branches concurrently within a single
@@ -82,13 +79,16 @@ public sealed class ServeHumanApprovalService(bool allowWhenUnattended) : IHuman
     /// </summary>
     public EventEmitter? EventEmitter { get; set; }
 
-    /// <summary>Called by <see cref="ServeSocketListener"/> when a human connects.</summary>
+    /// <summary>Cancelled when the daemon starts shutting down; set once by <see cref="ServeHost"/>.</summary>
+    public CancellationToken Stopping { get; set; }
+
+    /// <summary>Called by <see cref="ServeAttachClients"/> when a client first connects.</summary>
     public void RegisterConnection(IServeAttachSink sink)
     {
         lock (_lock) _connections.Add(sink);
     }
 
-    /// <summary>Called by <see cref="ServeSocketListener"/> when a connection closes.</summary>
+    /// <summary>Called by <see cref="ServeAttachClients"/> once a client is gone for good.</summary>
     public void UnregisterConnection(IServeAttachSink sink)
     {
         lock (_lock) _connections.Remove(sink);
@@ -140,22 +140,27 @@ public sealed class ServeHumanApprovalService(bool allowWhenUnattended) : IHuman
 
     private async Task<bool> GateAsync(object requestPayload, string kind)
     {
+        // A daemon that's stopping allows nothing, whatever the policy, and doesn't wait for an answer that would
+        // hold up the shutdown; the interrupted task asks again when it resumes on the next start.
+        if (Stopping.IsCancellationRequested) return false;
         var origin = _currentTaskOrigin;
         if (origin is not null)
         {
-            await _gateLock.WaitAsync();
+            try { await _gateLock.WaitAsync(Stopping); }
+            catch (OperationCanceledException) { return false; }
             try
             {
-                origin.Emit(requestPayload);
-                return await origin.ReadApprovalResponseAsync();
+                return await origin.RequestApprovalAsync(requestPayload).WaitAsync(Stopping);
+            }
+            catch (OperationCanceledException) when (Stopping.IsCancellationRequested)
+            {
+                return false;
             }
             catch (Exception)
             {
-                // The originating connection died mid-approval (e.g. the client's terminal was
-                // killed) and can never answer — fall through to the unattended policy exactly as
-                // if there had been no origin at all, rather than letting a broken-pipe exception
-                // from Emit propagate up and fail the whole task.
-                UnregisterConnection(origin);
+                // The originating client went away and didn't come back in time (see
+                // ServeAttachClient) — fall through to the unattended policy exactly as if there
+                // had been no origin at all, rather than failing the whole task.
             }
             finally
             {

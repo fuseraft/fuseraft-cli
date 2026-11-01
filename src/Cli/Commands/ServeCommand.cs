@@ -28,6 +28,23 @@ public sealed class ServeSettings : CommandSettings
     [DefaultValue("localhost")]
     public string Bind { get; set; } = "localhost";
 
+    [CommandOption("--tokens-file")]
+    [Description("A file of named bearer tokens, one 'name token' per line ('#' starts a comment), so each client gets its own and one can be revoked without the others. Re-read when it changes; a revoked token's connections are closed. Must be readable only by you (chmod 600). Works alongside FUSERAFT_SERVE_TOKEN.")]
+    public string? TokensFile { get; set; }
+
+    [CommandOption("--tls-cert")]
+    [Description("Serve the MCP, attach WebSocket and A2A endpoints over TLS (https://, wss://) with this certificate: a PEM file (key in --tls-key, or in the same file) or a .pfx/.p12 (password from FUSERAFT_SERVE_TLS_PASSWORD). The daemon prints its SHA-256 fingerprint for clients that pin a self-signed certificate.")]
+    public string? TlsCert { get; set; }
+
+    [CommandOption("--tls-key")]
+    [Description("The PEM private key for --tls-cert, when it isn't in the certificate file.")]
+    public string? TlsKey { get; set; }
+
+    [CommandOption("--reconnect-grace")]
+    [Description("Seconds a task's approval waits for its client to reconnect after the connection drops, before --unattended-policy decides. Applies to WebSocket clients that send a Fuseraft-Client-Id header (fuseraft-web does). Default 60; 0 decides at once.")]
+    [DefaultValue(60)]
+    public int ReconnectGrace { get; set; } = 60;
+
     [CommandOption("--socket")]
     [Description("Path to the Unix domain socket `fuseraft attach` connects to. Defaults to ~/.fuseraft/run/<project-hash>.sock.")]
     public string? Socket { get; set; }
@@ -77,6 +94,34 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
             return 1;
         }
 
+        if (settings.TlsKey is not null && settings.TlsCert is null)
+        {
+            AnsiConsole.MarkupLine("[red]✗[/] --tls-key needs --tls-cert.");
+            return 1;
+        }
+        if (settings.ReconnectGrace < 0)
+        {
+            AnsiConsole.MarkupLine($"[red]✗[/] --reconnect-grace must be 0 or more seconds, got {settings.ReconnectGrace}.");
+            return 1;
+        }
+        // Loaded before --work-dir changes directory, so relative paths mean what they meant on the command line.
+        var tokensFile = settings.TokensFile is null ? null : Path.GetFullPath(settings.TokensFile);
+        System.Security.Cryptography.X509Certificates.X509Certificate2? certificate = null;
+        if (settings.TlsCert is not null)
+        {
+            try
+            {
+                certificate = ServeTls.Load(Path.GetFullPath(settings.TlsCert),
+                    settings.TlsKey is null ? null : Path.GetFullPath(settings.TlsKey),
+                    Environment.GetEnvironmentVariable(ServeTls.PasswordVariable));
+            }
+            catch (InvalidOperationException ex)
+            {
+                AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(ex.Message)}");
+                return 1;
+            }
+        }
+
         // Mirrors RunCommand's ResolveWorkDir: an explicit --work-dir wins, otherwise fall back
         // to the config's own declared sandbox path rather than silently keeping the launch-time
         // CWD, so a config's relative paths (checkpoint, validation, ChangeTracker) resolve the
@@ -122,7 +167,8 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
         var projectSlug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
         var httpPort    = settings.HttpPort ?? FuseraftPaths.DefaultDaemonHttpPort(projectSlug);
 
-        var http = new ServeHttpOptions(settings.Bind, httpPort, Environment.GetEnvironmentVariable(ServeHttpHost.TokenVariable));
+        var http = new ServeHttpOptions(settings.Bind, httpPort, Environment.GetEnvironmentVariable(ServeHttpHost.TokenVariable), certificate,
+            tokensFile);
         if (ServeHttpHost.Validate(http) is { } httpProblem)
         {
             AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(httpProblem)}");
@@ -135,7 +181,7 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
             a2a = new ServeA2AOptions(
                 settings.A2ABind, settings.A2APort ?? httpPort + 1,
                 Environment.GetEnvironmentVariable(ServeA2AHost.TokenVariable),
-                settings.A2AAgent ?? []);
+                settings.A2AAgent ?? [], certificate);
             // Checked before the team is built, which can take a while and start MCP servers.
             string? problem;
             try
@@ -155,7 +201,7 @@ public sealed class ServeCommand(ILoggerFactory loggerFactory, PluginRegistry pl
         var host = new ServeHost(
             loggerFactory, pluginRegistry, activeStore,
             configPath, http, settings.Socket, unattendedAllow,
-            settings.AutoObjective ?? [], a2a);
+            settings.AutoObjective ?? [], a2a, TimeSpan.FromSeconds(settings.ReconnectGrace));
 
         try
         {

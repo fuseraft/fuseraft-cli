@@ -202,7 +202,7 @@ A live session is a stream of JSONL: one JSON object per line, each with a `type
 | **stdio** | Spawn `fuseraft repl --vscode --no-banner` with piped stdin/stdout. One process is one chat. | `ready` |
 | **run bridge** | Spawn `fuseraft run --bridge -c <config> "<task>"` (or `--resume <id>`) with piped stdin/stdout. One process is one orchestration session, and it exits when the session ends. | `ready` |
 | **serve socket** | Connect to the Unix socket of a running `fuseraft serve` (the path `fuseraft attach` uses). Many clients can attach to one daemon. | `hello` |
-| **serve WebSocket** | Open a WebSocket to `ws://<host>:<port>/attach` on a running `fuseraft serve` (the MCP port). Same events and inputs as the serve socket; each text message is one line. Send `Authorization: Bearer <token>` when the daemon has `FUSERAFT_SERVE_TOKEN` set. A handshake with an `Origin` header is refused. | `hello` |
+| **serve WebSocket** | Open a WebSocket to `ws://<host>:<port>/attach` (`wss://` when the daemon has `--tls-cert`) on a running `fuseraft serve` (the MCP port). Same events and inputs as the serve socket; each text message is one line. Send `Authorization: Bearer <token>` when the daemon has `FUSERAFT_SERVE_TOKEN` set. A handshake with an `Origin` header is refused. Send `Fuseraft-Client-Id: <id>` (1–64 of `A-Z a-z 0-9 - _`, the same every time) to keep your tasks across reconnects; see `hello`. | `hello` |
 
 Ignore any stdout line that doesn't parse as JSON. Slash-command output can occasionally leak through as plain text.
 
@@ -212,7 +212,7 @@ Ignore any stdout line that doesn't parse as JSON. Slash-command output can occa
 |-------|--------|---|
 | `ready` | `protocolVersion`, `sessionId`, `model`, `title`, `autoTitle`, `midTurnCommands[]` | `repl --vscode`. The chat is ready for input. `midTurnCommands` lists the slash commands that may be sent while a reply is still streaming. |
 | `ready` | `protocolVersion`, `sessionId`, `task`, `config`, `resumed`, `agents[]` | `run --bridge`. The session is about to start. |
-| `hello` | `protocolVersion` | Serve socket. Sent as soon as you connect. |
+| `hello` | `protocolVersion`, `clientId`, `readOnly`, `inFlight`, `pendingResults[]` | Serve socket and WebSocket. Sent as soon as you connect. `clientId` echoes your `Fuseraft-Client-Id` (null without one). `readOnly` is true when your bearer token is a `read` token: the daemon answers any `user_input` with an `error` event instead of queuing it. `inFlight` is your task that's still queued or running (`{sessionId, task, status, position}`), or null; its pending approval, if any, is asked again right after. `pendingResults` lists the session IDs of your tasks that finished while you were away; their `result` events follow the `hello`. |
 
 ### Input (client → fuseraft)
 
@@ -296,8 +296,9 @@ On stdio, `question` is only sent when the client spawned the CLI with `FUSERAFT
 | `tool_calling` | `agent`, `tool`, `argsSummary` | |
 | `token_budget_warning` | `agent`, `inputTokens`, `warnThreshold` | |
 | `a2a_call` | `agent`, `sessionId` | An A2A caller started a call to a hosted agent (`--a2a`). |
-| `result` | `sessionId`, `succeeded`, `errorMessage`, `lastAgent`, `lastMessage` | Your task finished. |
+| `task_resumed` | `sessionId`, `task` | The daemon restarted while this task ran, and is resuming it from its saved session. Its approvals, and its `result`, still go to the client that sent it. |
+| `result` | `sessionId`, `task`, `succeeded`, `errorMessage`, `lastAgent`, `lastMessage` | Your task finished. |
 
-Progress events are broadcast to every attached client. Approval prompts go only to the client that dispatched the task.
+Progress events are broadcast to every attached client. Approval prompts go only to the client that dispatched the task. With a client id, that client is every connection with the id: when a connection drops mid-approval, the daemon waits `--reconnect-grace` for the next one and asks it instead. A newer connection with the same id closes the older one. Client ids are scoped to the bearer token the connection authenticated with (see `--tokens-file`), so the same id under another token is another client. A daemon restart keeps clients' unfinished tasks and uncollected results, so a client reconnecting afterwards gets them in its `hello` as usual.
 
 The daemon also exposes `dispatch_task`, `get_status` and `get_result` as MCP tools over HTTP, and can host an A2A endpoint. See [Serve](serve.md).
