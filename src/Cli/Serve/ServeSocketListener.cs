@@ -1,5 +1,4 @@
 using System.Net.Sockets;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using fuseraft.Cli.Commands.Repl;
 using fuseraft.Cli.Protocol;
@@ -13,7 +12,8 @@ namespace fuseraft.Cli.Serve;
 /// process-wide static — see its doc comment — and this needs one per connection instead).
 ///
 /// <para>
-/// Any number of clients may attach concurrently. Every attached connection sees the daemon's
+/// Any number of clients may attach concurrently. A client is one connection, or, over the
+/// WebSocket, every connection with the same client id (<see cref="ServeAttachClient"/>). Every attached connection sees the daemon's
 /// live progress broadcast (<see cref="ServeHumanApprovalService.BroadcastEvent"/>) regardless of
 /// who dispatched the running task, but approval prompts are routed only to the task's own
 /// originator (<see cref="ServeHumanApprovalService.SetCurrentTaskOrigin"/>) — a bystander
@@ -24,7 +24,7 @@ namespace fuseraft.Cli.Serve;
 /// Per connection, task dispatch and approval-response reads share <see cref="ReplStdinPump"/>'s
 /// single line channel exactly like the REPL does — so, like the REPL, the two must never be
 /// awaited concurrently. The connection loop enforces this by blocking on
-/// <see cref="ServeTaskRecord.Done"/> after dispatching a task (during which only an approval-gate
+/// <see cref="ServeAttachClient.WhenIdle"/> after dispatching a task (during which only an approval-gate
 /// read is ever in flight on this pump) before reading the next input line — it does not read
 /// the next task while the current one is still running.
 /// </para>
@@ -33,14 +33,17 @@ public sealed class ServeSocketListener(
     string socketPath,
     ServeTaskQueue queue,
     ServeHumanApprovalService approvalService,
-    ILogger<ServeSocketListener> logger)
+    ILogger<ServeSocketListener> logger,
+    TimeSpan? reconnectGrace = null)
 {
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
+    /// <summary>How long a task's approval waits for its client to reconnect, by default.</summary>
+    public static readonly TimeSpan DefaultReconnectGrace = TimeSpan.FromSeconds(60);
 
+    private readonly ServeAttachClients _clients = new(approvalService, reconnectGrace ?? DefaultReconnectGrace);
     private Socket? _listenSocket;
+
+    /// <summary>The attach clients, by id.</summary>
+    public ServeAttachClients Clients => _clients;
 
     public void Start(CancellationToken cancellationToken)
     {
@@ -87,11 +90,14 @@ public sealed class ServeSocketListener(
     private async Task HandleConnectionAsync(Socket socket, CancellationToken ct)
     {
         await using var stream = new NetworkStream(socket, ownsSocket: true);
-        await HandleStreamAsync(stream, ct);
+        await HandleStreamAsync(stream, AttachIdentity.Anonymous, ct);
     }
 
-    /// <summary>Runs one attach connection over any line stream; the WebSocket endpoint uses this too.</summary>
-    internal async Task HandleStreamAsync(Stream stream, CancellationToken ct)
+    /// <summary>
+    /// Runs one attach connection over any line stream; the WebSocket endpoint uses this too, with the
+    /// connection's client id when it sent one.
+    /// </summary>
+    internal async Task HandleStreamAsync(Stream stream, AttachIdentity identity, CancellationToken ct)
     {
         try
         {
@@ -100,60 +106,44 @@ public sealed class ServeSocketListener(
 
             var pump = new ReplStdinPump(reader, getActiveCts: () => null);
             pump.Start();
-            var sink = new SocketAttachSink(writer, pump);
-            sink.Emit(new { type = "hello", protocolVersion = WireProtocol.Version });
-
-            approvalService.RegisterConnection(sink);
+            var connection = new AttachConnection(writer, pump, stream.Dispose);
+            var client = _clients.Connect(identity, connection, queue.GetQueuePosition);
             try
             {
                 while (!ct.IsCancellationRequested)
                 {
+                    // Only approval answers are read while this client's task runs (see the class comment);
+                    // its result is sent by the client, to whichever connection it has by then. A connection
+                    // that closes meanwhile is let go at once, so the client's reconnect grace can start.
+                    if (await Task.WhenAny(client.WhenIdle(), pump.Closed).ConfigureAwait(false) == pump.Closed)
+                        break;
                     var text = await pump.ReadInputAsync().ConfigureAwait(false);
                     if (text is null) break; // client disconnected
                     if (string.IsNullOrWhiteSpace(text)) continue;
-
-                    var sessionId = queue.Enqueue(text, originSink: sink);
-                    var record = queue.TryGet(sessionId)!;
-                    sink.Emit(new { type = "queued", sessionId, position = queue.GetQueuePosition(sessionId) });
-
-                    await record.Done.Task.ConfigureAwait(false);
-
-                    sink.Emit(new
+                    if (identity.ReadOnly)
                     {
-                        type = "result",
-                        sessionId,
-                        succeeded = record.Succeeded,
-                        errorMessage = record.ErrorMessage,
-                        lastAgent = record.LastAgent,
-                        lastMessage = record.LastMessageExcerpt,
-                    });
+                        connection.Emit(new { type = "error", text = "This token is read-only: it can watch the daemon, but not send it tasks." });
+                        continue;
+                    }
+
+                    client.Dispatch(connection,
+                        () => queue.TryGet(queue.Enqueue(text, originSink: client))!,
+                        queue.GetQueuePosition);
                 }
             }
             finally
             {
-                approvalService.UnregisterConnection(sink);
+                _clients.Disconnect(client, connection);
             }
+        }
+        catch (IOException ex)
+        {
+            // The client went away mid-write: routine for a network client, so not worth a stack trace.
+            logger.LogDebug(ex, "Attach connection dropped");
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Attach connection ended abnormally");
         }
-    }
-
-    private sealed class SocketAttachSink(TextWriter writer, ReplStdinPump pump) : IServeAttachSink
-    {
-        // Reachable concurrently from two independent paths once broadcast is in play: the
-        // connection's own approval-gate emit (from GateAsync, on this task's async flow) and
-        // BroadcastEvent's forwarding of another task's live progress (from ServeHost's event
-        // handlers). StreamWriter.WriteLine isn't safe under concurrent callers, so serialize them.
-        private readonly Lock _writeLock = new();
-
-        public void Emit(object payload)
-        {
-            var line = JsonSerializer.Serialize(payload, JsonOpts);
-            lock (_writeLock) writer.WriteLine(line);
-        }
-
-        public Task<bool> ReadApprovalResponseAsync() => pump.ReadApprovalResponseAsync();
     }
 }

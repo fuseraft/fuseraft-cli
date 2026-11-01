@@ -2324,6 +2324,10 @@ fuseraft serve [options]
 | `--http-port <port>` | derived from the project path (like `--socket`) | Port for the MCP (streamable-HTTP) endpoint at `/mcp`. Fixed rather than OS-assigned because another agent needs a stable address to configure ahead of time, unlike a human who can read a printed URL — but per-project rather than one hardcoded number for every project, so two daemons for two different projects don't collide on the same default port. |
 | `--bind <address>` | `localhost` | Address the HTTP listener (MCP at `/mcp`, attach WebSocket at `/attach`) listens on: `localhost`, an interface IP, or `0.0.0.0` for every interface. Anything but loopback requires the `FUSERAFT_SERVE_TOKEN` environment variable. When it's set, every request to `/mcp` and `/attach` must send `Authorization: Bearer <token>`. |
 | `--socket <path>` | `~/.fuseraft/run/<project-hash>.sock` | Unix domain socket `fuseraft attach` connects to. Lives in a short, flat directory (not under the per-project state tree) because AF_UNIX socket paths are capped at 108 bytes on Linux. |
+| `--tls-cert <file>` | off | Serve `/mcp`, `/attach` and the A2A endpoints over TLS (`https://`, `wss://`). A PEM certificate, with its key in `--tls-key` or the same file, or a `.pfx`/`.p12` whose password is in `FUSERAFT_SERVE_TLS_PASSWORD`. The daemon prints the certificate's SHA-256 fingerprint, for clients that pin a self-signed certificate. |
+| `--tls-key <file>` | — | The PEM private key for `--tls-cert`. |
+| `--tokens-file <file>` | — | Named bearer tokens, one `name token [full\|read]` per line (`#` starts a comment; tokens are at least 16 characters), so each client gets its own. A `read` token can watch over `/attach` and call `get_status`/`get_result`, but can't dispatch tasks. Re-read when it changes: a removed or rescoped token stops working as it was and its connections are closed. Client ids are kept per token. Must be readable only by you (`chmod 600`). Works alongside `FUSERAFT_SERVE_TOKEN`, which is the token named `default`. |
+| `--reconnect-grace <seconds>` | `60` | How long a running task's approval waits for its client to reconnect after the connection drops, before `--unattended-policy` decides. Applies to WebSocket clients that send a `Fuseraft-Client-Id` header (fuseraft-web does); such a client also gets the results that finished while it was away. `0` decides at once. |
 | `--unattended-policy <deny\|allow>` | `deny` | What happens to a mutating tool call (shell/write/git-push/etc.) when nobody is attached. `deny` — a task dispatched by another agent with no human watching is denied by default. `allow` — auto-approve, for trusted unattended pipelines. |
 | `--auto-objective <id>` | — | Objective ID (e.g. `OBJ-0001`, from `fuseraft objective list`) whose `RemainingTasks` the daemon pulls from and runs on its own whenever idle, instead of only running tasks it's explicitly dispatched. Repeatable. |
 | `--a2a` | off | Also host the config's agents over A2A, one endpoint per agent at `/{AgentName}`, so another fuseraft team can add them as `RemoteAgent` members. A call runs only that agent, under `--unattended-policy`. See [Serve — Hosting agents over A2A](serve.md#hosting-agents-over-a2a). |
@@ -2359,6 +2363,12 @@ fuseraft serve --config .fuseraft/config/devops-team.yaml --unattended-policy al
 # Accept attach and MCP clients from other machines
 FUSERAFT_SERVE_TOKEN=... fuseraft serve --bind 0.0.0.0
 
+# The same, over TLS
+FUSERAFT_SERVE_TOKEN=... fuseraft serve --bind 0.0.0.0 --tls-cert serve.crt --tls-key serve.key
+
+# A token per client, revocable by editing the file
+fuseraft serve --bind 0.0.0.0 --tls-cert serve.crt --tls-key serve.key --tokens-file /etc/fuseraft/tokens
+
 # Host the Tester agent for teams on other machines
 FUSERAFT_A2A_TOKEN=... fuseraft serve --a2a --a2a-bind 0.0.0.0 --a2a-agent Tester
 ```
@@ -2371,6 +2381,8 @@ dispatch_task(task: "Add input validation to the signup form")
 get_result(sessionId: "58440fde")
 # → { "status": "completed", "succeeded": true, "messages": [...] }
 ```
+
+Unfinished tasks survive a restart: the queue is saved under `~/.fuseraft/state/<project>/serve-queue.json`, and on the next start the task that was running resumes from its saved session, followed by the queued ones. SIGTERM shuts down like Ctrl+C. See [Serve — restarting the daemon](serve.md#from-another-machine-over-websocket).
 
 **Not yet supported:** multiple concurrent working directories behind one daemon, hosting the whole team as one A2A agent, A2A streaming, and a Windows named-pipe equivalent for `--socket` (Unix domain sockets only).
 
@@ -2390,6 +2402,10 @@ fuseraft attach [options]
 |------|---------|-------------|
 | `--socket <path>` | `~/.fuseraft/run/<project-hash>.sock` | Path to the daemon's attach socket. Must match the daemon's actual socket (same project directory, or an explicit `--socket` passed to both). |
 | `--url <ws-url>` | — | Attach over WebSocket instead, e.g. `ws://build-box.lan:24601/attach` (the daemon prints its URL). Sends `FUSERAFT_SERVE_TOKEN` as a bearer token when it's set. Can't be combined with `--socket`. |
+| `--cert-sha256 <fingerprint>` | — | With a `wss://` `--url`: trust the daemon's certificate only if its SHA-256 fingerprint is this, the one `fuseraft serve --tls-cert` prints (colons optional). For a self-signed certificate; any other certificate is refused. |
+| `--client-id <id>` | — | With `--url`: attach as this client (1–64 of `A-Z a-z 0-9 - _`). Attach again with the same id within the daemon's `--reconnect-grace` and you pick up your running task and its approval, and see the results that finished while you were away. |
+
+With a read-only token (`read` in the daemon's `--tokens-file`), `fuseraft attach` only watches: it shows the daemon's progress without a task prompt.
 
 Any number of clients may attach concurrently. Every attached connection sees the daemon's live progress (which agent is working, which tool it's calling) regardless of who dispatched the running task — it's a shared view, like several people watching one dashboard. Approval prompts for mutating tool calls, however, go only to the connection that actually dispatched the task in question; a connection that's just watching is never asked to approve someone else's (or an agent's) action.
 

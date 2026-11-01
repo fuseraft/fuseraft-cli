@@ -42,7 +42,7 @@ public sealed class ServeHttpHostTests
     [InlineData("0.0.0.0", "ws://localhost:5000/attach")]
     [InlineData("192.168.1.20", "ws://192.168.1.20:5000/attach")]
     public void LocalUrl_NamesAnAddressThisMachineCanReach(string bind, string expected) =>
-        Assert.Equal(expected, ServeHttpHost.LocalUrl(new ServeHttpOptions(bind, 5000, null), 5000, "ws", ServeHttpHost.AttachPath));
+        Assert.Equal(expected, ServeHttpHost.LocalUrl(new ServeHttpOptions(bind, 5000, null), 5000, webSocket: true, ServeHttpHost.AttachPath));
 
     [Fact]
     public async Task Attach_OverWebSocket_SpeaksTheAttachProtocol()

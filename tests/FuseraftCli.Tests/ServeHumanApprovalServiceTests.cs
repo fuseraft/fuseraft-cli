@@ -16,7 +16,12 @@ public sealed class ServeHumanApprovalServiceTests
         public bool ResponseToReturn = true;
 
         public void Emit(object payload) => Emitted.Add(payload);
-        public Task<bool> ReadApprovalResponseAsync() => Task.FromResult(ResponseToReturn);
+
+        public Task<bool> RequestApprovalAsync(object request)
+        {
+            Emitted.Add(request);
+            return Task.FromResult(ResponseToReturn);
+        }
     }
 
     [Fact]
@@ -184,20 +189,57 @@ public sealed class ServeHumanApprovalServiceTests
         // answers, and both scripted answers must be consumed exactly once each.
         Assert.Equal(new[] { false, true }, results.OrderBy(r => r));
         Assert.Equal(2, origin.Emitted.Count);
+        Assert.False(origin.Overlapped);
     }
 
-    /// <summary>A sink whose <see cref="ReadApprovalResponseAsync"/> hands out scripted answers one at a time, in call order.</summary>
+    [Fact]
+    public async Task AStoppingDaemon_DeniesThePendingApproval_EvenUnderTheAllowPolicy()
+    {
+        using var stopping = new CancellationTokenSource();
+        var service = new ServeHumanApprovalService(allowWhenUnattended: true) { Stopping = stopping.Token };
+        var origin = new SilentSink();
+        service.SetCurrentTaskOrigin(origin);
+        var gate = service.PromptShellCommandAsync("make deploy");
+        await origin.Asked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        stopping.Cancel();
+
+        Assert.False(await gate.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.False(await service.PromptShellCommandAsync("make deploy again"));
+    }
+
+    /// <summary>A sink whose client never answers.</summary>
+    private sealed class SilentSink : IServeAttachSink
+    {
+        public readonly TaskCompletionSource Asked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Emit(object payload) { }
+
+        public Task<bool> RequestApprovalAsync(object request)
+        {
+            Asked.TrySetResult();
+            return new TaskCompletionSource<bool>().Task;
+        }
+    }
+
+    /// <summary>A sink that hands out scripted answers in call order, and notes whether two requests were ever in flight at once.</summary>
     private sealed class SequencedSink(IReadOnlyList<bool> responses) : IServeAttachSink
     {
         private int _next;
+        private int _active;
         public readonly List<object> Emitted = [];
+        public bool Overlapped;
 
         public void Emit(object payload) => Emitted.Add(payload);
 
-        public Task<bool> ReadApprovalResponseAsync()
+        public async Task<bool> RequestApprovalAsync(object request)
         {
+            if (Interlocked.Increment(ref _active) > 1) Overlapped = true;
+            lock (Emitted) Emitted.Add(request);
+            await Task.Delay(20);
             var index = Interlocked.Increment(ref _next) - 1;
-            return Task.FromResult(responses[index]);
+            Interlocked.Decrement(ref _active);
+            return responses[index];
         }
     }
 }

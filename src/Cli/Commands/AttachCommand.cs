@@ -20,12 +20,33 @@ public sealed class AttachSettings : CommandSettings
     [Description("Attach over WebSocket instead, e.g. ws://host:port/attach (printed by `fuseraft serve`). Sends FUSERAFT_SERVE_TOKEN as a bearer token when it's set.")]
     public string? Url { get; set; }
 
+    [CommandOption("--cert-sha256")]
+    [Description("With a wss:// --url: trust the daemon's certificate only if its SHA-256 fingerprint is this (`fuseraft serve --tls-cert` prints it). For a self-signed certificate; any other certificate is refused.")]
+    public string? CertSha256 { get; set; }
+
+    [CommandOption("--client-id")]
+    [Description("With --url: attach as this client (1-64 letters, digits, '-' or '_'). Attaching again with the same id within the daemon's --reconnect-grace picks up your running task and its approvals, and shows the results that finished while you were away.")]
+    public string? ClientId { get; set; }
+
     public override ValidationResult Validate()
     {
         if (Url is not null && Socket is not null)
             return ValidationResult.Error("Use either --socket or --url, not both.");
         if (Url is not null && !(Uri.TryCreate(Url, UriKind.Absolute, out var uri) && uri.Scheme is "ws" or "wss"))
             return ValidationResult.Error($"--url must be a ws:// or wss:// URL, got: {Url}");
+        if (CertSha256 is not null)
+        {
+            if (Url is null || !Url.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+                return ValidationResult.Error("--cert-sha256 needs a wss:// --url.");
+            if (ServeTls.NormalizeFingerprint(CertSha256) is null)
+                return ValidationResult.Error($"--cert-sha256 must be a SHA-256 fingerprint (64 hex digits), got: {CertSha256}");
+        }
+        if (ClientId is not null)
+        {
+            if (Url is null) return ValidationResult.Error("--client-id needs --url; the Unix socket has no client ids.");
+            if (!ServeAttachClients.IsValidId(ClientId))
+                return ValidationResult.Error($"--client-id must be 1-64 letters, digits, '-' or '_', got: {ClientId}");
+        }
         return ValidationResult.Success();
     }
 }
@@ -54,7 +75,7 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
     public override async Task<int> ExecuteAsync(CommandContext context, AttachSettings settings, CancellationToken cancellationToken)
     {
         var (stream, target) = settings.Url is not null
-            ? await ConnectWebSocketAsync(settings.Url, cancellationToken)
+            ? await ConnectWebSocketAsync(settings.Url, settings.CertSha256, settings.ClientId, cancellationToken)
             : await ConnectSocketAsync(settings.Socket, cancellationToken);
         if (stream is null) return 1;
 
@@ -71,7 +92,10 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
         // At most one task is ever pending from this connection at a time (the foreground loop
         // below never dispatches a second one before the first resolves), so a single shared slot
         // — not a per-session map — is enough to hand the result back from the reader loop.
-        TaskCompletionSource<bool>? pendingResult = null;
+        PendingTask? pendingResult = null;
+        // The hello says whether this client id already has a task running; the prompt waits for it.
+        var hello = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readOnly = false;
 
         var readerLoop = Task.Run(async () =>
         {
@@ -84,15 +108,35 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
                 if (line is null)
                 {
                     AnsiConsole.MarkupLine("\n[dim]Daemon closed the connection.[/]");
-                    pendingResult?.TrySetResult(true);
+                    pendingResult?.Done.TrySetResult();
+                    hello.TrySetResult();
                     return;
                 }
 
+                if (!hello.Task.IsCompleted)
+                {
+                    readOnly = IsReadOnly(line);
+                    if (PickedUp(line) is { } sessionId)
+                    {
+                        AnsiConsole.MarkupLine($"[dim]Picked up your task → session {Markup.Escape(sessionId)}, still running.[/]");
+                        pendingResult = new PendingTask { SessionId = sessionId };
+                    }
+                    hello.TrySetResult();
+                }
                 await RenderServerLineAsync(line, writer, consolePump, pendingResult);
             }
         }, cancellationToken);
 
-        while (true)
+        await Task.WhenAny(hello.Task, Task.Delay(TimeSpan.FromSeconds(10), cancellationToken));
+        if (pendingResult is { } pickedUp) await Task.WhenAny(pickedUp.Done.Task, readerLoop);
+        if (readOnly)
+        {
+            AnsiConsole.MarkupLine("[dim]This token is read-only: watching the daemon's progress. Ctrl+C to detach.[/]");
+            await readerLoop;
+            return 0;
+        }
+
+        while (!readerLoop.IsCompleted)
         {
             AnsiConsole.Markup("[bold]>[/] ");
             // Stop waiting at the prompt when the daemon goes away, rather than on the next Enter.
@@ -102,11 +146,11 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
             if (task is null) break; // stdin closed
             if (string.IsNullOrWhiteSpace(task)) continue;
 
-            pendingResult = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            pendingResult = new PendingTask();
             try { await writer.WriteLineAsync(task); }
             catch { break; } // connection already gone
 
-            await pendingResult.Task;
+            await pendingResult.Done.Task;
             if (readerLoop.IsCompleted) break; // connection dropped while we were waiting
         }
 
@@ -137,9 +181,50 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
         return (new NetworkStream(socket, ownsSocket: true), socketPath);
     }
 
-    private static async Task<(Stream? Stream, string Target)> ConnectWebSocketAsync(string url, CancellationToken ct)
+    /// <summary>Whether a hello says this connection's token is read-only.</summary>
+    internal static bool IsReadOnly(string helloLine)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(helloLine);
+            return doc.RootElement.TryGetProperty("readOnly", out var r) && r.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException) { return false; }
+    }
+
+    /// <summary>Whether the connection failed because the daemon's certificate wasn't trusted, however deep that's wrapped.</summary>
+    internal static bool IsTlsFailure(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+            if (e is System.Security.Authentication.AuthenticationException) return true;
+        return false;
+    }
+
+    /// <summary>The session id of the running task a hello says this client already has, if any.</summary>
+    internal static string? PickedUp(string helloLine)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(helloLine);
+            var root = doc.RootElement;
+            return root.TryGetProperty("type", out var t) && t.GetString() == "hello" &&
+                   root.TryGetProperty("inFlight", out var inFlight) && inFlight.ValueKind == JsonValueKind.Object
+                ? GetString(inFlight, "sessionId")
+                : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static async Task<(Stream? Stream, string Target)> ConnectWebSocketAsync(
+        string url, string? certSha256, string? clientId, CancellationToken ct)
     {
         var socket = new ClientWebSocket();
+        socket.Options.KeepAliveInterval = ServeHttpHost.KeepAliveInterval;
+        socket.Options.KeepAliveTimeout  = ServeHttpHost.KeepAliveTimeout;
+        if (certSha256 is not null)
+            socket.Options.RemoteCertificateValidationCallback = ServeTls.Pinned(ServeTls.NormalizeFingerprint(certSha256)!);
+        if (clientId is not null)
+            socket.Options.SetRequestHeader(ServeAttachClients.ClientIdHeader, clientId);
         if (Environment.GetEnvironmentVariable(ServeHttpHost.TokenVariable) is { Length: > 0 } token)
             socket.Options.SetRequestHeader("Authorization", "Bearer " + token);
         try
@@ -150,6 +235,10 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
         {
             socket.Dispose();
             AnsiConsole.MarkupLine($"[red]✗ Could not connect:[/] {Markup.Escape(ex.Message)}");
+            if (IsTlsFailure(ex))
+                AnsiConsole.MarkupLine(certSha256 is null
+                    ? "[dim]The daemon's certificate isn't trusted here. For a self-signed one, pass the fingerprint it prints with --cert-sha256.[/]"
+                    : "[dim]The daemon's certificate doesn't match --cert-sha256.[/]");
             if (ex is WebSocketException { InnerException: null } && Environment.GetEnvironmentVariable(ServeHttpHost.TokenVariable) is null or "")
                 AnsiConsole.MarkupLine($"[dim]If the daemon was started with {ServeHttpHost.TokenVariable}, set it here too.[/]");
             return (null, url);
@@ -157,9 +246,16 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
         return (new WebSocketLineStream(socket, ownsSocket: true), url);
     }
 
-    /// <summary>Renders one JSONL line from the daemon; resolves <paramref name="pendingResult"/> on "result".</summary>
+    /// <summary>The task this connection waits on before prompting again; its session id comes from "queued" when it isn't known.</summary>
+    private sealed class PendingTask
+    {
+        public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public string? SessionId { get; set; }
+    }
+
+    /// <summary>Renders one JSONL line from the daemon; resolves <paramref name="pendingResult"/> on its "result".</summary>
     private static async Task RenderServerLineAsync(
-        string line, TextWriter writer, ReplStdinPump consolePump, TaskCompletionSource<bool>? pendingResult)
+        string line, TextWriter writer, ReplStdinPump consolePump, PendingTask? pendingResult)
     {
         JsonElement root;
         try { root = JsonDocument.Parse(line).RootElement; }
@@ -179,6 +275,7 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
             {
                 var position = GetNullableInt(root, "position");
                 var suffix = position is null or 0 ? "running next" : $"{position} ahead";
+                if (pendingResult is { SessionId: null }) pendingResult.SessionId = GetString(root, "sessionId");
                 AnsiConsole.MarkupLine($"[dim]queued → session {Markup.Escape(GetString(root, "sessionId"))} ({suffix})[/]");
                 break;
             }
@@ -187,6 +284,10 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
                 AnsiConsole.MarkupLine(
                     $"[cyan]⚙ daemon self-dispatched[/] from {Markup.Escape(GetString(root, "objectiveId"))}: " +
                     $"{Markup.Escape(GetString(root, "task"))} [dim](session {Markup.Escape(GetString(root, "sessionId"))})[/]");
+                break;
+
+            case "task_resumed":
+                AnsiConsole.MarkupLine($"[cyan]↻ resuming session {Markup.Escape(GetString(root, "sessionId"))} after the daemon restarted:[/] {Markup.Escape(GetString(root, "task"))}");
                 break;
 
             case "agent_starting":
@@ -218,12 +319,17 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
 
             case "result":
                 var succeeded = root.TryGetProperty("succeeded", out var s) && s.ValueKind == JsonValueKind.True;
+                var label = GetString(root, "task") is { Length: > 0 } finished && pendingResult?.SessionId != GetString(root, "sessionId")
+                    ? $" [dim](session {Markup.Escape(GetString(root, "sessionId"))}: {Markup.Escape(finished)})[/]"
+                    : "";
                 AnsiConsole.MarkupLine(succeeded
-                    ? "[green]✓ done[/]"
-                    : $"[red]✗ failed:[/] {Markup.Escape(GetString(root, "errorMessage"))}");
+                    ? $"[green]✓ done[/]{label}"
+                    : $"[red]✗ failed:[/] {Markup.Escape(GetString(root, "errorMessage"))}{label}");
                 if (GetString(root, "lastMessage") is { Length: > 0 } lastMessage)
                     AnsiConsole.MarkupLine(Markup.Escape(lastMessage));
-                pendingResult?.TrySetResult(true);
+                // A result that finished while this client was away isn't the one it's waiting on.
+                if (pendingResult is not null && (pendingResult.SessionId is null || pendingResult.SessionId == GetString(root, "sessionId")))
+                    pendingResult.Done.TrySetResult();
                 break;
 
             case "error":

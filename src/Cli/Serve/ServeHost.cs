@@ -40,7 +40,8 @@ public sealed class ServeHost(
     string? socketPathOverride,
     bool unattendedAllow,
     IReadOnlyList<string> autoObjectiveIds,
-    ServeA2AOptions? a2aOptions = null)
+    ServeA2AOptions? a2aOptions = null,
+    TimeSpan? reconnectGrace = null)
 {
     private const int AutoDispatchFailureThreshold = 3;
 
@@ -60,6 +61,7 @@ public sealed class ServeHost(
         var projectSlug = FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory());
         var socketPath  = socketPathOverride ?? FuseraftPaths.DaemonSocketPath(projectSlug);
         var pidFilePath = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalDaemonPidFile, projectSlug);
+        var queuePath   = FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalDaemonQueueFile, projectSlug);
 
         AcquirePidFile(pidFilePath);
 
@@ -77,10 +79,19 @@ public sealed class ServeHost(
             shutdownCts.Cancel();
         };
         Console.CancelKeyPress += onCancel;
+        // A service manager stops the daemon with SIGTERM; shutting down the same way as Ctrl+C
+        // leaves a running task marked as running, so the next start resumes it.
+        using var onTerminate = System.Runtime.InteropServices.PosixSignalRegistration.Create(
+            System.Runtime.InteropServices.PosixSignal.SIGTERM, ctx =>
+            {
+                ctx.Cancel = true;
+                if (!shutdownCts.IsCancellationRequested) AnsiConsole.MarkupLine("[dim]Shutting down...[/]");
+                shutdownCts.Cancel();
+            });
 
         try
         {
-            var approvalService = new ServeHumanApprovalService(unattendedAllow);
+            var approvalService = new ServeHumanApprovalService(unattendedAllow) { Stopping = shutdownCts.Token };
 
             // hitlMode: true unconditionally — this is what wires the mutating-action approval
             // closures (shell/tool-action/file-write) into the sandboxed plugins at all (see
@@ -106,10 +117,14 @@ public sealed class ServeHost(
             var objectiveManager = new ObjectiveManager(new ObjectiveStore(FuseraftPaths.LocalObjectives));
 
             socketListener = new ServeSocketListener(socketPath, queue, approvalService,
-                loggerFactory.CreateLogger<ServeSocketListener>());
+                loggerFactory.CreateLogger<ServeSocketListener>(), reconnectGrace);
+            // Before anything can dispatch, so restored tasks keep their place ahead of new ones.
+            var restored = new ServeQueueJournal(queuePath, queue, socketListener.Clients, _logger).Restore();
 
             mcpApp = ServeHttpHost.Build(httpOptions, queue, socketListener.HandleStreamAsync);
             await mcpApp.StartAsync(shutdownCts.Token);
+            // The web host stops itself on SIGTERM too; the daemon shuts down with it rather than serving on without it.
+            mcpApp.Lifetime.ApplicationStopping.Register(shutdownCts.Cancel);
             var boundPort = new Uri(mcpApp.Urls.First()).Port;
 
             string[] a2aUrls = [];
@@ -128,12 +143,23 @@ public sealed class ServeHost(
 
             socketListener.Start(shutdownCts.Token);
 
-            var httpAuth = string.IsNullOrEmpty(httpOptions.Token) ? "no token" : $"bearer token from {ServeHttpHost.TokenVariable}";
+            var httpAuth = (string.IsNullOrEmpty(httpOptions.Token), httpOptions.TokensFile) switch
+            {
+                (true, null)   => "no token",
+                (false, null)  => $"bearer token from {ServeHttpHost.TokenVariable}",
+                (true, { } f)  => $"bearer tokens from {f}",
+                (false, { } f) => $"bearer tokens from {ServeHttpHost.TokenVariable} and {f}",
+            };
             AnsiConsole.MarkupLine($"[dim]fuseraft serve[/] — [bold]{Markup.Escape(built.Config.Name)}[/]");
-            AnsiConsole.MarkupLine($"[dim]  MCP (dispatch_task/get_status/get_result) → {Markup.Escape(ServeHttpHost.LocalUrl(httpOptions, boundPort, "http", "/mcp"))}[/]");
+            AnsiConsole.MarkupLine($"[dim]  MCP (dispatch_task/get_status/get_result) → {Markup.Escape(ServeHttpHost.LocalUrl(httpOptions, boundPort, webSocket: false, "/mcp"))}[/]");
             AnsiConsole.MarkupLine($"[dim]  Attach socket → {Markup.Escape(socketPath)}  (fuseraft attach)[/]");
-            AnsiConsole.MarkupLine($"[dim]  Attach WebSocket → {Markup.Escape(ServeHttpHost.LocalUrl(httpOptions, boundPort, "ws", ServeHttpHost.AttachPath))}  (fuseraft attach --url)[/]");
-            AnsiConsole.MarkupLine($"[dim]  HTTP on {Markup.Escape(httpOptions.Bind)}, {httpAuth} (--bind)[/]");
+            AnsiConsole.MarkupLine($"[dim]  Attach WebSocket → {Markup.Escape(ServeHttpHost.LocalUrl(httpOptions, boundPort, webSocket: true, ServeHttpHost.AttachPath))}  (fuseraft attach --url)[/]");
+            AnsiConsole.MarkupLine($"[dim]  {(httpOptions.Secure ? "HTTPS" : "HTTP")} on {Markup.Escape(httpOptions.Bind)}, {httpAuth} (--bind)[/]");
+            if (httpOptions.Certificate is { } cert)
+                AnsiConsole.MarkupLine($"[dim]  TLS certificate {Markup.Escape(cert.Subject)}, SHA-256 {ServeTls.Fingerprint(cert)}[/]");
+            else if (!ServeA2AHost.IsLoopback(httpOptions.Bind) || a2aOptions is not null && !ServeA2AHost.IsLoopback(a2aOptions.Bind))
+                AnsiConsole.MarkupLine("[yellow]  ⚠ Plain HTTP beyond loopback: the token and every task travel unencrypted. " +
+                                       "Use --tls-cert, or put a TLS proxy in front.[/]");
             if (a2aOptions is null)
                 AnsiConsole.MarkupLine("[dim]  A2A: off (--a2a)[/]");
             else
@@ -147,7 +173,9 @@ public sealed class ServeHost(
             AnsiConsole.MarkupLine(autoObjectiveIds.Count > 0
                 ? $"[dim]  Auto-dispatch → {Markup.Escape(string.Join(", ", autoObjectiveIds))} (picks its own next task when idle)[/]"
                 : "[dim]  Auto-dispatch: off (--auto-objective)[/]");
-            AnsiConsole.MarkupLine("[dim]  Idle — waiting for a task. Ctrl+C to stop.[/]");
+            if (restored > 0)
+                AnsiConsole.MarkupLine($"[dim]  Restored {restored} unfinished task(s) from the last run ({Markup.Escape(queuePath)})[/]");
+            AnsiConsole.MarkupLine(restored > 0 ? "[dim]  Ctrl+C to stop.[/]" : "[dim]  Idle — waiting for a task. Ctrl+C to stop.[/]");
 
             await WorkerLoopAsync(queue, built, approvalService, objectiveManager, telemetry, shutdownCts.Token);
             return 0;
@@ -338,8 +366,61 @@ public sealed class ServeHost(
         CancellationToken cancellationToken)
     {
         var record = queue.TryGet(request.SessionId)!;
-        record.Status = ServeTaskStatus.Running;
+        queue.Start(record);
 
+        SessionCheckpoint checkpoint;
+        if (request.Resume)
+        {
+            if (await LoadResumableAsync(record, cancellationToken) is not { } saved) return;
+            checkpoint = saved;
+        }
+        else
+        {
+            if (!ScreenTask(request, record, built)) return;
+            checkpoint = await StartSessionAsync(request, objectiveManager, cancellationToken);
+        }
+
+        await BindSessionAsync(built, request.SessionId, cancellationToken);
+        built.Orchestrator.SetSessionId(request.SessionId);
+        built.Compactor?.SetSessionId(request.SessionId);
+        built.Orchestrator.SetStructuredTask(checkpoint.StructuredTask ?? TaskModel.FromGoal(request.Task));
+        if (request.Resume)
+        {
+            fuseraft.Cli.Commands.RunCommand.ApplyResumeState(built.Orchestrator, checkpoint);
+            approvalService.BroadcastEvent(new { type = "task_resumed", sessionId = request.SessionId, task = request.Task });
+        }
+
+        await RunSessionAsync(request, record, checkpoint, queue, built, approvalService, objectiveManager, telemetry, modelIdByAgent, cancellationToken);
+    }
+
+    /// <summary>
+    /// The saved session of a task that was running when the daemon stopped. Null, with the task finished, when
+    /// there's none to resume from, or it had in fact completed.
+    /// </summary>
+    private async Task<SessionCheckpoint?> LoadResumableAsync(ServeTaskRecord record, CancellationToken cancellationToken)
+    {
+        var saved = await sessionStore.LoadAsync(record.SessionId, cancellationToken);
+        if (saved is { IsComplete: false }) return saved;
+
+        var last = saved?.Messages.LastOrDefault();
+        record.Succeeded          = saved is not null;
+        record.ErrorMessage       = saved is null
+            ? "The daemon restarted while this task ran, and its session wasn't saved (Checkpoint.Mode: memory?), so it " +
+              "can't pick up where it left off. Dispatch it again."
+            : null;
+        record.TurnCount          = saved?.Messages.Count ?? 0;
+        record.LastAgent          = last?.AgentName;
+        record.LastMessageExcerpt = Truncate(last?.Content);
+        record.Messages           = saved?.Messages;
+        record.Status             = saved is null ? ServeTaskStatus.Failed : ServeTaskStatus.Completed;
+        record.CompletedAt        = DateTimeOffset.UtcNow;
+        record.Done.TrySetResult(true);
+        return null;
+    }
+
+    /// <summary>False, with the task failed, when its text looks like a prompt injection.</summary>
+    private static bool ScreenTask(ServeTaskRequest request, ServeTaskRecord record, OrchestratorBuildResult built)
+    {
         // Screen dispatched task text for prompt injection exactly like RunCommand does for a
         // new session's task — relevant here specifically because `dispatch_task` is an
         // MCP-exposed entry point another, potentially adversarial agent can call, unlike a
@@ -366,10 +447,15 @@ public sealed class ServeHost(
                 record.ErrorMessage = $"Task rejected: prompt injection detected ({detection.InjectionType}, confidence {detection.Confidence:P0}).";
                 record.CompletedAt  = DateTimeOffset.UtcNow;
                 record.Done.TrySetResult(true);
-                return;
+                return false;
             }
         }
+        return true;
+    }
 
+    private async Task<SessionCheckpoint> StartSessionAsync(
+        ServeTaskRequest request, ObjectiveManager objectiveManager, CancellationToken cancellationToken)
+    {
         if (request.ObjectiveId is not null)
         {
             // addIfMissing: false — a task dispatched (by a human or an MCP caller) under an
@@ -389,14 +475,24 @@ public sealed class ServeHost(
         };
 
         // Seed save so this session shows up in `fuseraft sessions` even if the process is
-        // killed before the first turn completes — mirrors RunCommand's own seed save.
+        // killed before the first turn completes — mirrors RunCommand's own seed save. It's also
+        // what a task interrupted by a restart resumes from.
         await sessionStore.SaveAsync(checkpoint, cancellationToken);
+        return checkpoint;
+    }
 
-        await BindSessionAsync(built, request.SessionId, cancellationToken);
-        built.Orchestrator.SetSessionId(request.SessionId);
-        built.Compactor?.SetSessionId(request.SessionId);
-        built.Orchestrator.SetStructuredTask(TaskModel.FromGoal(request.Task));
-
+    private async Task RunSessionAsync(
+        ServeTaskRequest request,
+        ServeTaskRecord record,
+        SessionCheckpoint checkpoint,
+        ServeTaskQueue queue,
+        OrchestratorBuildResult built,
+        ServeHumanApprovalService approvalService,
+        ObjectiveManager objectiveManager,
+        fuseraft.Cli.Telemetry.FuseraftTelemetry? telemetry,
+        IReadOnlyDictionary<string, string> modelIdByAgent,
+        CancellationToken cancellationToken)
+    {
         var runner = new SessionRunner(
             built.Orchestrator, built.Compactor, sessionStore, approvalService,
             built.EventEmitter, telemetry, modelIdByAgent,
@@ -440,6 +536,10 @@ public sealed class ServeHost(
             built.Orchestrator.ToolCalling        -= OnToolCalling;
             built.Orchestrator.TokenBudgetWarning -= OnTokenBudgetWarning;
         }
+
+        // Stopped by the daemon shutting down, not finished: the journal still has it as running,
+        // so the next start resumes it from its saved session.
+        if (cancellationToken.IsCancellationRequested) return;
 
         var last = result.Messages.LastOrDefault();
         record.TurnCount          = result.Messages.Count;
@@ -579,13 +679,16 @@ public sealed class ServeHost(
     // Single-instance guard
     // -------------------------------------------------------------------------
 
-    private static void AcquirePidFile(string pidFilePath)
+    internal static void AcquirePidFile(string pidFilePath)
     {
         var dir = Path.GetDirectoryName(pidFilePath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
+        // A pidfile naming this very process is left over from a crash of an earlier one that had the same pid,
+        // as every start of a daemon that's PID 1 in a container does.
         if (File.Exists(pidFilePath) &&
             int.TryParse(File.ReadAllText(pidFilePath).Trim(), out var existingPid) &&
+            existingPid != Environment.ProcessId &&
             IsProcessAlive(existingPid))
         {
             throw new InvalidOperationException(

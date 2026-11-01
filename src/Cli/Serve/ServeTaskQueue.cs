@@ -24,7 +24,9 @@ public enum ServeTaskStatus
 /// Used by <c>ServeHost</c> to scope mutating-action approval prompts to whoever actually asked
 /// for this task, rather than to any bystander who merely happens to be attached.
 /// </param>
-public sealed record ServeTaskRequest(string SessionId, string Task, string? ObjectiveId, IServeAttachSink? OriginSink);
+/// <param name="Resume">The task was running when the daemon last stopped; it picks up from its saved session.</param>
+public sealed record ServeTaskRequest(
+    string SessionId, string Task, string? ObjectiveId, IServeAttachSink? OriginSink, bool Resume = false);
 
 /// <summary>
 /// Mutable status/result record for one dispatched task, keyed by session ID. The worker loop
@@ -32,14 +34,17 @@ public sealed record ServeTaskRequest(string SessionId, string Task, string? Obj
 /// no locking needed since fuseraft's orchestrators only ever process one task at a time (see
 /// <see cref="ServeTaskQueue"/>'s serialization guarantee).
 /// </summary>
-public sealed class ServeTaskRecord(string sessionId, string task, string? objectiveId, IServeAttachSink? originSink)
+public sealed class ServeTaskRecord(
+    string sessionId, string task, string? objectiveId, IServeAttachSink? originSink, DateTimeOffset? createdAt = null)
 {
     public string SessionId { get; } = sessionId;
     public string Task { get; } = task;
     public string? ObjectiveId { get; } = objectiveId;
     public IServeAttachSink? OriginSink { get; } = originSink;
     public ServeTaskStatus Status { get; set; } = ServeTaskStatus.Queued;
-    public DateTimeOffset CreatedAt { get; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset CreatedAt { get; } = createdAt ?? DateTimeOffset.UtcNow;
+    /// <summary>How many times a daemon restart has interrupted this task.</summary>
+    public int Interruptions { get; init; }
     public DateTimeOffset? CompletedAt { get; set; }
     public bool? Succeeded { get; set; }
     public string? ErrorMessage { get; set; }
@@ -83,7 +88,17 @@ public sealed class ServeTaskQueue
     // Running records are never evicted regardless of count.
     private const int MaxRetainedTerminalRecords = 500;
 
+    /// <summary>How many restarts can interrupt one task before it's failed instead of resumed.</summary>
+    public const int MaxInterruptions = 3;
+
     public ChannelReader<ServeTaskRequest> Reader => _channel.Reader;
+
+    /// <summary>Raised when a task is queued, starts or finishes, for <see cref="ServeQueueJournal"/>.</summary>
+    public event Action? Changed;
+
+    /// <summary>The tasks still queued or running, oldest first.</summary>
+    public IReadOnlyList<ServeTaskRecord> Unfinished =>
+        [.. _records.Values.Where(r => r.Status is ServeTaskStatus.Queued or ServeTaskStatus.Running).OrderBy(r => r.CreatedAt)];
 
     /// <summary>
     /// Enqueues a new task and returns its freshly generated session ID immediately —
@@ -92,11 +107,51 @@ public sealed class ServeTaskQueue
     public string Enqueue(string task, string? objectiveId = null, IServeAttachSink? originSink = null)
     {
         var sessionId = Guid.NewGuid().ToString("N")[..8];
-        _records[sessionId] = new ServeTaskRecord(sessionId, task, objectiveId, originSink);
-        // Unbounded channel — TryWrite never fails.
-        _channel.Writer.TryWrite(new ServeTaskRequest(sessionId, task, objectiveId, originSink));
+        Add(new ServeTaskRecord(sessionId, task, objectiveId, originSink), resume: false);
         EvictOldestTerminalRecords();
         return sessionId;
+    }
+
+    /// <summary>
+    /// Queues a task the daemon had before it restarted, under its old session id. One that was running resumes
+    /// from its saved session; restore it first so it runs first, as it would have.
+    /// </summary>
+    public ServeTaskRecord Restore(
+        string sessionId, string task, string? objectiveId, IServeAttachSink? originSink, DateTimeOffset createdAt,
+        bool wasRunning, int interruptions = 0)
+    {
+        var record = new ServeTaskRecord(sessionId, task, objectiveId, originSink, createdAt) { Interruptions = interruptions };
+        if (wasRunning && interruptions > MaxInterruptions)
+        {
+            // A task that takes the daemon down with it would otherwise be resumed, and take it down, forever.
+            _records[sessionId] = record;
+            _ = record.Done.Task.ContinueWith(_ => Changed?.Invoke(), TaskScheduler.Default);
+            record.Status       = ServeTaskStatus.Failed;
+            record.Succeeded    = false;
+            record.ErrorMessage = $"The daemon stopped while running this task {interruptions} times, so it isn't resumed again. " +
+                                  "Its session history has how far it got.";
+            record.CompletedAt  = DateTimeOffset.UtcNow;
+            record.Done.TrySetResult(true);
+            return record;
+        }
+        Add(record, wasRunning);
+        return record;
+    }
+
+    /// <summary>Marks a task as running.</summary>
+    public void Start(ServeTaskRecord record)
+    {
+        record.Status = ServeTaskStatus.Running;
+        Changed?.Invoke();
+    }
+
+    private void Add(ServeTaskRecord record, bool resume)
+    {
+        _records[record.SessionId] = record;
+        _ = record.Done.Task.ContinueWith(_ => Changed?.Invoke(), TaskScheduler.Default);
+        // Unbounded channel — TryWrite never fails.
+        _channel.Writer.TryWrite(new ServeTaskRequest(record.SessionId, record.Task, record.ObjectiveId, record.OriginSink, resume));
+        Changed?.Invoke();
     }
 
     private void EvictOldestTerminalRecords()

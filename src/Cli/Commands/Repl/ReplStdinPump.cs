@@ -25,6 +25,7 @@ namespace fuseraft.Cli.Commands.Repl;
 public sealed class ReplStdinPump
 {
     private readonly Channel<string> _lines = Channel.CreateUnbounded<string>();
+    private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TextReader _input;
     private readonly Func<CancellationTokenSource?> _getActiveCts;
     private Task? _pumpTask;
@@ -34,6 +35,9 @@ public sealed class ReplStdinPump
         _input        = input;
         _getActiveCts = getActiveCts;
     }
+
+    /// <summary>Completes when the input closes, even while lines it read are still unconsumed.</summary>
+    internal Task Closed => _closed.Task;
 
     /// <summary>Idempotent — a second call is a no-op.</summary>
     internal void Start() => _pumpTask ??= Task.Run(PumpLoopAsync);
@@ -60,6 +64,7 @@ public sealed class ReplStdinPump
             if (line is null)
             {
                 _lines.Writer.TryComplete();
+                _closed.TrySetResult();
                 return;
             }
 
@@ -223,12 +228,15 @@ public sealed class ReplStdinPump
     /// wrong "type", or stdin closing because the panel/process went away — denies the command
     /// rather than risking a false approval.
     /// </summary>
-    internal async Task<bool> ReadApprovalResponseAsync()
+    internal async Task<bool> ReadApprovalResponseAsync() => await TryReadApprovalResponseAsync() ?? false;
+
+    /// <summary>Like <see cref="ReadApprovalResponseAsync"/>, but null when stdin closed before an answer arrived.</summary>
+    internal async Task<bool?> TryReadApprovalResponseAsync()
     {
         while (await _lines.Reader.WaitToReadAsync())
             if (_lines.Reader.TryRead(out var line))
                 return ExtractApproval(line);
-        return false;
+        return null;
     }
 
     /// <summary>
