@@ -4,7 +4,7 @@ using fuseraft.Cli.Protocol;
 namespace FuseraftCli.Tests;
 
 /// <summary>
-/// The JSON envelope every <c>--json</c> command writes. Clients (VS Code, fuseraft-server, CI) parse
+/// The JSON envelope every <c>--json</c> command writes. Clients (VS Code, fuseraft-web, CI) parse
 /// these exact keys, so a failure here means a breaking wire change, not a test to update casually.
 /// </summary>
 [Collection("FuseraftHomeEnv")] // WriteList_WritesOneLineAndReturnsZero swaps the process-wide WireProtocol.Writer

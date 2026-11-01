@@ -4,7 +4,7 @@ using Spectre.Console;
 namespace fuseraft.Cli.Protocol;
 
 /// <summary>
-/// The versioned wire contract that out-of-process clients (the VS Code extension, fuseraft-server,
+/// The versioned wire contract that out-of-process clients (the VS Code extension, fuseraft-web,
 /// CI scripts) depend on — documented in <c>docs/protocol.md</c>.
 /// </summary>
 public static class WireProtocol

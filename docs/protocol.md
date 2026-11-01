@@ -1,6 +1,6 @@
 ---
 title: "Wire Protocol"
-description: "The versioned JSON contract that tools built on fuseraft — the VS Code extension, fuseraft-server, CI scripts — use to drive and query the CLI without linking its code."
+description: "The versioned JSON contract that tools built on fuseraft — the VS Code extension, fuseraft-web, CI scripts — use to drive and query the CLI without linking its code."
 ---
 
 Tools built on fuseraft talk to it **out of process**: they spawn the CLI or connect to a running `fuseraft serve` daemon, and exchange JSON. They never reference fuseraft's assemblies. This page is that contract. If you build on fuseraft, depend on what's written here, not on internal types or the layout of files under `~/.fuseraft/`, which can change in any release.

@@ -15,7 +15,7 @@ public sealed record ServeHttpOptions(string Bind, int Port, string? Token);
 /// <summary>
 /// The daemon's HTTP listener: MCP at <c>/mcp</c> for other agents, and the attach protocol over
 /// a WebSocket at <c>/attach</c> for clients that can't reach the Unix socket (another machine,
-/// or a host such as fuseraft-server). With a token set, both require <c>Authorization: Bearer</c>.
+/// or a host such as fuseraft-web). With a token set, both require <c>Authorization: Bearer</c>.
 /// </summary>
 public static class ServeHttpHost
 {
