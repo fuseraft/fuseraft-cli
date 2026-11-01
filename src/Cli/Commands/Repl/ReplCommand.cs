@@ -28,6 +28,14 @@ public sealed class ReplSettings : CommandSettings
     [Description("Model ID to use (e.g. gpt-4o, claude-sonnet-4-6, grok-4). Overrides ~/.fuseraft/config if set.")]
     public string? Model { get; set; }
 
+    [CommandOption("--endpoint")]
+    [Description("Provider base URL for this session (e.g. https://api.x.ai/v1, http://localhost:11434). Overrides ~/.fuseraft/config without changing it.")]
+    public string? Endpoint { get; set; }
+
+    [CommandOption("--provider")]
+    [Description("Provider type for this session: openai (any OpenAI-compatible API), anthropic, azure or ollama. Overrides ~/.fuseraft/config without changing it.")]
+    public string? Provider { get; set; }
+
     [CommandOption("--save")]
     [Description("Persist --model as the new default in ~/.fuseraft/config.")]
     public bool Save { get; set; }
@@ -245,6 +253,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         if (OrchestratorConfigLoader.VsCodeMode)
         {
+            // A host that names the model (fuseraft-web, per account) needs no config file: --model plus
+            // FUSERAFT_API_KEY is a complete setup. Nothing here is saved unless --save asks.
+            if (userCfg is null && !string.IsNullOrWhiteSpace(settings.Model))
+                userCfg = new UserConfig { ModelId = settings.Model.Trim(), Provider = settings.Provider?.Trim() ?? string.Empty };
+
             // Running from VS Code. Prefer an API key explicitly injected by the
             // extension (FUSERAFT_API_KEY), then fall back to any legacy plaintext
             // key still in the config file, then to the OS keychain.  The env-var
@@ -327,7 +340,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 AnsiConsole.MarkupLine($"[dim]Saved[/] [bold]{Markup.Escape(modelId)}[/] [dim]as default model in[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/]");
         }
 
-        var modelConfig = ReplFactory.BuildModelConfig(modelId, userCfg);
+        var connection  = ConnectionOverride.From(settings.Provider, settings.Endpoint);
+        var modelConfig = ReplFactory.BuildModelConfig(modelId, userCfg, connection: connection);
         using var factory = new ChatClientFactory(transport: TransportOptions.From(userCfg));
 
         // Persisted REPL defaults (UserConfig.Repl) can only add to what the CLI flags for
@@ -788,6 +802,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             ApproveToolAction = approveToolAction,
             Yolo           = yolo,
             ToolArtifactStore = toolArtifactStore,
+            Connection     = connection,
         };
         ctxForStdin = ctx;
         if (tui is not null)

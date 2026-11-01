@@ -298,6 +298,8 @@ fuseraft repl [options]
 |------|---------|-------------|
 | `-m, --model <id>` | see below | Model ID to use (e.g. `gpt-4o`, `claude-sonnet-4-6`). Overrides `~/.fuseraft/config` when set. |
 | `--save` | off | Persist `--model` as the new default in `~/.fuseraft/config`. No effect without `--model`. |
+| `--endpoint <url>` | config | Provider base URL for this session (e.g. `https://api.x.ai/v1`, `http://localhost:11434`). Overrides `~/.fuseraft/config` without changing it, and is kept across `/model` and `/resume`. |
+| `--provider <type>` | config | Provider type for this session: `openai` (any OpenAI-compatible API), `anthropic`, `azure` or `ollama`. Overrides `~/.fuseraft/config` without changing it. |
 | `-s, --system <prompt>` | — | System prompt. Defaults to a coding/research prompt when tools are enabled. |
 | `--resume <id>` | — | Resume a previous REPL session by its session ID. The session's last few turns are re-displayed on startup (`repl.resumeReplayTurns`, default 3; `/replay` shows more). Use `/sessions` inside the REPL to list resumable sessions. Resuming from a different directory than the session ran in moves back into that directory first, so the sandbox, approvals and project instructions match the paths the session already uses. |
 | `--no-banner` | off | Skip the ASCII banner. Persist as the default with `fuseraft settings set repl.noBanner true`. |
@@ -358,6 +360,10 @@ See [Getting Started — Set your API key](getting-started.md#set-your-api-key) 
 | `DEEPSEEK_API_KEY` | `deepseek-chat` |
 
 `--model` alone only overrides the model for that session. Add `--save` to also write it to `~/.fuseraft/config` as the new default (e.g. `fuseraft repl --model claude-sonnet-4-6 --save`).
+
+`--endpoint` and `--provider` point one session at a different connection, e.g. a local Ollama or a gateway, without touching the config: `fuseraft repl --model llama3.1:8b --provider ollama --endpoint http://gpu-box:11434`. Giving either one replaces both of the config's values, so the config's endpoint is never called as another provider. With only `--endpoint`, the model ID's prefix picks the provider, or an OpenAI-compatible API is assumed when it doesn't match one. Neither is ever saved, even with `--save`; `/provider` (re)configures the connection interactively and replaces them.
+
+In `--vscode` mode (how fuseraft-web and the VS Code extension run the REPL), `--model` plus `FUSERAFT_API_KEY` is a complete setup without a `~/.fuseraft/config`.
 
 **Built-in tools**
 
