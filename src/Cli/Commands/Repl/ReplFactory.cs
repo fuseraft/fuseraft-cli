@@ -14,13 +14,17 @@ namespace fuseraft.Cli.Commands.Repl;
 /// </summary>
 internal static class ReplFactory
 {
-    internal static ModelConfig BuildModelConfig(string modelId, UserConfig? userCfg, string? reasoningEffort = null) =>
+    /// <param name="connection">This session's <c>--provider</c>/<c>--endpoint</c>, which win over the config's.</param>
+    internal static ModelConfig BuildModelConfig(string modelId, UserConfig? userCfg, string? reasoningEffort = null,
+        ConnectionOverride? connection = null) =>
         new()
         {
             ModelId         = modelId,
-            Endpoint        = userCfg?.Endpoint ?? string.Empty,
+            // Overriding one of the pair drops the config's other half, which belonged to a different connection:
+            // the config's xAI endpoint must not be called as --provider anthropic.
+            Endpoint        = connection is null ? userCfg?.Endpoint ?? string.Empty : connection.Endpoint ?? string.Empty,
             ApiKey          = userCfg?.ApiKey   ?? string.Empty,
-            Provider        = userCfg?.Provider ?? string.Empty,
+            Provider        = connection is null ? userCfg?.Provider ?? string.Empty : connection.Provider ?? string.Empty,
             ReasoningEffort = reasoningEffort,
         };
 
@@ -309,5 +313,17 @@ internal static class ReplFactory
         AnsiConsole.MarkupLine($"[yellow]⚠ Could not fetch a model list from {Markup.Escape(endpoint)}:[/] [dim]{Markup.Escape(ex.Message)}[/]");
         AnsiConsole.MarkupLine("[dim]You can enter a model ID manually instead.[/]");
         AnsiConsole.WriteLine();
+    }
+}
+
+/// <summary>A session's <c>--provider</c> and <c>--endpoint</c>: used for every model it talks to, never saved.</summary>
+internal sealed record ConnectionOverride(string? Provider, string? Endpoint)
+{
+    /// <summary>Null when neither flag was given, so the config's connection applies.</summary>
+    public static ConnectionOverride? From(string? provider, string? endpoint)
+    {
+        provider = string.IsNullOrWhiteSpace(provider) ? null : provider.Trim();
+        endpoint = string.IsNullOrWhiteSpace(endpoint) ? null : endpoint.Trim();
+        return provider is null && endpoint is null ? null : new ConnectionOverride(provider, endpoint);
     }
 }

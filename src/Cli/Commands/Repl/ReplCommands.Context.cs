@@ -343,6 +343,7 @@ internal static partial class ReplCommands
         newCfg.ApiKey    = newKey;
         ctx.UserCfg      = newCfg;
         ctx.ModelId      = newCfg.ModelId;
+        ctx.Connection   = null; // the provider just chosen replaces the session's --provider/--endpoint
         ctx.ModelConfig  = ReplFactory.BuildModelConfig(ctx.ModelId, ctx.UserCfg);
         try
         {
@@ -407,7 +408,7 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
-        var newConfig   = ReplFactory.BuildModelConfig(newModelId, ctx.UserCfg, newEffort);
+        var newConfig   = ReplFactory.BuildModelConfig(newModelId, ctx.UserCfg, newEffort, ctx.Connection);
         var activeTools = ctx.GetActiveTools();
         var hasTools    = activeTools.Count > 0;
         IChatClient newClient;

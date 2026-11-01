@@ -92,6 +92,9 @@ internal sealed class ReplSessionContext
     // --yolo (or repl.yolo): the session runs unattended, so a turn that hits a limit stops rather than asking.
     public bool Yolo { get; set; }
 
+    // The session's --provider/--endpoint, kept across /model and resume; null uses the config's.
+    public ConnectionOverride? Connection { get; set; }
+
     // Where oversized tool results go instead of the conversation (see WrapTool) — kept so tools that
     // join mid-session, from /mcp add or /mcp login, are wrapped like the ones registered at startup.
     public fuseraft.Infrastructure.Tools.ToolResultArtifactStore? ToolArtifactStore { get; set; }
