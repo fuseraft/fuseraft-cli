@@ -82,7 +82,7 @@ A second person attached at the same time sees the `agent_starting`/`tool_callin
 
 ### From another machine, over WebSocket
 
-The same attach protocol is also served as a WebSocket at `/attach`, on the MCP port. Use it when the Unix socket isn't reachable: from another machine, from a container, or from a host such as fuseraft-server.
+The same attach protocol is also served as a WebSocket at `/attach`, on the MCP port. Use it when the Unix socket isn't reachable: from another machine, from a container, or from a host such as fuseraft-web.
 
 ```bash
 # On the daemon's machine
