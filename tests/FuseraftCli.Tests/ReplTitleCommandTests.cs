@@ -1,3 +1,4 @@
+using System.Text.Json;
 using fuseraft.Cli.Commands.Repl;
 using fuseraft.Core;
 using fuseraft.Core.Models.Session;
@@ -83,6 +84,49 @@ public sealed class ReplTitleCommandTests : IDisposable
         var file = Assert.Single(Directory.GetFiles(FuseraftPaths.GlobalReplSessions, "repl-*.json"));
         var snap = await ReplSessionSnapshot.LoadAsync(Path.GetFileNameWithoutExtension(file)["repl-".Length..]);
         Assert.Equal("Branch me", snap!.Title);
+    }
+
+    // A client that keeps the session ID to resume the chat later (the VS Code panel across a reload) learns of a
+    // switch from the title event, which names the session the chat now runs as.
+    [Fact]
+    public async Task ForkSwitch_InJsonMode_EmitsTitleWithTheForksSessionId()
+    {
+        var ctx = NewContext();
+        ctx.JsonMode = true;
+        ctx.Title = "Branch me";
+
+        var events = await CaptureBridgeAsync(() => ReplCommands.HandleAsync(ctx, "/fork", "switch", CancellationToken.None));
+
+        var title = Assert.Single(events, e => e.GetProperty("type").GetString() == "title");
+        Assert.NotEqual("titled-session", ctx.SessionId);
+        Assert.Equal(ctx.SessionId, title.GetProperty("sessionId").GetString());
+        Assert.Equal("Branch me", title.GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Switch_InJsonMode_EmitsTitleWithTheNewSessionId()
+    {
+        await ReplSessionSnapshot.SaveAsync(ReplSessionSnapshot.Capture(
+            "other-session", "test-model", "/tmp", 1, [new ChatMessage(ChatRole.User, "hi")], DateTime.UtcNow, title: "Other chat"));
+        var ctx = NewContext();
+        ctx.JsonMode = true;
+
+        var events = await CaptureBridgeAsync(() => ReplCommands.HandleAsync(ctx, "/switch", "other-session", CancellationToken.None));
+
+        var title = Assert.Single(events, e => e.GetProperty("type").GetString() == "title");
+        Assert.Equal("other-session", title.GetProperty("sessionId").GetString());
+        Assert.Equal("Other chat", title.GetProperty("title").GetString());
+    }
+
+    private static async Task<List<JsonElement>> CaptureBridgeAsync(Func<Task> act)
+    {
+        var original = ReplJsonBridge.Writer;
+        var writer = new StringWriter();
+        ReplJsonBridge.Writer = writer;
+        try { await act(); }
+        finally { ReplJsonBridge.Writer = original; }
+        return [.. writer.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => JsonDocument.Parse(line).RootElement.Clone())];
     }
 
     [Fact]
