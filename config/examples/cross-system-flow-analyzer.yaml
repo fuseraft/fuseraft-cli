@@ -89,6 +89,9 @@ Orchestration:
     KeepRecentTurns: 8
     Mode: intent   # deterministic intent-log reconstruction — clean resumption if interrupted
 
+  # Below CutoverAt, so a heavy turn is flagged before compaction is forced.
+  WarnTurnTokens: 90000
+
   ContextBudget:
     WarnAt: 70000
     CutoverAt: 110000   # compact early; artifact handoffs eliminate the need for large live contexts

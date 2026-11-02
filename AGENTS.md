@@ -157,7 +157,7 @@ Config is bound via `OrchestratorBuilder.BindConfig` from `OrchestrationConfig`.
 
 **ContractPredicate format**: Predicates in `Contracts[].Requires[]` must use the flat `Type:` field (`Type: FileExists`, `Type: FilesWritten`, etc.) — not the object-key style (`FileExists: {Path: ...}`), which does not bind to `ContractPredicate.Type`.
 
-`config/examples/` contains runnable examples. **Keep these in sync** when adding new config fields — they are the primary reference for users and are checked by tests.
+`config/examples/` contains runnable examples. **Keep these in sync** when adding new config fields — they are the primary reference for users. No test loads them, so run `fuseraft validate` on each one after a schema change.
 
 When adding a new `FailureAction` or `FailureType` value, update:
 - `FailureHandlingConfig.cs` (enum + default config + `GetConfig` switch)

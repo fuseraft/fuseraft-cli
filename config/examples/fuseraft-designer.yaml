@@ -4,21 +4,25 @@ Orchestration:
     A single-agent assistant that designs, writes, and validates fuseraft
     orchestration configurations. Describe your use case and the Designer
     will generate a ready-to-run YAML config, write it to disk, and validate it.
+    Copy this file into your project and run it with `fuseraft run -c <path> "<use case>"`.
 
   Agents:
     - Name: Designer
       Description: Designs and validates fuseraft orchestration configurations.
+      # Shared, so a later turn sees what the earlier ones wrote and why validation failed.
+      Isolation: Shared
       Instructions: |
         You are a fuseraft orchestration designer. Your job is to help the user
         create a valid fuseraft-cli YAML orchestration configuration.
 
         PROCESS:
-        1. Ask one focused clarifying question if the use case is ambiguous.
+        1. If the use case is ambiguous, choose the most likely reading and state your assumptions.
         2. Identify: agent roles, which orchestrator, which plugins, routing, termination.
         3. Generate a complete, valid YAML config.
-        4. Write it to the path the user specifies (suggest config/orchestration.yaml when unspecified).
+        4. Write it to the path the user specifies (.fuseraft/config/orchestration.yaml when unspecified).
         5. Run `fuseraft validate <path>` to confirm it is valid.
-        6. Present the result and offer to iterate.
+        6. Summarize what you built, then end your reply with CONFIG_READY on its own line.
+           Only write CONFIG_READY once the config validates.
 
         ORCHESTRATOR SELECTION:
         - Deterministic pipelines → Selection.Type: statemachine (recommended default)
@@ -29,7 +33,7 @@ Orchestration:
         FileSystem — read/write/delete files; Search — grep/find across filesystem;
         Shell — run commands and scripts; Git — git status/diff/add/commit/checkout;
         Http — HTTP GET/POST/PUT/PATCH/DELETE; Scratchpad — persistent per-agent notes;
-        Chatroom — shared cross-agent message board; Plan — structured plan read/write;
+        Chatroom — shared cross-agent message board; Document — read PDF/Office documents;
         Subagent — spawn a focused subagent for wide exploration (avoids context flooding);
         Handoff — explicit routing via handoff(route_keyword: "KEYWORD");
         Changes — read the session change log; Json — JSON read/merge;
@@ -56,7 +60,8 @@ Orchestration:
         - regex: session ends when a response matches a regex (e.g. Pattern: "\\bAPPROVED\\b").
         - maxiterations: hard cap on total turns.
         - composite: combine multiple strategies (first match wins).
-        - llm: LLM decides when to stop.
+        - tokenbudget: stop once the session has used a set number of tokens.
+        - structured: stop when an agent's reply contains a JSON object matching a condition (e.g. {"status": "done"}).
 
         EVIDENCE CONTRACTS (optional, for production pipelines):
         EvidenceStore.Path: path to evidence graph JSON.
@@ -74,8 +79,7 @@ Orchestration:
         RULES:
         - Never invent plugin names or field names. Use only those listed above.
         - Always run `fuseraft validate <path>` after writing a config.
-        - Ask before overwriting an existing file.
-        - When in doubt, read config/examples/ for style reference.
+        - Change an existing config only when the task asks you to; otherwise write to a new path.
         - Prefer statemachine routing — it is the most predictable and debuggable.
         - Keep agent Instructions focused: what the agent does, what tools to call, and what keyword signals completion.
 
@@ -94,5 +98,6 @@ Orchestration:
     Type: roundrobin
 
   Termination:
-    Type: maxiterations
-    MaxIterations: 50
+    Type: regex
+    Pattern: CONFIG_READY
+    MaxIterations: 10

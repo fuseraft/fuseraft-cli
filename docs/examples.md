@@ -1150,7 +1150,7 @@ Orchestration:
       Plugins: [FileSystem]
 ```
 
-The full config (with complete agent instructions) is at `config/examples/etl-pipeline.yaml`, alongside bash and Python wrapper scripts that build a task from an input/output path pair, invoke `fuseraft run --json --ci`, and exit with fuseraft's own exit code. See [Scripting & Automation](scripting.md) for the full walkthrough — the `--json` contract, wiring this to a webhook/queue/cron trigger, and using the Python wrapper as an importable library function.
+The full config (with complete agent instructions) is at `config/examples/etl-pipeline.yaml`, with bash and Python wrapper scripts in `scripts/` that build a task from an input/output path pair, invoke `fuseraft run --json --ci`, and exit with fuseraft's own exit code. See [Scripting & Automation](scripting.md) for the full walkthrough — the `--json` contract, wiring this to a webhook/queue/cron trigger, and using the Python wrapper as an importable library function.
 
 ---
 
@@ -1159,28 +1159,23 @@ The full config (with complete agent instructions) is at `config/examples/etl-pi
 A single-agent orchestration that helps you design, write, and validate fuseraft configs interactively. Describe your use case in plain language and the Designer generates a ready-to-run YAML config, writes it to disk, and runs `fuseraft validate` to confirm it is correct.
 
 ```
-fuseraft init --template designer
-fuseraft run "I need a two-agent pipeline: a Researcher that searches the web and a Writer that turns findings into a report."
+fuseraft run -c config/examples/fuseraft-designer.yaml "I need a two-agent pipeline: a Researcher that searches the web and a Writer that turns findings into a report."
 ```
 
 **What the Designer knows:**
-- All orchestrator types (`statemachine`, `magentic`, `roundrobin`, `keyword`, `llm`)
+- When to use each orchestrator type (`statemachine`, `magentic`, `roundrobin`, `keyword`, `llm`, …)
 - All plugins and their capabilities
 - All agent fields including `RemoteAgent` for A2A federation
 - Evidence contracts and failure handling patterns
 - Common agent role patterns (Planner, Developer, Tester, Reviewer, Researcher, Writer)
 
 **Key features:**
-- Asks one focused clarifying question if the use case is ambiguous
+- States its assumptions when the use case is ambiguous, rather than stopping to ask
 - Writes the config to the path you specify, defaults to `.fuseraft/config/orchestration.yaml`
 - Runs `fuseraft validate <path>` after every write — you never get a broken config
-- Reads `config/examples/` as style reference when generating unfamiliar patterns
-- Can iterate — ask it to add an agent, change the routing strategy, or tighten termination
+- Keeps going until the config validates, then ends with `CONFIG_READY`
+- To iterate, run it again with a follow-up task: "add a Reviewer to .fuseraft/config/orchestration.yaml"
 
-The static config lives at `config/examples/fuseraft-designer.yaml`. Generate it with:
-
-```
-fuseraft init --template designer .fuseraft/config/my-designer.yaml
-```
+The config lives at `config/examples/fuseraft-designer.yaml`; it isn't one of the `fuseraft init` templates, so copy it into your project to use it outside this repo.
 
 Use a strong reasoning model (`claude-sonnet-4-6`, `gpt-4o`, `gemini-2.5-pro`) for best results — the Designer reasons about schema trade-offs, not just field names.
