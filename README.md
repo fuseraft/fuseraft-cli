@@ -6,382 +6,102 @@
 
 <img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — model-agnostic coding agent">
 
-fuseraft is a model-agnostic coding agent for your terminal: run `fuseraft` and start chatting with a model that can read and edit files, run shell commands, search your codebase, and use git — resumable sessions, ~50 slash commands, and safety guardrails on by default. Bring your own key (BYOK) to Anthropic, xAI, OpenAI, Azure, Ollama, or any OpenAI-compatible provider.
+fuseraft is a coding agent for your terminal that works with any model. Run `fuseraft` and chat with a model that reads and edits your files, runs commands, searches your code and uses git, asking before it changes anything. Bring your own key for Anthropic, OpenAI, xAI, Google, Mistral, DeepSeek, Azure, Ollama, or any OpenAI-compatible endpoint.
 
-When one agent isn't enough, fuseraft scales into declarative, multi-agent pipelines defined in YAML, where routing validators mechanically enforce that each agent did what it claimed — tool-call records, file presence, shell exit codes — before the pipeline advances. Claims are not evidence; artifacts and command results are. Built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
+When one agent isn't enough, fuseraft runs a team of them from a YAML file, and checks each agent's work (files on disk, test exit codes, tool-call records) before handing off to the next. Built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
 
-<img src="docs/.assets/fuseraft-repl.png" alt="A fuseraft REPL session in the terminal">
+**[Documentation](https://fuseraft.ai/fuseraft-cli/)** · [Getting started](https://fuseraft.ai/fuseraft-cli/getting-started/) · [Releases](https://github.com/fuseraft/fuseraft-cli/releases)
 
----
-
-## Quick start
-
-```bash
-# Open an interactive REPL session — no config needed
-fuseraft
-
-# Interactive wizard — describe your use case and get a config back
-fuseraft init
-
-# Or start from a built-in template
-fuseraft init --template solo           # single capable agent — the simplest starting point
-fuseraft init --template pipeline       # Planner → Developer → Tester → Reviewer (graph)
-fuseraft init --template swe            # full SWE pipeline with evidence contracts + Verifier
-fuseraft init --template debate         # adversarial deliberation for decisions and design reviews
-
-# Run a session
-fuseraft run -c .fuseraft/config/orchestration.yaml "Build a REST API in Go with JWT authentication"
-
-# Anchor all agents to a spec file as the authoritative source of truth
-fuseraft run --spec spec.md
-fuseraft run -c .fuseraft/config/orchestration.yaml --spec spec.md "Implement the specification"
-
-# Resume the most recent incomplete session
-fuseraft run --resume
-
-# Validate a config — add --diagram for a Mermaid flowchart preview
-fuseraft validate .fuseraft/config/orchestration.yaml --diagram
-```
-
----
-
-## Chat in your terminal
-
-`fuseraft repl` (or just `fuseraft` with no subcommand) starts an interactive chat session with a single model — no config file needed:
-
-- **Safe by default** — HITL approval and a filesystem/shell/git sandbox scoped to your launch directory are on unless you pass `--yolo`
-- **Built-in tools** — file read/write/patch, shell, code search, git, HTTP, a self-directed todo list, and subagents (`/explore`, `/locate`) the model can call mid-turn
-- **Slash commands** — plan and execute multi-step work (`/plan`, `/execute`, `/recover`), manage context (`/compact`, `/rewind`, `/undo`), inspect usage (`/context`, `/events`), connect MCP servers (`/mcp add`), switch models and reasoning effort live (`/model`, `/models`, `/reasoning`) — `/help` lists all of them
-- **Resumable sessions** — every session is checkpointed; `fuseraft --resume` (most recent here), `--resume <id>`, or `/sessions` picks up where you left off, `/fork` branches one off without disturbing the original
-- **Cross-session memory & skills** — the assistant saves and recalls memories (`/memory`) and loads portable skill packages
-- **Any provider** — model auto-detected from whichever API key is in your environment, or set explicitly with `--model`
-- Also available as a chat panel in the [VS Code extension](#vs-code-extension)
-
-See the [CLI Reference](docs/cli-reference.md#fuseraft-repl) for the full flag and slash-command list.
-
----
-
-## Run as a resident daemon
-
-`fuseraft serve` builds the agent team once and stays running, waiting to be dispatched into instead of exiting after a single task:
-
-- **Two front doors** — an MCP server (`dispatch_task`/`get_status`/`get_result` over streamable HTTP) for other agents, and a Unix socket (`fuseraft attach`) for a human
-- **Safe by default** — mutating tool calls from an unattended dispatch deny by default (`--unattended-policy allow` to opt in); approval for a task routes only to whoever actually dispatched it, never to a bystander who's just watching
-- **Live progress** — every attached connection sees what's currently running, regardless of who dispatched it
-- **Objective-driven autonomy** — `--auto-objective <id>` lets the daemon pull its own next task off an objective's backlog when idle, instead of only running what it's told
-
-```bash
-fuseraft serve --auto-objective OBJ-0001 --unattended-policy allow
-fuseraft attach   # from another terminal
-```
-
-See the [CLI Reference](docs/cli-reference.md#fuseraft-serve) for the full flag and MCP tool list.
-
----
+<img src="docs/.assets/fuseraft-repl.png" alt="A fuseraft REPL session asking to approve a file edit, with the diff shown">
 
 ## Install
 
-Prebuilt binaries are self-contained — no .NET installation required.
-
-**Linux / macOS**
+Prebuilt binaries are self-contained; you don't need .NET.
 
 ```bash
+# Linux / macOS (end with `bash -s -- --system` to install to /usr/local/bin)
 curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash
 ```
 
-Add `--system` to install to `/usr/local/bin` instead of `~/.local/bin`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash -s -- --system
-```
-
-**Windows (PowerShell)**
-
 ```powershell
+# Windows
 irm https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.ps1 | iex
 ```
 
-Both scripts download the latest release from [GitHub Releases](https://github.com/fuseraft/fuseraft-cli/releases), place the binary on your `PATH`, and confirm with a `fuseraft --version` on completion.
+Or download an archive from [Releases](https://github.com/fuseraft/fuseraft-cli/releases). `fuseraft update` keeps it current.
 
-**Manual download**
-
-Grab the archive for your platform from [Releases](https://github.com/fuseraft/fuseraft-cli/releases), extract the binary, and place it on your `PATH`.
-
-**Updates**
-
-Once installed, keep fuseraft current with:
+## Chat in your terminal
 
 ```bash
-fuseraft update          # download and install the latest release
-fuseraft update --check  # check without installing
+fuseraft              # start a chat in the current directory
+fuseraft --resume     # pick up the last chat here
 ```
 
-On Windows, `fuseraft update` launches a separate `fuseraft-update.exe` process (included in the release archive) that waits for running fuseraft instances to exit before replacing the binary. On Linux and macOS the replacement is atomic and happens in place.
+No config file needed: a setup wizard picks a provider and model on first run, and stores the key in your OS keychain.
 
-**Build from source**
+- **Safe by default.** Commands, file writes and git changes ask first, with a diff for every edit, and the agent is confined to the directory you started in. `--yolo` turns both off.
+- **Sessions you can come back to.** Every chat is saved; `/sessions` resumes one, `/fork` branches one, `/rewind` and `/undo` step back.
+- **Plans, sub-agents and goals.** `/plan` and `/execute` for multi-step work, sub-agents for exploring the codebase, `/goal` to keep going until a goal is met.
+- **Memory, skills and MCP.** It remembers what it learns across chats, loads portable skill packages, and connects to MCP servers (`/mcp add`).
+- **Switch models mid-chat** with `/model`; `/help` lists every command.
 
-Requires the [.NET 10 SDK](https://dot.net):
+More in the [REPL guide](https://fuseraft.ai/fuseraft-cli/repl/).
+
+## Agent teams
+
+`fuseraft run` drives a team of agents defined in YAML. Each one has its own model, instructions and tools, and routing validators block a handoff until the evidence exists: a brief on disk, the files the agent said it wrote, a passing test run.
 
 ```bash
-./build.sh          # Linux / macOS
-.\build.ps1         # Windows
+fuseraft init --template pipeline    # Planner → Developer → Tester → Reviewer
+fuseraft run -c .fuseraft/config/orchestration.yaml "Add JWT auth to the API"
+fuseraft run --resume                # continue the last unfinished session
 ```
-
-The binary lands in `./bin/`.
-
----
-
-## Multi-agent pipelines
-
-For work that benefits from more than one specialized agent, with mechanical verification that each did what it claimed:
-
-**Enforcement**
-- Routing validators block handoffs until evidence exists on disk (`RequireBrief`, `RequireWriteFile`, `RequireShellPass`, `TestReportValid`, etc.)
-- Change tracker logs every `write_file`, `shell_run`, and `git_commit` to a JSONL audit log
-- Evidence contracts gate transitions with predicates: `FileExists`, `FilesWritten`, `CommandSucceeded`
-
-**Coordination**
-- Twelve routing modes: sequential (one-pass), round-robin (cycling), keyword, structured, state machine, graph (parallel fan-out + hierarchical sub-graphs), workflow (cycle-native graph compiled once per session), LLM, Magentic, adversarial generate→critique, map-reduce (parallel item processing), scatter-gather (broadcast + synthesize)
-- Saga mode adds compensating rollback on failure
-- Inline agents or reusable, declarative `AgentFile` YAML; mix providers in one pipeline
-- Federate slots via A2A protocol
-
-**Knowledge & Tools**
-- Cross-session knowledge: ADRs, repository graph, provenance claims, objectives
-- Architecture drift detection, knowledge life cycle GC
-- Built-in [plugins](docs/plugins.md), Docker sandboxes, MCP servers, skills
-
-**Reliability & Governance**
-- Checkpoints after every turn; resume anywhere
-- Token tracking, compaction, per-agent context specs
-- Execution rings, prompt-injection detection, circuit breakers, rate limiting, SLO tracking, sandboxing, HITL
-- Prompt injection scans, blocked calls recorded in audit logs
-- Hash-chain audit logging, per-agent [decentralized identifiers](https://www.w3.org/TR/did-core/)
-
----
-
-## Documentation
-
-| Doc | Covers |
-|-----|--------|
-| [Getting Started](docs/getting-started.md) | Prerequisites, first run |
-| [CLI Reference](docs/cli-reference.md) | Commands and flags |
-| [Serve (Daemon Mode)](docs/serve.md) | Resident agent process dispatchable via MCP or a human attach session, objective-driven auto-dispatch |
-| [Scripting & Automation](docs/scripting.md) | Running fuseraft from bash/Python, `--json` output, event-driven pipelines |
-| [Configuration](docs/configuration.md) | YAML/JSON schema |
-| [Models & Providers](docs/models.md) | Model configuration and provider auto-detection |
-| [Plugins](docs/plugins.md) | All built-in tools agents can call |
-| [Strategies](docs/strategies.md) | Selection and termination strategies |
-| [Validators](docs/validators.md) | Anti-hallucination handoff guards |
-| [Harness Engineering](docs/harness-engineering.md) | Configs that enforce real progress mechanically |
-| [MCP Integration](docs/mcp.md) | Connecting external MCP servers |
-| [Security & Sandbox](docs/security.md) | File and network containment |
-| [Governance](docs/governance.md) | Execution rings, audit log, circuit breaker, SLO tracking |
-| [Context Store](docs/context-store.md) | Importing files and directories into the session context |
-| [Sessions](docs/sessions.md) | Resumption, HITL, cost tracking, compaction |
-| [Knowledge Layer](docs/knowledge.md) | ADRs, graph, provenance |
-| [Skills](docs/skills.md) | Portable skill packages, skill curation, and the cross-session skill index |
-| [Examples](docs/examples.md) | Ready-to-use config examples |
-| [Design](docs/design.md) | Architecture, layer map, MAF usage, and decision log |
-
----
-
-## Pipeline topologies
-
-A declarative agent is a reusable [`AgentFile`](docs/configuration.md#agent-files) — name, instructions, model, plugins, capabilities — versioned and shared like any other YAML. A declarative workflow composes several into one of the topologies below via routing strategy and evidence contracts, not an imperative graph of hand-authored condition/goto steps.
-
-**Simple**
-```mermaid
-flowchart LR
-    Task((Task)) --> Assistant[Assistant]
-```
-
-**Keyword routing with validators**
-
-```mermaid
-flowchart TD
-    Task((Task))
-    Planner[Planner]
-    Developer[Developer]
-    Tester[Tester]
-    Reviewer[Reviewer]
-    Done(["✓ Done"])
-
-    Task --> Planner
-    Planner      -->|"HANDOFF TO DEVELOPER · RequireBrief"| Developer
-    Developer    -->|"HANDOFF TO TESTER · RequireWriteFile · RequireShellPass"| Tester
-    Tester       -->|"HANDOFF TO REVIEWER · TestReportValid"| Reviewer
-    Reviewer     -->|"APPROVED"| Done
-    Reviewer     -->|"REVISION REQUIRED"| Developer
-    Reviewer     -->|"REPLAN REQUIRED"| Planner
-    Tester       -->|"BUGS FOUND"| Developer
-```
-
-**Declarative directed-graph pipelines**
-
-```mermaid
-flowchart TD
-    Planner([Planner])
-    Developer([Developer])
-    Tester([Tester])
-    Reviewer([Reviewer])
-    Terminal(["Reviewer\n✓ terminal"])
-
-    Planner   -->|"HANDOFF TO DEVELOPER · RequireBrief"| Developer
-    Developer -->|"HANDOFF TO TESTER · RequireWriteFile"| Tester
-    Tester    -->|"HANDOFF TO REVIEWER · TestReportValid"| Reviewer
-    Reviewer  -->|"APPROVED · RequireReviewJudgement"| Terminal
-    Reviewer  -->|"REPLAN REQUIRED"| Planner
-    Tester    -->|"BUGS FOUND"| Developer
-    Reviewer  -->|"REVISION REQUIRED"| Developer
-```
-
-...to parallel fan-out/fan-in where a coordinator spawns concurrent workers that merge into a single downstream node:
-
-```mermaid
-flowchart TD
-    Coordinator([Coordinator])
-    AnalyzerA(["Analyzer A\nparallel"])
-    AnalyzerB(["Analyzer B\nparallel"])
-    Synthesizer(["Synthesizer\n✓ terminal"])
-
-    Coordinator -->|"BEGIN PARALLEL ANALYSIS"| AnalyzerA
-    Coordinator -->|"BEGIN PARALLEL ANALYSIS"| AnalyzerB
-    AnalyzerA   -->|"ANALYSIS COMPLETE"| Synthesizer
-    AnalyzerB   -->|"ANALYSIS COMPLETE"| Synthesizer
-```
-
-**Fully autonomous [Magentic](https://arxiv.org/abs/2411.04468) pipelines**
 
 ```mermaid
 flowchart LR
-    Task((Task))
-    Manager([Manager])
-    Researcher[Researcher]
-    Developer[Developer]
-
-    Task       --> Manager
-    Manager    -->|"selects"| Researcher
-    Manager    -->|"selects"| Developer
-    Researcher -.->|"reports"| Manager
-    Developer  -.->|"reports"| Manager
+    Planner -->|"brief written"| Developer
+    Developer -->|"files written · tests pass"| Tester
+    Tester -->|"test report"| Reviewer
+    Reviewer -->|"REVISION REQUIRED"| Developer
+    Tester -->|"BUGS FOUND"| Developer
+    Reviewer -->|"APPROVED"| Done(["✓ Done"])
 ```
 
-**Adversarial pipelines**:
+Teams can run in sequence, as a state machine or graph with parallel branches, under an LLM manager (Magentic), as generator-and-critic pairs, or as map-reduce and scatter-gather fan-outs. Every turn is checkpointed. `fuseraft init --list-templates` shows the other starting points (`solo`, `swe`, `debate`, …).
 
-```mermaid
-flowchart TD
-    Task((Task))
-    Planner["Planner\ngenerator"]
-    PlanReviewer["PlanReviewer\ncritic · isolated context"]
-    Developer["Developer\ngenerator"]
-    CodeReviewer["CodeReviewer\ncritic · isolated context"]
-    Done(["✓ Done"])
+Start with [Configuration](https://fuseraft.ai/fuseraft-cli/configuration/), [Strategies](https://fuseraft.ai/fuseraft-cli/strategies/) and [Routing validators](https://fuseraft.ai/fuseraft-cli/validators/).
 
-    Task         --> Planner
-    Planner      -->|artifact| PlanReviewer
-    PlanReviewer -->|"APPROVED"| Developer
-    PlanReviewer -.->|revise| Planner
-    Developer    -->|artifact| CodeReviewer
-    CodeReviewer -->|"APPROVED"| Done
-    CodeReviewer -.->|revise| Developer
+## Run it as a daemon
+
+`fuseraft serve` keeps an agent team running and waiting for work. Other agents dispatch tasks to it over MCP; people attach with `fuseraft attach`, locally or from another machine over TLS with per-client tokens. Approvals go to whoever sent the task, and unattended changes are denied unless you allow them.
+
+```bash
+fuseraft serve
+fuseraft attach    # from another terminal
 ```
 
-**Scatter-gather (broadcast + synthesize)**
+See [Serve (daemon mode)](https://fuseraft.ai/fuseraft-cli/serve/).
 
-```mermaid
-flowchart TD
-    Task((Task))
-    Legal([LegalReviewer])
-    Tech([TechnicalReviewer])
-    Biz([BusinessReviewer])
-    Lead(["LeadReviewer\n✓ terminal"])
+## Beyond the terminal
 
-    Task --> Legal
-    Task --> Tech
-    Task --> Biz
-    Legal --> Lead
-    Tech  --> Lead
-    Biz   --> Lead
+- **[fuseraft for VS Code](https://github.com/fuseraft/fuseraft-vscode)** puts the same chat in a panel beside your editor, with native diff tabs for approvals.
+- **[fuseraft-web](https://fuseraft.ai/fuseraft-web/)** runs fuseraft in the browser for a team: an account per person, shared approvals, and daemons on other machines.
+
+Both drive the CLI through its versioned [wire protocol](https://fuseraft.ai/fuseraft-cli/protocol/), which you can use from your own scripts too (see [Scripting](https://fuseraft.ai/fuseraft-cli/scripting/)).
+
+## Building from source
+
+Requires the [.NET 10 SDK](https://dot.net).
+
+```bash
+./build.sh      # Linux / macOS; builds, runs the tests, and puts the binary in ./bin/
+.\build.ps1     # Windows
 ```
-
-**Map-reduce (parallel item processing)**
-
-```mermaid
-flowchart TD
-    Task((Task))
-    Splitter([Splitter])
-    MapperA(["Mapper · item 1"])
-    MapperB(["Mapper · item 2"])
-    MapperC(["Mapper · item N"])
-    Reducer(["Reducer\n✓ terminal"])
-
-    Task     --> Splitter
-    Splitter -->|item 1| MapperA
-    Splitter -->|item 2| MapperB
-    Splitter -->|item N| MapperC
-    MapperA  --> Reducer
-    MapperB  --> Reducer
-    MapperC  --> Reducer
-```
-
-**Hierarchical sub-graphs**
-
-```mermaid
-flowchart TD
-    Task((Task))
-    SubGraph["research_phase\n(nested graph)"]
-    Gatherer([DataGatherer])
-    Analyst(["Analyst\n✓ sub-graph terminal"])
-    Writer(["Writer\n✓ terminal"])
-
-    Task     --> SubGraph
-    SubGraph --> Gatherer
-    Gatherer -->|"DATA READY"| Analyst
-    SubGraph -->|"RESEARCH COMPLETE"| Writer
-```
-
----
-
-## VS Code Extension
-
-The [fuseraft VS Code extension](https://github.com/fuseraft/fuseraft-vscode) brings the full CLI experience into your editor, with the REPL as the primary experience.
-
-**REPL Chat Panel** — `fuseraft: Open REPL` opens the same interactive chat session as the terminal REPL, in a panel beside your editor:
-- Live streaming responses, tool call badges, full markdown rendering with one-click code copy, per-turn token usage on hover
-- Model dropdown — switch models live, fetched from your provider
-- Slash commands (`/plan`, `/execute`, `/compact`, `/tools`, `/sessions`, and more), resumable sessions, stop button to interrupt mid-stream
-- File change summary after each response; write/patch approvals open as native VS Code diff tabs
-
-**Activity bar panel** — seven persistent views:
-- **Run Task** — compose a task, pick a config, set flags (`--hitl`, `--tools`, `--verbose`, `--devui`), and launch. Each task opens in its own named terminal; multiple tasks can run simultaneously.
-- **Sessions** — lists sessions scoped to your workspace with status, age, and task preview. Click to resume; preview icon opens a formatted transcript with per-turn token usage.
-- **Configs** — auto-discovers every fuseraft config in your workspace. Click to open, or hit **+** to run the Initialize Config wizard.
-- **Context** — manages reference material agents can access during sessions. Import files or folders; they're stored in `.fuseraft/context/` and available to any session in the workspace.
-- **Memory** — lists cross-session memories grouped by type. Click to open, right-click to delete.
-- **Skills** — lists installed skill packages. Click to open `SKILL.md`, **+** to add one.
-- **Objectives** — lists objectives with status and task-completion percentage. **+** to create one.
-
-**CodeLens on config files** — three inline actions appear above the first line of any config:
-
-```
-▶ Run Task   ✓ Validate   ⎇ Diagram
-```
-
-**Task files** — right-click any `.md` or `.txt` file in the explorer or editor to run it directly as a fuseraft task.
-
-**YAML / JSON IntelliSense** — full JSON Schema for fuseraft configs ships with the extension. Autocomplete, inline docs, and validation for every field.
-
-**Status bar** — a persistent `fuseraft` button always visible at the bottom of the editor.
-
----
 
 ## Contributing
 
-Contributions are welcome — bug fixes, new plugins, config examples, documentation, and new ideas. See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
-
----
+Bug fixes, plugins, config examples and docs are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT
+[MIT](LICENSE.md)
