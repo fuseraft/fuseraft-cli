@@ -82,6 +82,8 @@ internal static partial class ReplCommands
 
             if (ctx.JsonMode)
             {
+                // The title event carries the session ID, so a client keeping it (to resume the chat later) follows the switch.
+                ReplJsonBridge.Emit(new { type = "title", sessionId = ctx.SessionId, title = ctx.Title, autoTitle = ctx.AutoTitle });
                 ReplJsonBridge.Emit(new { type = "text", text =
                     $"## Switched to Fork\n\n" +
                     $"Previous session: **`{prevId}`** (saved)\n\n" +
@@ -320,6 +322,7 @@ internal static partial class ReplCommands
 
         if (ctx.JsonMode)
         {
+            ReplJsonBridge.Emit(new { type = "title", sessionId = ctx.SessionId, title = ctx.Title, autoTitle = ctx.AutoTitle });
             ReplJsonBridge.Emit(new { type = "text", text =
                 $"## Switched Session\n\n" +
                 $"Now running as: **`{snapshot.SessionId}`** (was `{prevId}`)\n\n" +

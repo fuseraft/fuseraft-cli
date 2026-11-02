@@ -246,7 +246,7 @@ There are no request IDs. A response is simply the next matching line on stdin, 
 | `step_status` | `step`, `total`, `status`, `stepsLeft` | |
 | `shell_start` / `shell_output` / `shell_end` | `command` / `text` / — | A `!command` shell escape. |
 | `replay` | `total`, `compacted`, `turns[]` (`{user, assistant, toolCalls[]}`) | Earlier turns, re-sent after a resume. |
-| `title` | `sessionId`, `title`, `autoTitle` | The chat's name changed. |
+| `title` | `sessionId`, `title`, `autoTitle` | The chat's name changed, or the chat switched to another session (`/switch`, `/fork switch`): `sessionId` is the one it now runs as. |
 | `applied` | `command`, `message` | A mid-turn command took effect. |
 | `copy` | `text` | Text the user asked to copy to the clipboard. |
 | `text` / `info` / `warning` / `error` | `text` | Messages for the user. `text` is pre-rendered Markdown. |
