@@ -151,13 +151,13 @@ internal static class ReplFactory
             // enough that the extra mechanism isn't worth the complexity there. maxIterations
             // still carries that distinction here (ChatIterationLimit for free-form vs.
             // StepIterationLimit for steps — see ReplTurn.ChatIterationLimit's own comment on
-            // why this parameter and that constant can't drift apart).
+            // why this parameter and that constant can't drift apart). Free-form turns also run
+            // read-only calls side by side (ReplToolScheduler).
+            var freeForm = maxIterations == ReplTurn.ChatIterationLimit;
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? functionInvoker =
-                maxIterations == ReplTurn.ChatIterationLimit
-                    ? new ReplToolLoopGuard(limits).InvokeAsync
-                    : null;
+                freeForm ? new ReplToolLoopGuard(limits, new ReplToolScheduler().InvokeAsync).InvokeAsync : null;
             client = AgentMiddlewareBuilder.BuildEventEmitMiddleware(
-                client, agentConfig, skillsProvider: null, functionInvoker);
+                client, agentConfig, skillsProvider: null, functionInvoker, allowConcurrentInvocation: freeForm);
         }
         return client;
     }

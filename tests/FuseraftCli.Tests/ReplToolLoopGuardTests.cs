@@ -346,4 +346,87 @@ public sealed class ReplToolLoopGuardTests
         Assert.All(results.Take(3), r => Assert.DoesNotContain("SYSTEM NOTICE", r));
         Assert.Contains("4 rounds of tool calls in a row have failed", results[3]);
     }
+
+    // Rounds as FunctionInvokingChatClient makes them: every call of a round shares one Messages list.
+
+    private static FunctionInvocationContext RoundCall(
+        IList<ChatMessage> round, int iteration, AIFunction function, string cmd, int index, int count) => new()
+    {
+        Messages          = round,
+        Iteration         = iteration,
+        FunctionCallIndex = index,
+        FunctionCount     = count,
+        Function          = function,
+        Arguments         = new AIFunctionArguments(new Dictionary<string, object?> { ["cmd"] = cmd }),
+        CallContent       = new FunctionCallContent($"call-{iteration}-{index}", "shell_run",
+            new Dictionary<string, object?> { ["cmd"] = cmd }),
+    };
+
+    [Fact]
+    public async Task IdenticalCallsInTheFirstRound_StillCountTowardTheStreak()
+    {
+        var guard = new ReplToolLoopGuard();
+        List<ChatMessage> round = [];
+
+        string? third = null;
+        for (var i = 0; i < 3; i++)
+            third = (await guard.InvokeAsync(RoundCall(round, 0, FlakyFunction, "ls", i, 3), CancellationToken.None))?.ToString();
+
+        Assert.Contains("3 call in a row", third);
+    }
+
+    [Fact]
+    public async Task ASuccessEarlyInTheFirstRound_KeepsItFromCountingAsFailed()
+    {
+        var guard = new ReplToolLoopGuard();
+        List<ChatMessage> first = [], second = [];
+        await guard.InvokeAsync(RoundCall(first, 0, FlakyFunction, "ok", 0, 3), CancellationToken.None);
+        await guard.InvokeAsync(RoundCall(first, 0, FlakyFunction, "bad-1", 1, 3), CancellationToken.None);
+        await guard.InvokeAsync(RoundCall(first, 0, FlakyFunction, "bad-2", 2, 3), CancellationToken.None);
+
+        var r = (await guard.InvokeAsync(RoundCall(second, 1, FlakyFunction, "bad-3", 0, 1), CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", r);   // one failed round so far, not two
+    }
+
+    [Fact]
+    public async Task ANewRequest_StartsANewTurnEvenAtTheSameIteration()
+    {
+        var guard = new ReplToolLoopGuard();
+        for (var turn = 0; turn < 2; turn++)
+            await guard.InvokeAsync(RoundCall(new List<ChatMessage>(), 0, FlakyFunction, "ls", 0, 1), CancellationToken.None);
+
+        var r = (await guard.InvokeAsync(RoundCall(new List<ChatMessage>(), 0, FlakyFunction, "ls", 0, 1), CancellationToken.None))?.ToString();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", r);
+    }
+
+    [Fact]
+    public async Task CallsFinishingOutOfOrder_TheLastToFinishIsTold()
+    {
+        var guard = new ReplToolLoopGuard();
+        var gate  = new TaskCompletionSource();
+        var slow  = AIFunctionFactory.Create(async () => { await gate.Task; return "[ERROR] slow"; }, "shell_run");
+        await guard.InvokeAsync(RoundCall([], 0, FlakyFunction, "bad-0", 0, 1), CancellationToken.None);
+
+        List<ChatMessage> round = [];
+        var first  = guard.InvokeAsync(RoundCall(round, 1, slow, "a", 0, 2), CancellationToken.None).AsTask();
+        var second = (await guard.InvokeAsync(RoundCall(round, 1, FlakyFunction, "bad-b", 1, 2), CancellationToken.None))?.ToString();
+        gate.SetResult();
+
+        Assert.DoesNotContain("SYSTEM NOTICE", second);
+        Assert.Contains("2 rounds of tool calls in a row have failed", (await first)?.ToString());
+    }
+
+    [Fact]
+    public async Task ARoundShortOfACall_IsStillCounted()
+    {
+        var guard = new ReplToolLoopGuard();
+        // Two calls were requested but one never reached the invoker (an unknown tool).
+        await guard.InvokeAsync(RoundCall([], 0, FlakyFunction, "bad-0", 0, 2), CancellationToken.None);
+
+        var r = (await guard.InvokeAsync(RoundCall([], 1, FlakyFunction, "bad-1", 0, 1), CancellationToken.None))?.ToString();
+
+        Assert.Contains("2 rounds of tool calls in a row have failed", r);
+    }
 }

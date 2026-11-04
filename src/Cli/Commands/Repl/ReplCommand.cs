@@ -131,6 +131,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         "shell_which", "shell_get_working_directory",
     };
 
+    private static readonly HashSet<string> ShellCommandTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "shell_run", "shell_run_script",
+    };
+
     private static readonly HashSet<string> CoreGitTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "git_status", "git_diff", "git_log", "git_show", "git_branch_list",
@@ -518,7 +523,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             fsFunctions    = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory, sandboxRoot: sandboxRoot, includedRoots: includedRoots, exemptedPaths: [toolArtifactsDir])))
                 .ToList();
-            shellFunctions = PluginRegistry.GetFunctionsFromObject(shellPlugin!).ToList();
+            // Explorations can run side by side, and each may run commands.
+            shellFunctions = ToolConcurrency.OneAtATime(PluginRegistry.GetFunctionsFromObject(shellPlugin!), ShellCommandTools);
             gitFunctions   = PluginRegistry.GetFunctionsFromObject(new GitPlugin(approveToolAction("Git"), sandboxRoot, includedRoots, fsDenyPatterns)).ToList();
             toolsByCategory["Search"]     = PluginRegistry.GetFunctionsFromObject(new SearchPlugin(sandboxRoot, includedRoots, fsDenyPatterns)).ToList();
             todoPlugin                    = new TodoPlugin();
