@@ -156,12 +156,12 @@ In the REPL a stream that drops mid-reply is also retried automatically, separat
 
 ### OS keychain fallback
 
-If an agent model has neither `ApiKey` nor `ApiKeyEnvVar` set after global defaults are applied, fuseraft retrieves the key stored in the OS keychain (set via `fuseraft key set` or the REPL wizard) and injects it as a literal `ApiKey`. This means the full auth resolution order for any agent model is:
+If an agent model has neither `ApiKey` nor `ApiKeyEnvVar` set after global defaults are applied, fuseraft retrieves the key stored in the OS keychain (set via `fuseraft keychain --set` or the REPL wizard) and injects it as a literal `ApiKey`. This means the full auth resolution order for any agent model is:
 
 1. Explicit `ApiKey` in the agent file (literal value)
 2. `ApiKeyEnvVar` from the agent file (env var lookup)
 3. `provider.apiKeyEnvVar` from `~/.fuseraft/config` (env var lookup)
-4. OS keychain (retrieved once at startup, injected as literal key)
+4. OS keychain: the key saved for that model's endpoint (retrieved once at startup, injected as literal key). A model on another endpoint never gets it.
 5. Nothing — Ollama and other unauthenticated providers work without a key
 
 Per-agent values always win; global values only fill in empty fields.

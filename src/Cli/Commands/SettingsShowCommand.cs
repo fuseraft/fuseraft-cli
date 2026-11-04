@@ -25,7 +25,8 @@ public sealed class SettingsShowCommand : AsyncCommand
         }
 
         var keyStore  = ApiKeyStoreFactory.Create();
-        var storedKey = await keyStore.RetrieveAsync();
+        var keyFor    = ProviderKeys.Origin(KeyStorePersistence.EndpointOf(config));
+        var storedKey = await ProviderKeys.RetrieveAsync(keyStore, KeyStorePersistence.EndpointOf(config), adoptLegacy: true);
 
         // Keys match `fuseraft settings set` so any row can be copied straight into it; rows without a
         // section prefix (API key, MCP servers, ...) aren't settable that way.
@@ -61,7 +62,7 @@ public sealed class SettingsShowCommand : AsyncCommand
         Row("provider.apiKeyEnvVar", Str(config.ApiKeyEnvVar, "(none)"));
         Row("API key", string.IsNullOrEmpty(storedKey)
             ? Dim("not stored — read from the environment, if set")
-            : $"[green]stored[/] [dim]in {Markup.Escape(keyStore.StoreName)}[/]");
+            : $"[green]stored[/] [dim]for {Markup.Escape(keyFor)} in {Markup.Escape(keyStore.StoreName)}[/]");
         Row("provider.requestTimeoutSeconds",    Tuned(config.RequestTimeoutSeconds,    TransportOptions.DefaultRequestTimeoutSeconds,    v => $"{v}s"));
         Row("provider.streamIdleTimeoutSeconds", Tuned(config.StreamIdleTimeoutSeconds, TransportOptions.DefaultStreamIdleTimeoutSeconds, v => $"{v}s"));
         Row("provider.maxRetries",               Tuned(config.MaxRetries,               TransportOptions.DefaultMaxRetries,               v => v.ToString()));

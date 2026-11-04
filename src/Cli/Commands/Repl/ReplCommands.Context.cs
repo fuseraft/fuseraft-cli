@@ -339,7 +339,7 @@ internal static partial class ReplCommands
         var (newCfg, newKey, _) = await ReplFactory.RunSetupWizardAsync(ctx.ModelId, ctx.UserCfg);
         if (newCfg is null || newKey is null) return CommandResult.Continue;
 
-        ctx.KeyStored = string.IsNullOrEmpty(newKey) || await KeyStorePersistence.TryStoreAsync(ctx.KeyStore, newKey);
+        ctx.KeyStored = string.IsNullOrEmpty(newKey) || await KeyStorePersistence.TryStoreAsync(ctx.KeyStore, newCfg, newKey);
         newCfg.ApiKey    = newKey;
         ctx.UserCfg      = newCfg;
         ctx.ModelId      = newCfg.ModelId;

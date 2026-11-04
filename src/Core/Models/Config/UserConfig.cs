@@ -71,10 +71,16 @@ public sealed class UserConfig
     [JsonIgnore]
     public string ApiKey { get; set; } = string.Empty;
 
-    // Ollama runs locally without an API key, so a configured Ollama provider is
-    // considered complete without one.
+    /// <summary>Origin the keychain key in <see cref="ApiKey"/> was saved for (see <see cref="ModelConfig.ApiKeyOrigin"/>).</summary>
+    [JsonIgnore]
+    public string ApiKeyOrigin { get; set; } = string.Empty;
+
+    // Ollama, and any server on this machine (the VS Code extension saves Ollama as an
+    // OpenAI-compatible localhost endpoint), can run without an API key.
     [JsonIgnore]
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(ModelId) &&
-        (!string.IsNullOrWhiteSpace(ApiKey) || Provider.Equals("ollama", StringComparison.OrdinalIgnoreCase));
+        (!string.IsNullOrWhiteSpace(ApiKey)
+         || Provider.Equals("ollama", StringComparison.OrdinalIgnoreCase)
+         || (Uri.TryCreate(Endpoint, UriKind.Absolute, out var uri) && uri.IsLoopback));
 }

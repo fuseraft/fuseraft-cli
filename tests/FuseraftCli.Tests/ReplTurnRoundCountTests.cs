@@ -1,4 +1,3 @@
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
@@ -51,7 +50,7 @@ public sealed class ReplTurnRoundCountTests : IDisposable
     private readonly string _tempHome = Path.Combine(Path.GetTempPath(), $"fuseraft-test-{Guid.NewGuid():N}");
     private readonly List<string> _eventsPaths = [];
     private readonly List<ReplSessionContext> _contexts = [];
-    private readonly List<HttpListener> _listeners = [];
+    private readonly List<LoopbackHttpServer> _servers = [];
 
     public ReplTurnRoundCountTests() =>
         Environment.SetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar, _tempHome);
@@ -60,7 +59,7 @@ public sealed class ReplTurnRoundCountTests : IDisposable
     {
         Environment.SetEnvironmentVariable(FuseraftPaths.HomeOverrideEnvVar, _originalHome);
         if (Directory.Exists(_tempHome)) Directory.Delete(_tempHome, recursive: true);
-        foreach (var l in _listeners) l.Close();
+        foreach (var server in _servers) server.DisposeAsync().AsTask().GetAwaiter().GetResult();
         foreach (var ctx in _contexts) { ctx.Emitter.Dispose(); ctx.Factory.Dispose(); }
         foreach (var path in _eventsPaths) if (File.Exists(path)) File.Delete(path);
     }
@@ -68,29 +67,15 @@ public sealed class ReplTurnRoundCountTests : IDisposable
     // Answers each chat-completions request with the next stream in turn (the last one repeats).
     private string Serve(params string[] streams)
     {
-        var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        probe.Start();
-        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
-        probe.Stop();
-
-        var listener = new HttpListener();
-        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-        listener.Start();
-        _listeners.Add(listener);
         var next = 0;
-        _ = Task.Run(async () =>
+        var server = new LoopbackHttpServer((_, res) =>
         {
-            while (listener.IsListening)
-            {
-                HttpListenerContext c;
-                try { c = await listener.GetContextAsync(); } catch { return; }
-                var body = Encoding.UTF8.GetBytes(streams[Math.Min(next++, streams.Length - 1)]);
-                c.Response.ContentType = "text/event-stream";
-                await c.Response.OutputStream.WriteAsync(body);
-                c.Response.Close();
-            }
+            var body = Encoding.UTF8.GetBytes(streams[Math.Min(next++, streams.Length - 1)]);
+            res.ContentType = "text/event-stream";
+            return res.OutputStream.WriteAsync(body, 0, body.Length);
         });
-        return $"http://127.0.0.1:{port}/v1";
+        _servers.Add(server);
+        return server.BaseUrl + "/v1";
     }
 
     private (ReplSessionContext Ctx, string EventsPath) NewContext(string endpoint)

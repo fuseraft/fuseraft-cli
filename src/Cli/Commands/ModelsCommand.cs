@@ -29,13 +29,13 @@ public sealed class ModelsCommand : AsyncCommand<ModelsSettings>
         if (!string.IsNullOrEmpty(legacyKey))
         {
             userCfg!.ApiKey = legacyKey;
-            if (await KeyStorePersistence.TryStoreAsync(keyStore, legacyKey) && !settings.Json)
+            if (await KeyStorePersistence.TryStoreAsync(keyStore, userCfg, legacyKey) && !settings.Json)
                 AnsiConsole.MarkupLine($"[dim]API key migrated to {Markup.Escape(keyStore.StoreName)}.[/]");
             UserConfigStore.Save(userCfg);
         }
         else if (userCfg is not null)
         {
-            userCfg.ApiKey = await keyStore.RetrieveAsync() ?? string.Empty;
+            await KeyStorePersistence.LoadAsync(keyStore, userCfg);
         }
 
         bool pendingSave = false;
@@ -56,7 +56,7 @@ public sealed class ModelsCommand : AsyncCommand<ModelsSettings>
             (userCfg, wizardKey, selectedFromList) = await ReplFactory.RunSetupWizardAsync(null, userCfg);
             if (userCfg is null || wizardKey is null) return 1;
             if (!string.IsNullOrEmpty(wizardKey))
-                await KeyStorePersistence.TryStoreAsync(keyStore, wizardKey);
+                await KeyStorePersistence.TryStoreAsync(keyStore, userCfg, wizardKey);
             userCfg.ApiKey = wizardKey;
             if (selectedFromList)
                 UserConfigStore.Save(userCfg);
