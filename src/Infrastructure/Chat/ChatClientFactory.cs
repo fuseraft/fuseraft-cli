@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using OllamaSharp;
 using OpenAI;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.KeyStore;
 
 namespace fuseraft.Infrastructure.Chat;
 
@@ -83,6 +84,8 @@ public sealed class ChatClientFactory(
     // OpenAI-compatible endpoint) is what makes prompt caching available at all. See
     // AnthropicPromptCachingChatClient for why.
     private const string AnthropicDefaultEndpoint = "https://api.anthropic.com";
+
+    internal const string LocalServerPlaceholderKey = "no-key";
 
     // Checked in order — put more-specific prefixes first.
     private static readonly (string Prefix, ProviderPreset Defaults)[] ModelPrefixes =
@@ -199,6 +202,12 @@ public sealed class ChatClientFactory(
     {
         config = Resolve(config);
 
+        // A keychain key belongs to the server it was saved for; a session pointed elsewhere
+        // (--endpoint, /model, another provider) must not carry it there.
+        if (!string.IsNullOrEmpty(config.ApiKey) && !string.IsNullOrEmpty(config.ApiKeyOrigin)
+            && ProviderKeys.Origin(EndpointFor(config.ModelId, config.Provider, config.Endpoint)) != config.ApiKeyOrigin)
+            config = config with { ApiKey = string.Empty };
+
         // Primary API key — optional for Ollama. Literal ApiKey takes precedence over env-var lookup.
         var primaryKey = !string.IsNullOrEmpty(config.ApiKey)
             ? config.ApiKey
@@ -304,6 +313,9 @@ public sealed class ChatClientFactory(
                     throw new InvalidOperationException(
                         $"Provider '{provider}' requires Endpoint to be set (model: '{config.ModelId}'). " +
                         $"This should have been filled in by auto-detection — check the model ID prefix.");
+                // A server on this machine (Ollama's /v1, llama.cpp) usually needs no key, but the SDK insists on one.
+                if (string.IsNullOrEmpty(apiKey) && new Uri(config.Endpoint).IsLoopback)
+                    apiKey = LocalServerPlaceholderKey;
                 if (string.IsNullOrEmpty(apiKey))
                     throw new InvalidOperationException(
                         $"No API key available for model '{config.ModelId}' at '{config.Endpoint}'. " +
@@ -315,6 +327,18 @@ public sealed class ChatClientFactory(
                     .GetChatClient(config.ModelId)
                     .AsIChatClient());
         }
+    }
+
+    /// <summary>The endpoint a model is called at: <paramref name="endpoint"/> if set, else what <see cref="Resolve"/> and the client pick.</summary>
+    public static string EndpointFor(string modelId, string provider, string endpoint)
+    {
+        if (!string.IsNullOrWhiteSpace(endpoint)) return endpoint.Trim();
+        bool isOllamaTag = modelId.Contains(':') && !modelId.Contains("://") && HasOllamaStyleTag(modelId);
+        if (isOllamaTag) return "http://localhost:11434";
+        if (DetectFromPrefix(modelId) is { } preset) return preset.Endpoint;
+        if (provider.Equals("ollama", StringComparison.OrdinalIgnoreCase)) return "http://localhost:11434";
+        if (provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase)) return AnthropicDefaultEndpoint;
+        return string.Empty;
     }
 
     // Helpers

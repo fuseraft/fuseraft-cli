@@ -518,6 +518,8 @@ Detection is automatic — no configuration required.
 
 When you configure the REPL via the first-run wizard or `/provider setup`, the API key is stored in the OS-native credential store — never in `~/.fuseraft/config` on disk.
 
+**Each key belongs to one server.** The key is saved under the origin (`scheme://host:port`) of the endpoint it was entered for, and fuseraft only sends it there. Pointing the config, `--endpoint`, or `/model` at another server doesn't take the key along: that server gets the key saved for it, or none. A key saved by an older fuseraft, before keys were scoped, is moved on first use to the endpoint configured at that moment, which is where it was already being sent. The exceptions are a key a host injects for one run (`FUSERAFT_API_KEY` with `--vscode`) and `memory.endpoint` / `subagent.endpoint`, which reuse the main key by design (see [Configuration](configuration.md)).
+
 **Updating or rotating a key.** When a key expires or you need to swap it out, either run `/provider setup` in the REPL (reconfigures provider/model/key interactively and rebuilds the session's chat client immediately), or outside the REPL:
 
 ```bash

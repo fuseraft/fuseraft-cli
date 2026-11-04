@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Chat;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
@@ -176,58 +177,74 @@ public static class OrchestratorConfigLoader
         return config with { Agents = agents, Models = models, Selection = sel, Telemetry = telemetry };
     }
 
-    // Injects the OS keychain key as a literal ApiKey on every model config that has
-    // neither ApiKey nor ApiKeyEnvVar set. The keychain is read at most once per call.
-    // Models that already have either field set are left untouched.
+    // Injects an OS keychain key as a literal ApiKey on every model config that has neither
+    // ApiKey nor ApiKeyEnvVar set: the key saved for that model's endpoint, so a model on one
+    // provider never gets another's. Models that already have either field set are left untouched.
     private static async Task<OrchestrationConfig> ApplyKeychainKeyAsync(
         OrchestrationConfig config,
         CancellationToken cancellationToken = default)
     {
-        // Quick check: any model actually needs a key?
         bool NeedsKey(ModelConfig m) =>
             string.IsNullOrWhiteSpace(m.ApiKey) && string.IsNullOrWhiteSpace(m.ApiKeyEnvVar);
 
-        bool anyAgentNeedsKey = config.Agents.Any(a => NeedsKey(a.Model))
-            || config.Models.Values.Any(NeedsKey)
-            || (config.Selection.Model    is not null && NeedsKey(config.Selection.Model))
-            || (config.Selection.Magentic?.Model is not null && NeedsKey(config.Selection.Magentic.Model));
-
-        if (!anyAgentNeedsKey) return config;
+        var all = config.Agents.Select(a => a.Model)
+            .Concat(config.Models.Values)
+            .Append(config.Selection.Model)
+            .Append(config.Selection.Magentic?.Model)
+            .OfType<ModelConfig>()
+            .Where(NeedsKey)
+            .ToList();
+        if (all.Count == 0) return config;
 
         // In VS Code mode prefer FUSERAFT_API_KEY (injected by the extension from
         // ~/.fuseraft/config) but fall back to the OS keychain so that runs stay
         // functional after a legacy-key migration has removed the plaintext apiKey
         // field from the config (which causes the extension to stop injecting the
-        // env var).
-        string? keychainKey;
-        if (VsCodeMode)
+        // env var). The host chose where this run goes, so its key isn't scoped.
+        var envKey = VsCodeMode ? Environment.GetEnvironmentVariable("FUSERAFT_API_KEY") : null;
+        Func<ModelConfig, ModelConfig> fill;
+        if (!string.IsNullOrWhiteSpace(envKey))
         {
-            var envKey = Environment.GetEnvironmentVariable("FUSERAFT_API_KEY");
-            keychainKey = !string.IsNullOrWhiteSpace(envKey)
-                ? envKey
-                : await ApiKeyStoreFactory.Create().RetrieveAsync();
+            fill = m => NeedsKey(m) ? m with { ApiKey = envKey } : m;
         }
         else
         {
-            keychainKey = await ApiKeyStoreFactory.Create().RetrieveAsync();
+            var store = ApiKeyStoreFactory.Create();
+
+            // A key saved before keys were scoped belongs to the endpoint the global config names.
+            var (globalCfg, _) = UserConfigStore.Load();
+            if (globalCfg is not null)
+                await ProviderKeys.RetrieveAsync(store, ChatClientFactory.EndpointFor(globalCfg.ModelId, globalCfg.Provider, globalCfg.Endpoint), adoptLegacy: true);
+
+            var keys = new Dictionary<string, string>();
+            foreach (var origin in all.Select(OriginOf).Where(o => o.Length > 0).Distinct())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var key = await ProviderKeys.RetrieveAsync(store, origin);
+                if (!string.IsNullOrWhiteSpace(key)) keys[origin] = key;
+            }
+            if (keys.Count == 0) return config;
+
+            fill = m => NeedsKey(m) && keys.TryGetValue(OriginOf(m), out var key)
+                ? m with { ApiKey = key, ApiKeyOrigin = OriginOf(m) }
+                : m;
         }
-        if (string.IsNullOrWhiteSpace(keychainKey)) return config;
 
-        ModelConfig Fill(ModelConfig m) =>
-            NeedsKey(m) ? m with { ApiKey = keychainKey } : m;
-
-        var agents = config.Agents.Select(a => a with { Model = Fill(a.Model) }).ToList();
-        var models  = config.Models.ToDictionary(kv => kv.Key, kv => Fill(kv.Value));
+        var agents = config.Agents.Select(a => a with { Model = fill(a.Model) }).ToList();
+        var models  = config.Models.ToDictionary(kv => kv.Key, kv => fill(kv.Value));
         var sel     = config.Selection with
         {
-            Model    = config.Selection.Model    is not null ? Fill(config.Selection.Model)    : null,
+            Model    = config.Selection.Model    is not null ? fill(config.Selection.Model)    : null,
             Magentic = config.Selection.Magentic is not null
-                ? config.Selection.Magentic with { Model = config.Selection.Magentic.Model is not null ? Fill(config.Selection.Magentic.Model) : null }
+                ? config.Selection.Magentic with { Model = config.Selection.Magentic.Model is not null ? fill(config.Selection.Magentic.Model) : null }
                 : null,
         };
 
         return config with { Agents = agents, Models = models, Selection = sel };
     }
+
+    private static string OriginOf(ModelConfig m) =>
+        ProviderKeys.Origin(ChatClientFactory.EndpointFor(m.ModelId, m.Provider, m.Endpoint));
 
     // Separates binding from loading so both BuildAsync and LoadConfig get the same
     // helpful error message when a field type doesn't match the schema.

@@ -2770,8 +2770,12 @@ fuseraft keychain [options]
 |------|-------------|
 | `--set` | Read `FUSERAFT_API_KEY` from the environment and store it, overwriting any existing entry. |
 | `--get` | Print the stored key to stdout. Exits 1 if none is stored. |
+| `--delete` | Remove the stored key. |
+| `--endpoint <URL>` | The provider endpoint the key is for. Defaults to the one in `~/.fuseraft/config`. |
 
 With no flags, prints whether a key is currently stored (never the key itself).
+
+Keys are stored per endpoint origin (`scheme://host:port`), and a key is only ever sent to the origin it was saved for. Switching `provider.endpoint` to another server doesn't carry the old key there: save one for the new server with `--set`, or leave it without one (a server on this machine, such as Ollama, needs none).
 
 **Updating an expired or rotated key**
 

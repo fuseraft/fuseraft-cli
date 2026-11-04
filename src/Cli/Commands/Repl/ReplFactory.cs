@@ -24,6 +24,7 @@ internal static class ReplFactory
             // the config's xAI endpoint must not be called as --provider anthropic.
             Endpoint        = connection is null ? userCfg?.Endpoint ?? string.Empty : connection.Endpoint ?? string.Empty,
             ApiKey          = userCfg?.ApiKey   ?? string.Empty,
+            ApiKeyOrigin    = userCfg?.ApiKeyOrigin ?? string.Empty,
             Provider        = connection is null ? userCfg?.Provider ?? string.Empty : connection.Provider ?? string.Empty,
             ReasoningEffort = reasoningEffort,
         };

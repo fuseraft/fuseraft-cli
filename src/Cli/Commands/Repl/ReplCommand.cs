@@ -267,27 +267,32 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             // extension (FUSERAFT_API_KEY), then fall back to any legacy plaintext
             // key still in the config file, then to the OS keychain.  The env-var
             // path exists for future use; most users will hit the keychain fallback.
+            // An injected key goes wherever the host points this run, so it isn't scoped.
             if (userCfg is not null)
             {
                 var envKey = Environment.GetEnvironmentVariable("FUSERAFT_API_KEY");
-                userCfg.ApiKey = !string.IsNullOrEmpty(envKey)
-                    ? envKey
-                    : !string.IsNullOrEmpty(legacyKey)
-                        ? legacyKey
-                        : await keyStore.RetrieveAsync() ?? string.Empty;
+                if (!string.IsNullOrEmpty(envKey))
+                    userCfg.ApiKey = envKey;
+                else if (!string.IsNullOrEmpty(legacyKey))
+                {
+                    userCfg.ApiKey       = legacyKey;
+                    userCfg.ApiKeyOrigin = ProviderKeys.Origin(KeyStorePersistence.EndpointOf(userCfg));
+                }
+                else
+                    await KeyStorePersistence.LoadAsync(keyStore, userCfg);
             }
         }
         else if (!string.IsNullOrEmpty(legacyKey))
         {
             userCfg ??= new UserConfig();
             userCfg.ApiKey = legacyKey;
-            if (await KeyStorePersistence.TryStoreAsync(keyStore, legacyKey))
+            if (await KeyStorePersistence.TryStoreAsync(keyStore, userCfg, legacyKey))
                 AnsiConsole.MarkupLine($"[dim]API key migrated to {Markup.Escape(keyStore.StoreName)}.[/]");
             UserConfigStore.Save(userCfg);
         }
         else if (userCfg is not null)
         {
-            userCfg.ApiKey = await keyStore.RetrieveAsync() ?? string.Empty;
+            await KeyStorePersistence.LoadAsync(keyStore, userCfg);
         }
 
         var modelId = ResolveModelId(settings, userCfg);
@@ -307,7 +312,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             bool selectedFromList;
             (userCfg, wizardKey, selectedFromList) = await ReplFactory.RunSetupWizardAsync(modelId, userCfg);
             if (userCfg is null || wizardKey is null) return 1;
-            keyStored = string.IsNullOrEmpty(wizardKey) || await KeyStorePersistence.TryStoreAsync(keyStore, wizardKey);
+            keyStored = string.IsNullOrEmpty(wizardKey) || await KeyStorePersistence.TryStoreAsync(keyStore, userCfg, wizardKey);
             userCfg.ApiKey = wizardKey;
             modelId        = userCfg.ModelId;
             if (selectedFromList)

@@ -60,6 +60,12 @@ public record ModelConfig
     public string ApiKey { get; init; } = string.Empty;
 
     /// <summary>
+    /// Origin (<c>scheme://host:port</c>) a keychain-sourced <see cref="ApiKey"/> was saved for; the key is dropped when the
+    /// resolved endpoint is elsewhere. Empty for keys the user or host supplied directly, which go wherever they're configured.
+    /// </summary>
+    public string ApiKeyOrigin { get; init; } = string.Empty;
+
+    /// <summary>
     /// Additional literal API keys for round-robin pool rotation.
     /// When more than one key is available (across <see cref="ApiKey"/>, <see cref="ApiKeyEnvVar"/>,
     /// <c>ApiKeys</c>, and <c>ApiKeyEnvVars</c>), a 429 on one key automatically rotates to the next.
