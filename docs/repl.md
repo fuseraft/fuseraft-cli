@@ -76,6 +76,8 @@ Rarer or destructive operations (`delete_file`, `git_push`, `shell_run_backgroun
 
 Run `/tools` at any time to see what's active right now.
 
+When the model asks for several tools in one response, the read-only ones run at the same time: searches, git reads, `subagent_explore` / `subagent_locate`, `http_get`, and MCP tools their server marks read-only. File reads take turns with each other but overlap the rest. Anything that can change something (a write, a shell command, a commit, a tool fuseraft can't vouch for) waits for every call before it, and the calls after it wait for it, so the model's order still holds. Approval prompts are asked one at a time, and shell commands from explorations running side by side never overlap.
+
 ---
 
 ## The safety model

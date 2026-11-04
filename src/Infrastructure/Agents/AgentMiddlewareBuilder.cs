@@ -323,7 +323,8 @@ internal sealed class AgentMiddlewareBuilder(
         IChatClient effectiveClient,
         AgentConfig config,
         AgentSkillsProvider? skillsProvider,
-        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? functionInvoker = null)
+        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? functionInvoker = null,
+        bool allowConcurrentInvocation = false)
     {
         // Pre-configure FunctionInvokingChatClient so ChatClientAgent reuses our instance
         // (it only adds its own when none is present in the pipeline). This lets us set
@@ -335,6 +336,7 @@ internal sealed class AgentMiddlewareBuilder(
             .UseFunctionInvocation(configure: c =>
             {
                 c.MaximumIterationsPerRequest = maxIterations;
+                c.AllowConcurrentInvocation   = allowConcurrentInvocation;
                 if (functionInvoker is not null) c.FunctionInvoker = functionInvoker;
             })
             .Build();

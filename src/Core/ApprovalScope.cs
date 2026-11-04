@@ -13,10 +13,18 @@ namespace fuseraft.Core;
 /// plugins is wrapped with <see cref="Guard(Func{string, Task{bool}})"/> and its overloads, so this is
 /// the single place a refusal is decided.
 /// </para>
+///
+/// <para>
+/// Approvals that are asked are asked one at a time, so tools running side by side (a model's parallel
+/// read-only calls, or explorations that each run commands) queue their prompts instead of overlapping
+/// them. Each waits its turn before reading any saved "always" answer, so it sees one given just before.
+/// </para>
 /// </summary>
 public static class ApprovalScope
 {
     private static readonly AsyncLocal<bool> Refusing = new();
+    private static readonly SemaphoreSlim Asking = new(1, 1);
+    private static readonly AsyncLocal<bool> AskingInThisFlow = new();
 
     /// <summary>For the rest of the calling async flow, refuse approval prompts without showing them.</summary>
     public static void RefuseInThisFlow() => Refusing.Value = true;
@@ -25,14 +33,30 @@ public static class ApprovalScope
     public static bool IsRefusing => Refusing.Value;
 
     public static Func<string, Task<bool>> Guard(Func<string, Task<bool>> approve) =>
-        a => Refusing.Value ? Task.FromResult(false) : approve(a);
+        a => Refusing.Value ? Task.FromResult(false) : OneAtATime(() => approve(a));
 
     public static Func<string, string, Task<bool>> Guard(Func<string, string, Task<bool>> approve) =>
-        (a, b) => Refusing.Value ? Task.FromResult(false) : approve(a, b);
+        (a, b) => Refusing.Value ? Task.FromResult(false) : OneAtATime(() => approve(a, b));
 
     public static Func<string, string, string, Task<bool>> Guard(Func<string, string, string, Task<bool>> approve) =>
-        (a, b, c) => Refusing.Value ? Task.FromResult(false) : approve(a, b, c);
+        (a, b, c) => Refusing.Value ? Task.FromResult(false) : OneAtATime(() => approve(a, b, c));
 
     public static Func<string, string, string, string, Task<bool>> Guard(Func<string, string, string, string, Task<bool>> approve) =>
-        (a, b, c, d) => Refusing.Value ? Task.FromResult(false) : approve(a, b, c, d);
+        (a, b, c, d) => Refusing.Value ? Task.FromResult(false) : OneAtATime(() => approve(a, b, c, d));
+
+    private static async Task<bool> OneAtATime(Func<Task<bool>> approve)
+    {
+        // An approval that itself asks another (in the same flow) already holds the turn.
+        if (AskingInThisFlow.Value) return await approve();
+        await Asking.WaitAsync();
+        try
+        {
+            AskingInThisFlow.Value = true;
+            return await approve();
+        }
+        finally
+        {
+            Asking.Release();
+        }
+    }
 }
