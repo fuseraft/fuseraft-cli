@@ -43,6 +43,15 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'VS Code extension',
+					items: [
+						{ label: 'Overview', link: '/vscode/' },
+						{ label: 'Setup & Providers', link: '/vscode-setup/' },
+						{ label: 'Chat Panel', link: '/vscode-chat/' },
+						{ label: 'Reference', link: '/vscode-reference/' },
+					],
+				},
+				{
 					label: 'Agent teams',
 					items: [
 						{ label: 'Configuration', link: '/configuration/' },
