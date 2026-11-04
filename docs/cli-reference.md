@@ -474,7 +474,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/memory list` | Same as `/memory` |
 | `/memory show <name>` | Show the full body of a stored memory |
 | `/memory delete <name>` | Delete a stored memory by name |
-| `/memory save` | Extract memories from the current session and save them now (also runs automatically on `/exit`) |
+| `/memory save` | Extract memories from the current session and save them now (also runs automatically on `/exit` when `memory.autoSave` is on) |
 | `/paste` | Enter multi-line paste mode; type `.done` on its own line to finish. The full-screen REPL takes a multi-line paste in its prompt directly, so there it only says so |
 | `/save` | Save a Markdown transcript to `repl-<sessionId>.md` in the current directory |
 | `/save <file>` | Save the transcript to a specific file |
