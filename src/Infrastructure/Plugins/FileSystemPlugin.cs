@@ -460,7 +460,7 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         // Same binary-content risk as ReadFileAsync: File.ReadAllTextAsync doesn't throw on
         // binary data (invalid UTF-8 just becomes replacement characters), and a mismatch below
-        // would hand the un-truncated, un-split "content" to ExtractExcerpt/FindFirstMismatchingLine,
+        // would hand the un-truncated, un-split "content" to ExtractExcerpt/FindFirstDifference,
         // which have no per-line cap of their own — a compiled file with no newline byte for a
         // long stretch would come back as one huge line in the mismatch hint.
         if (BinaryFileSniffer.LooksBinary(resolved))
@@ -500,17 +500,18 @@ public sealed class FileSystemPlugin : ITurnResettable
             _patchedThisTurn.Remove(resolved);
 
             // Give the agent enough information to correct itself without a full re-read.
-            var lineHint     = FilePatchDiffing.CountLines(normalContent, normalOld);
-            var mismatchHint = FilePatchDiffing.FindFirstMismatchingLine(normalContent, normalOld);
+            var differenceHint = FilePatchDiffing.FindFirstDifference(normalContent, normalOld);
+            var lineHint       = differenceHint.Length > 0 ? string.Empty : FilePatchDiffing.CountLines(normalContent, normalOld);
             var excerpt      = FilePatchDiffing.ExtractExcerpt(normalContent, normalOld, contextLines: 8);
             var excerptNote  = excerpt.Length > 0
                 ? $"\nNearest content in file:\n{excerpt}\n"
                 : string.Empty;
             return PluginResult.Error(
                 $"oldText not found in '{resolved}'. " +
-                $"The text must match exactly including whitespace, indentation, and line endings. " +
+                $"The text must match exactly, character for character, including whitespace and indentation " +
+                $"(CRLF vs LF line endings don't matter; they're normalised). " +
+                $"{differenceHint}" +
                 $"{lineHint}" +
-                $"{mismatchHint}" +
                 $"{excerptNote}" +
                 $"Read the file with read_file to get exact text before retrying patch_file.");
         }

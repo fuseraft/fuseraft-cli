@@ -320,6 +320,32 @@ public sealed class FileSystemPluginTests : IDisposable
     }
 
     [Fact]
+    public async Task PatchFile_CrlfFileWithLfOldText_Matches()
+    {
+        await File.WriteAllTextAsync(TempPath("Build.md"), "# Build\r\n\r\nAfter import, bounce the cluster.\r\nDone.\r\n");
+
+        var result = await _plugin.PatchFileAsync(TempPath("Build.md"),
+            "After import, bounce the cluster.\nDone.", "After import, run Rebuild Global Settings.\nDone.");
+
+        Assert.DoesNotContain("[ERROR]", result);
+        Assert.Equal("# Build\r\n\r\nAfter import, run Rebuild Global Settings.\r\nDone.\r\n", await ReadBack("Build.md"));
+    }
+
+    [Fact]
+    public async Task PatchFile_InvisibleDifference_ErrorNamesItAndClearsLineEndings()
+    {
+        await File.WriteAllTextAsync(TempPath("Build.md"), "# Build\r\n\r\nAfter import \u2014 bounce the cluster.\r\n");
+
+        var result = await _plugin.PatchFileAsync(TempPath("Build.md"),
+            "After import - bounce the cluster.", "After import, run Rebuild Global Settings.");
+
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("U+2014 em dash", result);
+        Assert.Contains("line 3, column 14", result);
+        Assert.Contains("line endings don't matter", result);
+    }
+
+    [Fact]
     public async Task PatchFile_OldTextWithEscapedQuotesFoundVerbatim_KeepsEscapes()
     {
         var original = "GROOVY = \"return \\\"1900-01-01\\\"\"\n";
@@ -704,8 +730,8 @@ public sealed class FileSystemPluginTests : IDisposable
         await File.WriteAllTextAsync(TempPath("hint.py"), "def foo():\n    return 1\n");
         var result = await _plugin.PatchFileAsync(TempPath("hint.py"), "def foo():\n    return 99", "def foo():\n    return 2");
         Assert.StartsWith("[ERROR]", result);
-        // The hint should call out the mismatching second line.
-        Assert.Contains("Line 2 of oldText", result);
+        // The hint should point at where the second line diverges.
+        Assert.Contains("line 2, column 12", result);
         Assert.Contains("return 99", result);
         Assert.Contains("return 1", result);
     }
