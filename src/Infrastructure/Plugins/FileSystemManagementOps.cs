@@ -60,9 +60,9 @@ internal sealed class FileSystemManagementOps
         _denyMatcher      = owner.DenyMatcher;
     }
 
-    [Description("Search a file (grep). Cheaper than full read_file.")]
+    [Description("Search one file (grep) with context lines. Cheaper than full read_file. To search a directory, use search_content.")]
     public async Task<string> GrepFileAsync(
-        [Description("File path.")] string path,
+        [Description("File path (one file, not a directory).")] string path,
         [Description("Text or regex pattern.")] string pattern,
         [Description("Context lines around match.")] int contextLines = 2,
         [Description("Max matches.")] int maxMatches = 30,
@@ -71,6 +71,13 @@ internal sealed class FileSystemManagementOps
         var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved, _denyMatcher);
         denial = await _includedRoots.DenyOrEscalateAsync(denial, resolved, "grep_file", _approveAction);
         if (denial is not null) return denial;
+
+        // Models often reach for grep_file to search a folder; "File not found" for a folder
+        // that exists reads as "it isn't there", so name the tool that does what they meant.
+        if (Directory.Exists(resolved))
+            return PluginResult.Error(
+                $"'{resolved}' is a directory. grep_file searches one file. " +
+                $"To search every file under it, call search_content(query: \"{pattern}\", directory: \"{resolved}\").");
 
         if (!File.Exists(resolved))
             return PluginResult.Error($"File not found: {resolved}");

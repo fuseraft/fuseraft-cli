@@ -39,6 +39,18 @@ public sealed class FileSystemManagementOpsTests : IDisposable
     }
 
     [Fact]
+    public async Task GrepFile_Directory_PointsToSearchContent()
+    {
+        var dir = TempPath("docs");
+        Directory.CreateDirectory(dir);
+        var result = await _ops.GrepFileAsync(dir, "needle");
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("is a directory", result);
+        Assert.Contains("search_content(query: \"needle\"", result);
+        Assert.DoesNotContain("File not found", result);
+    }
+
+    [Fact]
     public async Task GrepFile_NoMatches_ReturnsInfo()
     {
         await File.WriteAllTextAsync(TempPath("grep.txt"), "line one\nline two\n");
