@@ -1058,7 +1058,7 @@ If the agent still does not call a write tool on the correction turn, a warning 
 *Completion checklist* — The agent's system prompt includes a structured self-verification checklist that fires before every response:
 
 - **Tools & verification:** every action was performed with a tool call — not described as if done; tool calls succeeded (no errors, exit code 0 for shell)
-- **Files:** for file writes, re-read the file to confirm content is correct
+- **Files:** a successful `write_file`/`patch_file` result is trusted; the agent re-reads only the changed range, and only when the result leaves doubt (e.g. the content was normalised)
 - **Shell:** shell output is shown and confirms the goal was met
 - **Completeness:** every part of the request was addressed; nothing was deferred or skipped without explaining why
 

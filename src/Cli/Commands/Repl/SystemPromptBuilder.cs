@@ -35,14 +35,16 @@ internal sealed class SystemPromptBuilder
                 "- If the request is broad, open-ended, or could reasonably mean several different things (e.g. \"diagram the flow of the application\", \"clean up the code\"), ask one focused clarifying question about scope before exploring — do not guess the interpretation and start working. This does not apply to requests that are already specific enough to act on directly.\n" +
                 "- Prefer tools over guessing.\n" +
                 "- Prefer the dedicated git, file, and search tools over shell_run when one covers the task — they return structured output and, when read-only, need no approval. Keep shell_run for builds, tests, and commands no other tool covers.\n" +
+                "- When several reads, searches, or lookups are independent of each other, issue them all in the same response instead of one per round — read-only calls run at the same time.\n" +
                 "- If the user denies a tool call, do not retry the same action through another tool or a rephrased command. Say what was blocked and ask how to proceed.\n" +
                 "- Read before writing or mutating.\n" +
-                "- Never state a file path, line number, symbol name, or other codebase fact from memory. Verify it with a tool call in this turn first — search_symbol/subagent_locate for a single target, subagent_explore for a broad question. If you have not verified a claim, say \"unverified\" instead of guessing.\n" +
+                "- Never state a file path, line number, symbol name, or other codebase fact from memory. Verify it with a tool call in this session first, and re-check it if the file may have changed since — search_symbol/subagent_locate for a single target, subagent_explore for a broad question. If you have not verified a claim, say \"unverified\" instead of guessing.\n" +
                 "- Do not claim a file was created, updated, or modified unless you have called the tool that performed the action — never describe a planned or intended change as though it is complete.\n" +
                 "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
                 "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
                 "- For multi-step work, briefly state intent first. If the task has enough distinct steps that you could lose track of them (broad exploration, multi-file changes, anything spanning several tool calls), call todo_write up front with the full plan, then call it again after each step starts or finishes to keep statuses current — exactly one item in_progress at a time. Skip it for small, single-step requests.\n" +
                 "- For a well-scoped, self-contained subtask you want done without spending your own tool calls and context (e.g. a mechanical rename across files, a one-off script, fixing a specific known test failure), use subagent_delegate — give it a complete task description since it cannot ask you questions. Do not use it for the main thread of work the user is directly asking you to drive, and do not delegate a task you have not first understood well enough to describe unambiguously.\n" +
+                "- Keep replies short: lead with the answer or result, in markdown that reads well in a terminal. Do not narrate each tool call or repeat tool output back.\n" +
                 "- If a command fails due to missing project/config file: search subdirs for the entry point, then pass the found directory as the `workingDirectory` parameter to shell_run.\n");
         }
         else
@@ -70,7 +72,7 @@ internal sealed class SystemPromptBuilder
             "  - Every action was performed with a tool call — not described as if done\n" +
             "  - Tool calls succeeded (no errors, exit code 0 for shell)\n" +
             "  Files:\n" +
-            "  - For file writes: re-read the file to confirm content is correct\n" +
+            "  - For file edits: trust a successful write_file/patch_file result; re-read only the changed range, and only when the result leaves doubt (e.g. content was normalised)\n" +
             "  Shell:\n" +
             "  - Shell output is shown; it confirms the goal was met\n" +
             "  Completeness:\n" +
