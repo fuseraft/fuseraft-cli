@@ -115,42 +115,94 @@ public sealed class FilePatchDiffingTests : IDisposable
         Assert.Equal(string.Empty, excerpt);
     }
 
-    // FindFirstMismatchingLine
+    // FindFirstDifference
 
     [Fact]
-    public void FindFirstMismatchingLine_SingleLineSearch_ReturnsEmpty()
+    public void FindFirstDifference_EmDashVsHyphens_NamesBothCharacters()
     {
-        var result = FilePatchDiffing.FindFirstMismatchingLine("a\nb\nc", "a");
+        var file   = "Run the import \u2014 then bounce the cluster.\n";
+        var search = "Run the import -- then bounce the cluster.";
+
+        var result = FilePatchDiffing.FindFirstDifference(file, search);
+
+        Assert.Contains("line 1, column 16", result);
+        Assert.Contains("U+2014 em dash", result);
+        Assert.Contains("'-' (U+002D)", result);
+    }
+
+    [Fact]
+    public void FindFirstDifference_CurlyVsStraightQuote_NamesCurlyQuote()
+    {
+        var result = FilePatchDiffing.FindFirstDifference(
+            "In the utility, choose \u201CRebuild Global Settings\u201D next.", "In the utility, choose \"Rebuild Global Settings\" next.");
+        Assert.Contains("curly double quote", result);
+    }
+
+    [Fact]
+    public void FindFirstDifference_TrailingSpacesInFile_ReportsSpaceVsLineBreak()
+    {
+        var file   = "intro\nThe docs say to bounce.  \nNext line\n";
+        var search = "The docs say to bounce.\nNext line";
+
+        var result = FilePatchDiffing.FindFirstDifference(file, search);
+
+        Assert.Contains("line 2, column 24", result);
+        Assert.Contains("the file has a space where oldText has a line break", result);
+    }
+
+    [Fact]
+    public void FindFirstDifference_NonBreakingSpace_IsNamed()
+    {
+        var result = FilePatchDiffing.FindFirstDifference(
+            "Costpoint\u00A0admin server only", "Costpoint admin server only");
+        // The shared prefix is only 9 chars, under the anchor, so pad it.
+        Assert.Equal(string.Empty, result);
+
+        result = FilePatchDiffing.FindFirstDifference(
+            "Run on the Costpoint\u00A0admin server", "Run on the Costpoint admin server");
+        Assert.Contains("non-breaking space (U+00A0)", result);
+    }
+
+    [Fact]
+    public void FindFirstDifference_LaterLineDiverges_ReportsThatLine()
+    {
+        var file   = "line one here\nline two here\nline DIFFERENT\nline four";
+        var search = "line one here\nline two here\nline three";
+
+        var result = FilePatchDiffing.FindFirstDifference(file, search);
+
+        Assert.Contains("line 3, column 6", result);
+        Assert.Contains("line DIFFERENT", result);
+        Assert.Contains("line three", result);
+    }
+
+    [Fact]
+    public void FindFirstDifference_OldTextRunsPastEndOfFile_SaysSo()
+    {
+        var result = FilePatchDiffing.FindFirstDifference("final sentence here", "final sentence here and more");
+        Assert.Contains("the end of the file", result);
+    }
+
+    [Fact]
+    public void FindFirstDifference_ShortCoincidentalPrefix_ReturnsEmpty()
+    {
+        var result = FilePatchDiffing.FindFirstDifference("The cat sat.", "The dog ran away from home.");
         Assert.Equal(string.Empty, result);
     }
 
     [Fact]
-    public void FindFirstMismatchingLine_SecondLineDiverges_ReportsMismatch()
+    public void FindFirstDifference_ExactMatch_ReturnsEmpty()
     {
-        var fileContent = "line1\nline2\nlineDIFFERENT\nline4";
-        var searchText   = "line1\nline2\nline3";
-
-        var result = FilePatchDiffing.FindFirstMismatchingLine(fileContent, searchText);
-
-        Assert.Contains("Line 3", result);
-        Assert.Contains("line3", result);
-        Assert.Contains("lineDIFFERENT", result);
-        Assert.Contains("file line 3", result);
-    }
-
-    [Fact]
-    public void FindFirstMismatchingLine_NoFirstLineMatchAnywhere_ReturnsEmpty()
-    {
-        var result = FilePatchDiffing.FindFirstMismatchingLine("a\nb\nc", "zzz\nyyy");
+        var result = FilePatchDiffing.FindFirstDifference("line1\nline2\nline3", "line1\nline2\nline3");
         Assert.Equal(string.Empty, result);
     }
 
     [Fact]
-    public void FindFirstMismatchingLine_ExactMatch_ReturnsEmpty()
+    public void FindFirstDifference_ExcerptShowsLineBreaksEscaped()
     {
-        var fileContent = "line1\nline2\nline3";
-        var result = FilePatchDiffing.FindFirstMismatchingLine(fileContent, "line1\nline2\nline3");
-        Assert.Equal(string.Empty, result);
+        var result = FilePatchDiffing.FindFirstDifference("alpha beta gamma\ndelta X", "alpha beta gamma\ndelta Y");
+        Assert.Contains("gamma\\ndelta X", result);
+        Assert.DoesNotContain("\n", result);
     }
 
     // Truncate

@@ -114,31 +114,68 @@ internal static class FilePatchDiffing
         return sb.ToString().TrimEnd();
     }
 
-    // When the first line of searchText can be located in fileContent but a subsequent
-    // line diverges, returns a hint identifying the first mismatching line so the agent
-    // can correct oldText without a full re-read.
-    internal static string FindFirstMismatchingLine(string fileContent, string searchText)
+    // Below this many matching characters the "best" match is likely coincidence, not the
+    // passage the caller meant, so a hint would point at the wrong place.
+    private const int MinDifferenceAnchor = 12;
+
+    // Finds the longest prefix of searchText that occurs in fileContent and names the first
+    // character after it on each side. Differences models can't see in a line-level hint — an
+    // em dash for "--", curly for straight quotes, trailing spaces, a non-breaking space — are
+    // the usual reason a patch keeps missing. Both inputs must already be LF-normalised.
+    internal static string FindFirstDifference(string fileContent, string searchText)
     {
-        var searchLines = searchText.Split('\n');
-        var fileLines   = fileContent.Split('\n');
-
-        if (searchLines.Length <= 1) return string.Empty;
-
-        var firstLine = searchLines[0];
-        for (int i = 0; i <= fileLines.Length - searchLines.Length; i++)
+        // Prefix occurrence is monotonic (if the first k chars occur, so do the first k-1), so
+        // binary search the length with IndexOf instead of comparing at every file offset.
+        int lo = 0, hi = searchText.Length;
+        while (lo < hi)
         {
-            if (fileLines[i] != firstLine) continue;
-
-            for (int j = 1; j < searchLines.Length; j++)
-            {
-                if (fileLines[i + j] == searchLines[j]) continue;
-
-                return $"Line {j + 1} of oldText ('{Truncate(searchLines[j])}') " +
-                       $"does not match file line {i + j + 1} ('{Truncate(fileLines[i + j])}'). ";
-            }
+            var mid = (lo + hi + 1) / 2;
+            if (fileContent.Contains(searchText[..mid], StringComparison.Ordinal)) lo = mid;
+            else hi = mid - 1;
         }
 
-        return string.Empty;
+        var matched = lo;
+        if (matched < MinDifferenceAnchor || matched >= searchText.Length) return string.Empty;
+
+        var at   = fileContent.IndexOf(searchText[..matched], StringComparison.Ordinal) + matched;
+        var line = 1;
+        var lineStart = 0;
+        for (int i = 0; i < at; i++)
+            if (fileContent[i] == '\n') { line++; lineStart = i + 1; }
+
+        var fileChar = at < fileContent.Length ? DescribeChar(fileContent[at]) : "the end of the file";
+        return $"oldText matches the file up to line {line}, column {at - lineStart + 1}, then differs: " +
+               $"the file has {fileChar} where oldText has {DescribeChar(searchText[matched])}. " +
+               $"File:    \"{Window(fileContent, at)}\" " +
+               $"oldText: \"{Window(searchText, matched)}\". ";
+    }
+
+    private static string DescribeChar(char c) => c switch
+    {
+        '\n'     => "a line break",
+        ' '      => "a space",
+        '\t'     => "a tab",
+        '\u00A0' => "a non-breaking space (U+00A0)",
+        '\u200B' => "a zero-width space (U+200B)",
+        '\uFEFF' => "a byte-order mark (U+FEFF)",
+        '\u2013' => "'\u2013' (U+2013 en dash)",
+        '\u2014' => "'\u2014' (U+2014 em dash)",
+        '\u2018' or '\u2019' => $"'{c}' (U+{(int)c:X4} curly single quote)",
+        '\u201C' or '\u201D' => $"'{c}' (U+{(int)c:X4} curly double quote)",
+        '\u2026' => "'\u2026' (U+2026 ellipsis)",
+        _ when c < 0x20 => $"control character U+{(int)c:X4}",
+        _        => $"'{c}' (U+{(int)c:X4})",
+    };
+
+    // A short stretch either side of the difference, with line breaks shown as \n so the
+    // excerpt stays on one line of the error.
+    private static string Window(string text, int at)
+    {
+        var from = Math.Max(0, at - 24);
+        var to   = Math.Min(text.Length, at + 16);
+        var head = from > 0 ? "…" : string.Empty;
+        var tail = to < text.Length ? "…" : string.Empty;
+        return head + text[from..to].Replace("\n", "\\n") + tail;
     }
 
     internal static string Truncate(string s, int max = 60)
