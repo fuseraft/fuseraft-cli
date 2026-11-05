@@ -30,7 +30,7 @@ public sealed class ReplSessionPlugin(
     [Description(
         "Compact the conversation history into a concise handoff summary to free context budget. " +
         "Call this when accumulated previous turns or tool reads are consuming most of the context window — " +
-        "the agent keeps seeing budget-exceeded errors or context is near the 80k token ceiling. " +
+        "you keep seeing budget-exceeded errors, or repl_session_get_context_status shows the budget mostly used. " +
         "The compaction takes effect immediately: the next turn starts with the compact summary instead of the full history. " +
         "Safe to call at any point in the session.")]
     public Task<string> CompactContextAsync(

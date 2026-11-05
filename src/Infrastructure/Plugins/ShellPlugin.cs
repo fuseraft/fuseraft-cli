@@ -54,8 +54,8 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
 
     private const string TimeoutParamDescription =
         "Timeout in seconds; 0 or less uses the default. The command is killed when it runs out, so " +
-        "never use shell_run for a server or anything else that runs until stopped: start it with " +
-        "shell_run_background instead.";
+        "never use this for a server or anything else that runs until stopped: start it with " +
+        "shell_run_background if that tool is available, otherwise tell the user to start it.";
 
     // A model that passes 0 usually means "don't wait" or "no limit". Neither is safe here: no
     // limit lets a server (dotnet run, npm start) block the turn forever, so take the default.

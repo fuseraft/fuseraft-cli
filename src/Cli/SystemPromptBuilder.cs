@@ -48,6 +48,17 @@ internal static class SystemPromptBuilder
             };
         }
 
+        // Guidance that names a plugin's tools goes only to agents that have that plugin: an agent
+        // told to call a tool it lacks, and also to halt on a missing tool, blocks on its first turn.
+        config = config with
+        {
+            Agents = config.Agents
+                .Select(a => BuildPluginGuidanceBlock(a.Plugins) is { } guidance
+                    ? a with { Instructions = a.Instructions.TrimEnd() + "\n\n" + guidance }
+                    : a)
+                .ToList()
+        };
+
         // Inject the user-supplied spec into every agent's system prompt so all agents
         // remain anchored to it even after context compaction (spec-anchored SDD).
         string? specBlock = null;
@@ -253,6 +264,22 @@ internal static class SystemPromptBuilder
         using var stream = asm.GetManifestResourceStream(name)!;
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd().Trim();
+    }
+
+    internal static string? BuildPluginGuidanceBlock(IReadOnlyCollection<string> pluginNames)
+    {
+        bool Has(string name) => pluginNames.Any(p => p.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+        var lines = new List<string>();
+        if (Has("Subagent"))
+        {
+            lines.Add("- Prefer `subagent_locate` for single-target symbol/file lookups; prefer `subagent_explore` for broad multi-hop questions. Both return focused summaries without flooding context.");
+            lines.Add("- When a question splits into independent parts (one module, service or concern each), use `subagent_explore_many` to explore up to 4 of them at the same time instead of one `subagent_explore` after another.");
+        }
+        if (Has("SessionContext"))
+            lines.Add("- Call `session_context_read` at the start of each turn to catch up without re-reading files. Call `session_context_write` before every handoff so successors have a current-state snapshot.");
+
+        return lines.Count == 0 ? null : "**Plugin tools:**\n" + string.Join("\n", lines);
     }
 
     private static string BuildTestSelectorBlock(TestSelectorConfig ts)

@@ -37,4 +37,32 @@ public sealed class SystemPromptBuilderTests
         Assert.Contains("Spec body.", local);
         Assert.Contains("Runtime Environment", local);
     }
+
+    [Fact]
+    public async Task BuildSystemPrompt_PluginToolGuidanceOnlyForAgentsWithThePlugin()
+    {
+        var config = new OrchestrationConfig
+        {
+            Agents =
+            [
+                new AgentConfig { Name = "Bare", Instructions = "Bare own." },
+                new AgentConfig { Name = "Full", Instructions = "Full own.", Plugins = ["subagent", "SessionContext"] },
+            ],
+        };
+
+        var built = await SystemPromptBuilder.BuildSystemPrompt(
+            config, "orchestration.yaml", "s1", null, NullLoggerFactory.Instance, CancellationToken.None);
+
+        var bare = built.Agents.Single(a => a.Name == "Bare").Instructions;
+        Assert.DoesNotContain("session_context_read", bare);
+        Assert.DoesNotContain("subagent_", bare);
+
+        var full = built.Agents.Single(a => a.Name == "Full").Instructions;
+        Assert.Contains("session_context_read", full);
+        Assert.Contains("subagent_explore_many", full);
+    }
+
+    [Fact]
+    public void BuildPluginGuidanceBlock_NullWithoutGuidedPlugins() =>
+        Assert.Null(SystemPromptBuilder.BuildPluginGuidanceBlock(["FileSystem", "Shell"]));
 }

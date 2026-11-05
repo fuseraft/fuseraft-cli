@@ -442,7 +442,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         return content;
     }
 
-    [Description("Replace exact oldText with newText. Preferred over write_file for edits.")]
+    [Description("Replace exact oldText with newText. oldText must occur exactly once in the file; include surrounding lines to make it unique. Preferred over write_file for edits.")]
     public async Task<string> PatchFileAsync(
         [Description("File path.")] string path,
         [Description("Exact text to replace.")] string oldText,
@@ -597,7 +597,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     public async Task<string> WriteFileAsync(
         [Description("File path.")] string path,
         [Description("File content.")] string content,
-        [Description("Skip escape-sequence normalisation.")] bool raw = false,
+        [Description("Write content exactly as given. Otherwise common model artifacts are repaired: code fences around .json, literal \\n in single-line content, typographic quotes/dashes in source files. Set true when those are intended.")] bool raw = false,
         [Description("Expected current version (0 = skip check). Write fails with VERSION_MISMATCH when the file has been modified since this version was read.")] int baseVersion = 0)
     {
         if (content is null)
