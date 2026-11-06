@@ -17,19 +17,19 @@ public sealed class ReplInputTests : IDisposable
         ReplInput.Bridge = null;
     }
 
-    private static ReplStdinPump Answering(string answer)
-    {
-        var pump = new ReplStdinPump(new StringReader($$"""{"type":"question_response","answer":"{{answer}}"}"""), () => null);
-        pump.Start();
-        return pump;
-    }
+    // Started once the question is asked: an answer that arrives before its question is a stale one, and dropped.
+    private static ReplStdinPump Answering(string answer) =>
+        new(new StringReader($$"""{"type":"question_response","answer":"{{answer}}"}"""), () => null);
 
     [Fact]
     public async Task SelectAsync_AsksThePanel_AndReturnsItsPick()
     {
-        ReplInput.Bridge = Answering("2. python: print(1)");
+        var pump = Answering("2. python: print(1)");
+        ReplInput.Bridge = pump;
 
-        var picked = await ReplInput.SelectAsync("[bold]Which code block?[/]", ["1. sh: ls", "2. python: print(1)"]);
+        var asked = ReplInput.SelectAsync("[bold]Which code block?[/]", ["1. sh: ls", "2. python: print(1)"]);
+        pump.Start();
+        var picked = await asked;
 
         Assert.Equal("2. python: print(1)", picked);
         Assert.Contains("\"type\":\"question\"", _events.ToString());
@@ -40,8 +40,11 @@ public sealed class ReplInputTests : IDisposable
     [Fact]
     public async Task SelectAsync_AnswerNotAChoice_IsNoPick()
     {
-        ReplInput.Bridge = Answering("something else");
+        var pump = Answering("something else");
+        ReplInput.Bridge = pump;
 
-        Assert.Null(await ReplInput.SelectAsync("Which?", ["a", "b"]));
+        var asked = ReplInput.SelectAsync("Which?", ["a", "b"]);
+        pump.Start();
+        Assert.Null(await asked);
     }
 }

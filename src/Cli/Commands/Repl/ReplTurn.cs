@@ -368,12 +368,13 @@ internal static class ReplTurn
         }
         if (ctx.StdinPump is { } pump)
             pump.RunNow = line => ReplCommands.RunMidTurn(ctx, line);
+        AcceptMidTurnMessages(ctx);
         try   { await RunLoopAsync(ctx, cancellationToken); }
         finally
         {
             Console.CancelKeyPress -= OnCancelKeyPress;
-            if (ReplInput.Screen is { } s) { s.Interrupt = null; s.RunNow = null; }
-            if (ctx.StdinPump is { } p) p.RunNow = null;
+            if (ReplInput.Screen is { } s) { s.Interrupt = null; s.RunNow = null; s.Interject = null; }
+            if (ctx.StdinPump is { } p) { p.RunNow = null; p.Interject = null; }
         }
 
         void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
@@ -423,6 +424,19 @@ internal static class ReplTurn
                 ctx.LineReader.RequestCancel();
             }
         }
+    }
+
+    // A message sent while the REPL works reaches the model at its next call: after the running tool calls, or as the
+    // next turn it runs before it's done starts (each turn of a /goal run, a correction).
+    internal static void AcceptMidTurnMessages(ReplSessionContext ctx)
+    {
+        Func<string, bool> interject = text =>
+        {
+            ctx.Interjections.Enqueue(text);
+            return true;
+        };
+        if (ReplInput.Screen is { } screen) screen.Interject = interject;
+        if (ctx.StdinPump is { } pump) pump.Interject = interject;
     }
 
     private static async Task RunLoopAsync(ReplSessionContext ctx, CancellationToken cancellationToken)
@@ -498,6 +512,15 @@ internal static class ReplTurn
 
             ReplAutoTitle.MaybeStart(ctx);
             if (ctx.TitleUnsaved) await SaveSnapshotAsync(ctx);
+
+            // Sent while the REPL was busy with something no turn read from (a command, plan steps): it starts the next turn.
+            if (!ctx.Interjections.IsEmpty)
+            {
+                var left = new List<string>();
+                while (ctx.Interjections.TryDequeue(out var text)) left.Add(text);
+                if (ctx.CarriedInput is { } earlier) left.Insert(0, earlier);
+                ctx.CarriedInput = string.Join("\n\n", left);
+            }
 
             string? raw;
             IReadOnlyList<DataContent> bridgeImages = [];
@@ -698,6 +721,18 @@ internal static class ReplTurn
         return await AttachMentionsAsync(ctx, typed, ct) is { } mentioned ? typed + "\n\n" + mentioned : typed;
     }
 
+    // What an earlier turn of this busy stretch left unread (already reported as carried) and what was sent since.
+    static async Task<string?> TakeHeldInputAsync(ReplSessionContext ctx, CancellationToken ct)
+    {
+        var carried = ctx.CarriedInput;
+        ctx.CarriedInput = null;
+        var joined = await TakeInterjectionsAsync(ctx, ct);
+        if (carried is null) return joined;
+        await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex, payload: new { content = carried, images = 0, interjection = true });
+        var withMentions = await AttachMentionsAsync(ctx, carried, ct) is { } mentioned ? carried + "\n\n" + mentioned : carried;
+        return joined is null ? withMentions : withMentions + "\n\n" + joined;
+    }
+
     // The files and directories the message names with @, read through the session's tools, and what was attached.
     internal static Task<string?> AttachMentionsAsync(ReplSessionContext ctx, string text, CancellationToken ct) =>
         ReplMentions.AttachAsync(text, ctx.Cwd, ctx.GetActiveTools(), (what, ok) =>
@@ -815,6 +850,9 @@ internal static class ReplTurn
                 AnsiConsole.MarkupLine(
                     $"[dim]  ({dropped} older image{(dropped == 1 ? "" : "s")} dropped from context — only the last {ImageAttachments.KeepRecentImages} stay attached)[/]");
         }
+        // What the user sent while the REPL was busy that no turn has read yet: this turn's first model call takes it.
+        if (!isStepRequest && await TakeHeldInputAsync(ctx, cancellationToken) is { } held)
+            ctx.History.Add(new ChatMessage(ChatRole.User, held));
         await ctx.Emitter.EmitAsync(EventTypes.TurnStart, turn: ctx.TurnIndex, payload: new { is_step = isStepRequest, is_correction = isCorrectionTurn });
 
         // Preserve the user's input before the LLM call so a crash mid-turn still
@@ -1704,16 +1742,7 @@ internal static class ReplTurn
         // There, what the user sends while a free-form turn runs joins it after its next tool results.
         var interjector    = (screen is null && pump is null) || isStepRequest ? null : activeClient.GetService<ReplInterjectingChatClient>();
         if (interjector is not null)
-        {
             interjector.Take = ct => TakeInterjectionsAsync(ctx, ct);
-            Func<string, bool> interject = text =>
-            {
-                ctx.Interjections.Enqueue(text);
-                return true;
-            };
-            if (screen is not null) screen.Interject = interject;
-            else pump!.Interject = interject;
-        }
 
         // Whatever the turn didn't read starts the next one, unless the turn was cancelled, which drops it.
         void ReleaseInterjections(bool cancelled)
@@ -1721,8 +1750,6 @@ internal static class ReplTurn
             screen?.EndMessage(turn: false);
             if (interjector is null) return;
             interjector.Take = null;
-            if (screen is not null) screen.Interject = null;
-            else pump!.Interject = null;
             var unread = new List<string>();
             while (ctx.Interjections.TryDequeue(out var text)) unread.Add(text);
             if (unread.Count == 0) return;

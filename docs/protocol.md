@@ -210,7 +210,7 @@ Ignore any stdout line that doesn't parse as JSON. Slash-command output can occa
 
 | Event | Fields | |
 |-------|--------|---|
-| `ready` | `protocolVersion`, `sessionId`, `model`, `title`, `autoTitle`, `midTurnCommands[]` | `repl --vscode`. The chat is ready for input. `midTurnCommands` lists the slash commands that may be sent while a reply is still streaming. |
+| `ready` | `protocolVersion`, `sessionId`, `model`, `title`, `autoTitle`, `midTurnCommands[]` | `repl --vscode`. The chat is ready for input. `midTurnCommands` lists the slash commands that take effect at once when sent while the REPL is busy: during a turn, a whole `/goal` run, or another command. |
 | `ready` | `protocolVersion`, `sessionId`, `task`, `config`, `resumed`, `agents[]` | `run --bridge`. The session is about to start. |
 | `hello` | `protocolVersion`, `clientId`, `readOnly`, `inFlight`, `pendingResults[]` | Serve socket and WebSocket. Sent as soon as you connect. `clientId` echoes your `Fuseraft-Client-Id` (null without one). `readOnly` is true when your bearer token is a `read` token: the daemon answers any `user_input` with an `error` event instead of queuing it. `inFlight` is your task that's still queued or running (`{sessionId, task, status, position}`), or null; its pending approval, if any, is asked again right after. `pendingResults` lists the session IDs of your tasks that finished while you were away; their `result` events follow the `hello`. |
 
@@ -219,11 +219,11 @@ Ignore any stdout line that doesn't parse as JSON. Slash-command output can occa
 | Line | Fields | |
 |------|--------|---|
 | `user_input` | `text`, `images?[]` (`{name, data}` with `data` a base64 data URL) | A message, or a slash command. On the serve socket, each message is dispatched as a new task; a plain text line works too, and images aren't supported there. |
-| `approval_response` | `approved` (bool) | Answers the pending `approval_request`. Anything malformed counts as **denied**. |
-| `question_response` | `answer` (string, or `null` to skip) | Answers the pending `question`. |
+| `approval_response` | `approved` (bool) | Answers the pending `approval_request`. Anything malformed counts as **denied**, and so does an `interrupt` while it's pending. |
+| `question_response` | `answer` (string, or `null` to skip) | Answers the pending `question`. An `interrupt` while it's pending dismisses it. |
 | `interrupt` | — | Cancels the running turn. Use it on Windows; elsewhere, sending `SIGINT` to the process does the same. |
 
-There are no request IDs. A response is simply the next matching line on stdin, so send exactly one response per `approval_request` or `question`.
+There are no request IDs. A response is simply the next matching line on stdin, so send exactly one response per `approval_request` or `question`. Other lines sent while one is pending, `user_input` included, aren't taken as the answer: they keep their place as input. A response sent when nothing is pending is ignored.
 
 ### Turn events (stdio)
 

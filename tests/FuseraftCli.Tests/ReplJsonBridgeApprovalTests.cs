@@ -49,10 +49,12 @@ public sealed class ReplJsonBridgeApprovalTests
     {
         var pump = new ReplStdinPump(
             new StringReader("""{"type":"approval_response","approved":true}""" + "\n"), () => null);
-        pump.Start();
         var service = new JsonBridgeHumanApprovalService(pump);
 
-        var allowed = await service.PromptShellCommandAsync("echo hi");
+        // The prompt opens before the answer arrives, as it does for the panel.
+        var asked = service.PromptShellCommandAsync("echo hi");
+        pump.Start();
+        var allowed = await asked;
 
         Assert.True(allowed);
     }
@@ -62,10 +64,12 @@ public sealed class ReplJsonBridgeApprovalTests
     {
         var pump = new ReplStdinPump(
             new StringReader("""{"type":"approval_response","approved":false}""" + "\n"), () => null);
-        pump.Start();
         var service = new JsonBridgeHumanApprovalService(pump);
 
-        var allowed = await service.PromptShellCommandAsync("rm -rf /");
+        // The prompt opens before the answer arrives, as it does for the panel.
+        var asked = service.PromptShellCommandAsync("rm -rf /");
+        pump.Start();
+        var allowed = await asked;
 
         Assert.False(allowed);
     }
@@ -89,10 +93,11 @@ public sealed class ReplJsonBridgeApprovalTests
     {
         var pump = new ReplStdinPump(
             new StringReader($$"""{"type":"approval_response","approved":{{(approved ? "true" : "false")}}}""" + "\n"), () => null);
-        pump.Start();
         var service = new JsonBridgeHumanApprovalService(pump, promptRoutes: true);
 
-        Assert.Equal(approved, await service.PromptRouteApprovalAsync("HANDOFF", "Dev", "Tester"));
+        var asked = service.PromptRouteApprovalAsync("HANDOFF", "Dev", "Tester");
+        pump.Start();
+        Assert.Equal(approved, await asked);
     }
 
     [Fact]
@@ -100,10 +105,12 @@ public sealed class ReplJsonBridgeApprovalTests
     {
         var pump = new ReplStdinPump(
             new StringReader("""{"type":"approval_response","approved":true}""" + "\n"), () => null);
-        pump.Start();
         var service = new JsonBridgeHumanApprovalService(pump);
 
-        var allowed = await service.PromptToolActionAsync("FileSystem", "write_file", "/tmp/scratch.txt");
+        // The prompt opens before the answer arrives, as it does for the panel.
+        var asked = service.PromptToolActionAsync("FileSystem", "write_file", "/tmp/scratch.txt");
+        pump.Start();
+        var allowed = await asked;
 
         Assert.True(allowed);
     }
@@ -113,10 +120,12 @@ public sealed class ReplJsonBridgeApprovalTests
     {
         var pump = new ReplStdinPump(
             new StringReader("""{"type":"approval_response","approved":false}""" + "\n"), () => null);
-        pump.Start();
         var service = new JsonBridgeHumanApprovalService(pump);
 
-        var allowed = await service.PromptToolActionAsync("Git", "git_push", "origin main");
+        // The prompt opens before the answer arrives, as it does for the panel.
+        var asked = service.PromptToolActionAsync("Git", "git_push", "origin main");
+        pump.Start();
+        var allowed = await asked;
 
         Assert.False(allowed);
     }
@@ -126,10 +135,12 @@ public sealed class ReplJsonBridgeApprovalTests
     {
         var pump = new ReplStdinPump(
             new StringReader("""{"type":"approval_response","approved":true}""" + "\n"), () => null);
-        pump.Start();
         var service = new JsonBridgeHumanApprovalService(pump);
 
-        var allowed = await service.PromptFileWriteAsync("write_file", "/tmp/scratch.txt", "old", "new");
+        // The prompt opens before the answer arrives, as it does for the panel.
+        var asked = service.PromptFileWriteAsync("write_file", "/tmp/scratch.txt", "old", "new");
+        pump.Start();
+        var allowed = await asked;
 
         Assert.True(allowed);
     }
@@ -139,10 +150,12 @@ public sealed class ReplJsonBridgeApprovalTests
     {
         var pump = new ReplStdinPump(
             new StringReader("""{"type":"approval_response","approved":false}""" + "\n"), () => null);
-        pump.Start();
         var service = new JsonBridgeHumanApprovalService(pump);
 
-        var allowed = await service.PromptFileWriteAsync("patch_file", "/tmp/scratch.txt", "old", "new");
+        // The prompt opens before the answer arrives, as it does for the panel.
+        var asked = service.PromptFileWriteAsync("patch_file", "/tmp/scratch.txt", "old", "new");
+        pump.Start();
+        var allowed = await asked;
 
         Assert.False(allowed);
     }
@@ -220,10 +233,11 @@ public sealed class ReplJsonBridgeApprovalTests
     {
         var pump = new ReplStdinPump(
             new StringReader("""{"type":"question_response","answer":"SQLite"}""" + "\n"), () => null);
-        pump.Start();
         var service = new JsonBridgeHumanApprovalService(pump, questions: true);
 
-        Assert.Equal("SQLite", await service.PromptQuestionAsync("Which database?", ["Postgres", "SQLite"], true, CancellationToken.None));
+        var asked = service.PromptQuestionAsync("Which database?", ["Postgres", "SQLite"], true, CancellationToken.None);
+        pump.Start();
+        Assert.Equal("SQLite", await asked);
     }
 
     [Fact]

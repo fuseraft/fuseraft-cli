@@ -205,7 +205,10 @@ internal sealed class ReplSessionContext
     // Safe mode
     public bool             SafeMode;
 
-    /// <summary>Messages the user sent in the full-screen REPL while the running turn works; the turn reads them after its next tool results.</summary>
+    /// <summary>
+    /// Messages the user sent while the REPL works (full-screen REPL or VS Code panel); a turn reads them after its next
+    /// tool results, or when it starts if they came between turns.
+    /// </summary>
     public System.Collections.Concurrent.ConcurrentQueue<string> Interjections { get; } = new();
 
     /// <summary>"Always" answers to approvals, for /approvals; null in a session built without them (tests).</summary>

@@ -29,25 +29,25 @@ public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump, bool
 
     public async Task<string?> PromptQuestionAsync(string question, IReadOnlyList<string> options, bool allowOther, CancellationToken ct)
     {
-        ReplJsonBridge.Emit(new { type = "question", question, options, allowOther });
-        return await stdinPump.ReadQuestionResponseAsync(ct);
+        return await stdinPump.ReadQuestionResponseAsync(ct,
+            () => ReplJsonBridge.Emit(new { type = "question", question, options, allowOther }));
     }
 
     public async Task<bool> PromptShellCommandAsync(string command)
     {
-        ReplJsonBridge.Emit(new { type = "approval_request", kind = "shell_command", command });
-        return await stdinPump.ReadApprovalResponseAsync();
+        return await stdinPump.ReadApprovalResponseAsync(
+            () => ReplJsonBridge.Emit(new { type = "approval_request", kind = "shell_command", command }));
     }
 
     public async Task<bool> PromptToolActionAsync(string plugin, string action, string detail)
     {
-        ReplJsonBridge.Emit(new { type = "approval_request", kind = "tool_action", plugin, action, detail });
-        return await stdinPump.ReadApprovalResponseAsync();
+        return await stdinPump.ReadApprovalResponseAsync(
+            () => ReplJsonBridge.Emit(new { type = "approval_request", kind = "tool_action", plugin, action, detail }));
     }
 
     public async Task<bool> PromptFileWriteAsync(string action, string path, string oldContent, string newContent)
     {
-        ReplJsonBridge.Emit(new
+        return await stdinPump.ReadApprovalResponseAsync(() => ReplJsonBridge.Emit(new
         {
             type = "approval_request",
             kind = "file_write",
@@ -56,8 +56,7 @@ public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump, bool
             path,
             oldContent,
             newContent,
-        });
-        return await stdinPump.ReadApprovalResponseAsync();
+        }));
     }
 
     // The REPL's /hitl mode only gates Shell/FileSystem/Git/Http mutating calls (see
@@ -80,8 +79,8 @@ public sealed class JsonBridgeHumanApprovalService(ReplStdinPump stdinPump, bool
     public async Task<bool> PromptRouteApprovalAsync(string keyword, string sourceAgent, string targetAgent)
     {
         if (!promptRoutes) return true;
-        ReplJsonBridge.Emit(new { type = "approval_request", kind = "route_approval", keyword, sourceAgent, targetAgent });
-        return await stdinPump.ReadApprovalResponseAsync();
+        return await stdinPump.ReadApprovalResponseAsync(
+            () => ReplJsonBridge.Emit(new { type = "approval_request", kind = "route_approval", keyword, sourceAgent, targetAgent }));
     }
 
     public Task<string?> PromptPostSessionAsync() => Task.FromResult<string?>(null);

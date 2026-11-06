@@ -168,15 +168,71 @@ public sealed class ReplTurnBridgeEventsTests : IDisposable
             [Update(new TextContent("Working")), Update(new TextContent(" on it."))],
             during: () => taken = pump.Interject?.Invoke("also add tests")));
         var ctx = NewContext(client, pump);
+        ReplTurn.AcceptMidTurnMessages(ctx);
 
         await RunTurnAsync(ctx);
 
         Assert.True(taken);
-        Assert.Null(pump.Interject);
         Assert.Equal("also add tests", ctx.CarriedInput);
         var carried = Assert.Single(Events("interjection"));
         Assert.Equal("carried", carried.GetProperty("status").GetString());
         Assert.Equal(1, carried.GetProperty("count").GetInt32());
+    }
+
+    // Records what each model call was sent.
+    private sealed class RecordingChatClient : IChatClient
+    {
+        public List<List<ChatMessage>> Calls { get; } = [];
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "")));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Calls.Add([.. messages]);
+            await Task.Yield();
+            yield return Update(new TextContent("Noted."));
+        }
+
+        public object? GetService(Type serviceType, object? key = null) => serviceType.IsInstanceOfType(this) ? this : null;
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task WhatWasSentBetweenTurns_TheNextTurnsFirstModelCallReads()
+    {
+        // As between the turns of a /goal run: one message the last turn left unread, one sent during the audit.
+        var client = new RecordingChatClient();
+        var ctx = NewContext(client);
+        ctx.CarriedInput = "use the v2 API";
+        ctx.Interjections.Enqueue("and keep it short");
+
+        await RunTurnAsync(ctx, "[Goal follow-up] b.txt is missing.");
+
+        var sent = Assert.Single(client.Calls);
+        Assert.Equal(["[Goal follow-up] b.txt is missing.", "use the v2 API\n\nand keep it short"],
+            sent.Where(m => m.Role == ChatRole.User).Select(m => m.Text).TakeLast(2));
+        Assert.Null(ctx.CarriedInput);
+        Assert.True(ctx.Interjections.IsEmpty);
+        Assert.Equal(1, Assert.Single(Events("interjection")).GetProperty("count").GetInt32());
+    }
+
+    [Fact]
+    public async Task APlanStep_LeavesWhatWasSentForLater()
+    {
+        var client = new RecordingChatClient();
+        var ctx = NewContext(client);
+        ctx.StepClient = client;
+        ctx.Interjections.Enqueue("after the plan, check the docs");
+
+        await ReplTurn.ExecuteAsync(ctx, "[Step 1 of 2] do it", isStepRequest: true, capturePlan: false,
+            activeStep: null, CancellationToken.None);
+
+        Assert.DoesNotContain(Assert.Single(client.Calls), m => m.Text.Contains("check the docs"));
+        Assert.Equal("after the plan, check the docs", Assert.Single(ctx.Interjections));
     }
 
     [Fact]
