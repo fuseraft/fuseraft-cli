@@ -109,8 +109,7 @@ public sealed class ServeAttachClient : IServeAttachSink
                 ?? throw new IOException("The client that dispatched this task is no longer connected.");
             try
             {
-                connection.Emit(request);
-                if (await connection.Pump.TryReadApprovalResponseAsync() is { } approved)
+                if (await connection.Pump.TryReadApprovalResponseAsync(() => connection.Emit(request)) is { } approved)
                     return approved;
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }

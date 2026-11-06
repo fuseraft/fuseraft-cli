@@ -4,7 +4,7 @@ namespace FuseraftCli.Tests;
 
 /// <summary>
 /// While a turn runs, a plain message from the VS Code panel joins it (as the full-screen REPL's prompt does);
-/// commands, image messages, and approval and question answers keep their place in line.
+/// commands and image messages wait, and approval and question answers go only to the prompt waiting for them.
 /// </summary>
 public sealed class ReplStdinPumpTests
 {
@@ -33,9 +33,10 @@ public sealed class ReplStdinPumpTests
         {
             Interject = text => { joined.Add(text); return true; },
         };
+        var approval = pump.ReadApprovalResponseAsync();
         pump.Start();
 
-        Assert.True(await pump.ReadApprovalResponseAsync());
+        Assert.True(await approval);
         Assert.Equal("/compact", (await pump.ReadMessageAsync())!.Text);
         Assert.Null(await pump.ReadMessageAsync());
         Assert.Equal(["use the v2 API"], joined);
@@ -59,17 +60,18 @@ public sealed class ReplStdinPumpTests
         Assert.Equal(expected, ReplStdinPump.CommandText(line));
 
     [Fact]
-    public async Task WhileATurnRuns_ACommandThatNeedNotWait_RunsNow_AndOthersQueue()
+    public async Task WhileBusy_ACommandThatNeedNotWait_RunsNow_AndOthersQueue()
     {
+        // No turn is streaming (no active request), as between the turns of a /goal run: the REPL is still busy.
         var ran = new List<string>();
-        using var turn = new CancellationTokenSource();
         var pump = new ReplStdinPump(new StringReader(string.Join('\n',
             """{"type":"user_input","text":"/title Login bug"}""",
-            """{"type":"user_input","text":"/compact"}""")), () => turn)
+            """{"type":"user_input","text":"/compact"}""")), () => null)
         {
             RunNow = line => { ran.Add(line); return line.StartsWith("/title") ? "renamed" : null; },
         };
         pump.Start();
+        await pump.Closed;
 
         Assert.Equal("/compact", (await pump.ReadMessageAsync())!.Text);
         Assert.Null(await pump.ReadMessageAsync());
@@ -77,14 +79,86 @@ public sealed class ReplStdinPumpTests
     }
 
     [Fact]
-    public async Task BetweenTurns_EvenAnInstantCommandQueues()
+    public async Task WhileWaitingForInput_EvenAnInstantCommandQueues()
     {
         var pump = new ReplStdinPump(new StringReader("""{"type":"user_input","text":"/title Later"}"""), () => null)
         {
             RunNow = _ => "renamed",
         };
+        var read = pump.ReadMessageAsync();
         pump.Start();
 
-        Assert.Equal("/title Later", (await pump.ReadMessageAsync())!.Text);
+        Assert.Equal("/title Later", (await read)!.Text);
     }
+
+    [Fact]
+    public async Task WhileWaitingForInput_APlainMessageIsTheNextInput_NotAnInterjection()
+    {
+        var joined = new List<string>();
+        var pump = new ReplStdinPump(new StringReader("""{"type":"user_input","text":"next question"}"""), () => null)
+        {
+            Interject = text => { joined.Add(text); return true; },
+        };
+        var read = pump.ReadMessageAsync();
+        pump.Start();
+
+        Assert.Equal("next question", (await read)!.Text);
+        Assert.Empty(joined);
+    }
+
+    [Fact]
+    public async Task AnApprovalPrompt_TakesOnlyItsAnswer_AndMessagesSentMeanwhileWaitAsInput()
+    {
+        var pump = new ReplStdinPump(new StringReader(string.Join('\n',
+            """{"type":"user_input","text":"also, thanks!"}""",
+            """{"type":"user_input","text":"/hitl auto"}""",
+            """{"type":"approval_response","approved":true}""")), () => null);
+        var approval = pump.ReadApprovalResponseAsync();
+        pump.Start();
+
+        Assert.True(await approval);
+        Assert.Equal("also, thanks!", (await pump.ReadMessageAsync())!.Text);
+        Assert.Equal("/hitl auto", (await pump.ReadMessageAsync())!.Text);
+    }
+
+    [Fact]
+    public async Task AQuestion_IgnoresAnApprovalAnswer()
+    {
+        var pump = new ReplStdinPump(new StringReader(string.Join('\n',
+            """{"type":"approval_response","approved":true}""",
+            """{"type":"user_input","text":"hello"}""",
+            """{"type":"question_response","answer":"SQLite"}""")), () => null);
+        var question = pump.ReadQuestionResponseAsync(CancellationToken.None);
+        pump.Start();
+
+        Assert.Equal("SQLite", await question);
+        Assert.Equal("hello", (await pump.ReadMessageAsync())!.Text);
+    }
+
+    [Fact]
+    public async Task AnAnswerSentBeforeItsPromptOpened_AnswersNothing()
+    {
+        // e.g. Allow clicked just after Stop closed the prompt: it must not approve the next one.
+        var pump = new ReplStdinPump(new StringReader("""{"type":"approval_response","approved":true}"""), () => null);
+        pump.Start();
+        await pump.Closed;
+
+        Assert.Null(await pump.TryReadApprovalResponseAsync());
+        Assert.Null(await pump.ReadMessageAsync());
+    }
+
+    [Fact]
+    public async Task Stop_DeniesAnOpenApproval()
+    {
+        using var turn = new CancellationTokenSource();
+        var pump = new ReplStdinPump(new StringReader(string.Join('\n',
+            """{"type":"interrupt"}""",
+            """{"type":"approval_response","approved":true}""")), () => turn);
+        var approval = pump.TryReadApprovalResponseAsync();
+        pump.Start();
+
+        Assert.False(await approval);
+        Assert.True(turn.IsCancellationRequested);
+    }
+
 }

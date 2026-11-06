@@ -8,8 +8,8 @@ namespace fuseraft.Cli.Commands.Repl;
 /// <summary>
 /// Owns stdin for the life of a JSON-bridge REPL session (<c>fuseraft repl --vscode</c>). A
 /// single background loop is the only thing that ever reads from it once <see cref="Start"/> is
-/// called; everything else consumes lines through <see cref="ReadInputAsync"/> /
-/// <see cref="ReadApprovalResponseAsync"/> instead of touching the underlying reader directly.
+/// called; everything else consumes lines through <see cref="ReadInputAsync"/>,
+/// <see cref="ReadApprovalResponseAsync"/> and the like instead of touching the underlying reader directly.
 ///
 /// This exists because of how the "Stop" button has to work on Windows. There's no way to
 /// deliver a real SIGINT to a child process there, so the extension sends the interrupt as an
@@ -21,14 +21,23 @@ namespace fuseraft.Cli.Commands.Repl;
 /// was silently a no-op: clicking Stop mid-response did nothing. Routing every stdin line through
 /// this always-running pump lets an interrupt be acted on the instant it arrives, regardless of
 /// what the main loop is awaiting.
+///
+/// Approval and question answers travel on their own channel, read only while a prompt is open, so
+/// a message sent meanwhile can never be taken for an answer, and an answer can never become a message.
 /// </summary>
 public sealed class ReplStdinPump
 {
     private readonly Channel<string> _lines = Channel.CreateUnbounded<string>();
+    private readonly Channel<string> _answers = Channel.CreateUnbounded<string>();
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TextReader _input;
     private readonly Func<CancellationTokenSource?> _getActiveCts;
     private Task? _pumpTask;
+    // True while the main loop waits in ReadMessageAsync/ReadInputAsync — i.e. nothing is running.
+    private volatile bool _awaitingInput;
+
+    // Put on the answer channel by an interrupt: a prompt still open when the turn stops is denied or dismissed.
+    private const string Interrupted = "";
 
     internal ReplStdinPump(TextReader input, Func<CancellationTokenSource?> getActiveCts)
     {
@@ -43,14 +52,17 @@ public sealed class ReplStdinPump
     internal void Start() => _pumpTask ??= Task.Run(PumpLoopAsync);
 
     /// <summary>
-    /// Takes a message the user sends while a turn runs, as the full-screen REPL's prompt does; set by <c>ReplTurn</c>
-    /// for the length of a free-form turn. Only plain text joins: a <c>/command</c>, <c>!command</c> or <c>$skill</c>
+    /// Takes a message the user sends while the REPL is busy, as the full-screen REPL's prompt does; set by
+    /// <c>ReplTurn</c> for the session. Only plain text joins: a <c>/command</c>, <c>!command</c> or <c>$skill</c>
     /// waits for the turn to end, a message with images starts the next turn, and approval and question answers
-    /// keep their place in line.
+    /// go to the prompt waiting for them.
     /// </summary>
     internal volatile Func<string, bool>? Interject;
 
-    /// <summary>Runs a <c>/command</c> that arrives while a turn runs if it needn't wait for the turn (see <c>ReplCommands.RunMidTurn</c>).</summary>
+    /// <summary>
+    /// Runs a <c>/command</c> that arrives while the REPL is busy (a turn, a whole <c>/goal</c> run, another command)
+    /// if it needn't wait for that to finish (see <c>ReplCommands.RunMidTurn</c>).
+    /// </summary>
     internal volatile Func<string, string?>? RunNow;
 
     private async Task PumpLoopAsync()
@@ -64,6 +76,7 @@ public sealed class ReplStdinPump
             if (line is null)
             {
                 _lines.Writer.TryComplete();
+                _answers.Writer.TryComplete();
                 _closed.TrySetResult();
                 return;
             }
@@ -75,14 +88,21 @@ public sealed class ReplStdinPump
                 var c = _getActiveCts();
                 if (c is not null && !c.IsCancellationRequested) c.Cancel();
                 else if (c is not null) fuseraft.Infrastructure.Plugins.ProcessHelper.KillRunning();
-                continue; // handled here — never queued for ReadInputAsync/ReadApprovalResponseAsync
+                _answers.Writer.TryWrite(Interrupted);
+                continue; // handled here — never queued as input
             }
 
-            if (_getActiveCts() is not null && RunNow is { } runNow && CommandText(line) is { } command
+            if (AnswerType(line) is not null)
+            {
+                _answers.Writer.TryWrite(line);
+                continue;
+            }
+
+            if (!_awaitingInput && RunNow is { } runNow && CommandText(line) is { } command
                 && runNow(command) is not null)
                 continue;
 
-            if (Interject is { } interject && InterjectionText(line) is { } text && interject(text))
+            if (!_awaitingInput && Interject is { } interject && InterjectionText(line) is { } text && interject(text))
                 continue;
 
             _lines.Writer.TryWrite(line);
@@ -115,6 +135,31 @@ public sealed class ReplStdinPump
         catch (JsonException) { return null; }
     }
 
+    // "approval_response" or "question_response" for an answer line; null for anything else.
+    private static string? AnswerType(string line)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            return doc.RootElement.ValueKind == JsonValueKind.Object &&
+                   doc.RootElement.TryGetProperty("type", out var t) &&
+                   t.GetString() is "approval_response" or "question_response" ? t.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    // Opens a prompt: drops answers left from earlier ones (sent after their prompt had closed), asks via
+    // `ask`, and waits for an answer of `type`. Interrupted when the turn was stopped; null once input closes.
+    private async Task<string?> ReadAnswerAsync(string type, Action? ask, CancellationToken ct)
+    {
+        while (_answers.Reader.TryRead(out _)) { }
+        ask?.Invoke();
+        while (await _answers.Reader.WaitToReadAsync(ct))
+            if (_answers.Reader.TryRead(out var line) && (line == Interrupted || AnswerType(line) == type))
+                return line;
+        return null;
+    }
+
     internal static bool IsInterruptLine(string line)
     {
         try
@@ -129,12 +174,20 @@ public sealed class ReplStdinPump
     internal sealed record BridgeInput(string? Text, IReadOnlyList<DataContent> Images, IReadOnlyList<string> Errors);
 
     /// <summary>Like <see cref="ReadInputAsync"/> but keeps attached images; null once stdin is closed.</summary>
-    internal async Task<BridgeInput?> ReadMessageAsync()
+    internal async Task<BridgeInput?> ReadMessageAsync() =>
+        await ReadLineAsync() is { } line ? ParseMessage(line) : null;
+
+    private async Task<string?> ReadLineAsync()
     {
-        while (await _lines.Reader.WaitToReadAsync())
-            if (_lines.Reader.TryRead(out var line))
-                return ParseMessage(line);
-        return null;
+        _awaitingInput = true;
+        try
+        {
+            while (await _lines.Reader.WaitToReadAsync())
+                if (_lines.Reader.TryRead(out var line))
+                    return line;
+            return null;
+        }
+        finally { _awaitingInput = false; }
     }
 
     /// <summary>
@@ -199,13 +252,8 @@ public sealed class ReplStdinPump
     }
 
     /// <summary>Returns the next non-interrupt line's "text" field, or null once stdin is closed.</summary>
-    internal async Task<string?> ReadInputAsync()
-    {
-        while (await _lines.Reader.WaitToReadAsync())
-            if (_lines.Reader.TryRead(out var line))
-                return ExtractText(line);
-        return null;
-    }
+    internal async Task<string?> ReadInputAsync() =>
+        await ReadLineAsync() is { } line ? ExtractText(line) : null;
 
     internal static string? ExtractText(string line)
     {
@@ -219,40 +267,26 @@ public sealed class ReplStdinPump
     }
 
     /// <summary>
-    /// Blocks for the webview's answer to a pending <c>approval_request</c> event (see
-    /// <see cref="fuseraft.Cli.JsonBridgeHumanApprovalService"/>), e.g.
-    /// <c>{"type":"approval_response","approved":true}</c>. Only ever called from within a single
-    /// shell-tool-call approval gate, never concurrently with <see cref="ReadInputAsync"/> (that's
-    /// only awaited between turns), so both can safely share this pump's one line channel.
-    /// Anything other than a well-formed approval with <c>approved:true</c> — malformed JSON, the
-    /// wrong "type", or stdin closing because the panel/process went away — denies the command
-    /// rather than risking a false approval.
+    /// Asks with <paramref name="ask"/> (emitting the <c>approval_request</c> event, see
+    /// <see cref="fuseraft.Cli.JsonBridgeHumanApprovalService"/>) and blocks for the answer, e.g.
+    /// <c>{"type":"approval_response","approved":true}</c>. Messages sent meanwhile wait their turn as
+    /// input. Anything other than a well-formed approval with <c>approved:true</c> — a malformed answer,
+    /// Stop, or stdin closing because the panel/process went away — denies the command rather than
+    /// risking a false approval.
     /// </summary>
-    internal async Task<bool> ReadApprovalResponseAsync() => await TryReadApprovalResponseAsync() ?? false;
+    internal async Task<bool> ReadApprovalResponseAsync(Action? ask = null) => await TryReadApprovalResponseAsync(ask) ?? false;
 
     /// <summary>Like <see cref="ReadApprovalResponseAsync"/>, but null when stdin closed before an answer arrived.</summary>
-    internal async Task<bool?> TryReadApprovalResponseAsync()
-    {
-        while (await _lines.Reader.WaitToReadAsync())
-            if (_lines.Reader.TryRead(out var line))
-                return ExtractApproval(line);
-        return null;
-    }
+    internal async Task<bool?> TryReadApprovalResponseAsync(Action? ask = null) =>
+        await ReadAnswerAsync("approval_response", ask, CancellationToken.None) is { } line ? ExtractApproval(line) : null;
 
     /// <summary>
-    /// Blocks for the webview's answer to a pending <c>question</c> event, e.g.
-    /// <c>{"type":"question_response","answer":"SQLite"}</c>. Like <see cref="ReadApprovalResponseAsync"/>,
-    /// only ever awaited mid-turn from the one ask_user call in flight. Anything but a non-empty string
-    /// answer — <c>"answer":null</c> (skipped), malformed JSON, the wrong "type", or stdin closing —
-    /// dismisses the question.
+    /// Asks with <paramref name="ask"/> (emitting a <c>question</c> event) and blocks for the answer, e.g.
+    /// <c>{"type":"question_response","answer":"SQLite"}</c>. Anything but a non-empty string answer —
+    /// <c>"answer":null</c> (skipped), a malformed answer, Stop, or stdin closing — dismisses the question.
     /// </summary>
-    internal async Task<string?> ReadQuestionResponseAsync(CancellationToken ct)
-    {
-        while (await _lines.Reader.WaitToReadAsync(ct))
-            if (_lines.Reader.TryRead(out var line))
-                return ExtractQuestionAnswer(line);
-        return null;
-    }
+    internal async Task<string?> ReadQuestionResponseAsync(CancellationToken ct, Action? ask = null) =>
+        await ReadAnswerAsync("question_response", ask, ct) is { } line ? ExtractQuestionAnswer(line) : null;
 
     internal static string? ExtractQuestionAnswer(string line)
     {

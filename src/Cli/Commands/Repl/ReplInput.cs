@@ -187,8 +187,8 @@ internal static class ReplInput
     {
         if (Screen is null && Bridge is { } bridge)
         {
-            ReplJsonBridge.Emit(new { type = "question", question = Plain(title), options = choices, allowOther = false });
-            var picked = await bridge.ReadQuestionResponseAsync(ct);
+            var picked = await bridge.ReadQuestionResponseAsync(ct,
+                () => ReplJsonBridge.Emit(new { type = "question", question = Plain(title), options = choices, allowOther = false }));
             return picked is not null && choices.Contains(picked) ? picked : null;
         }
         if (Screen is not { } screen)

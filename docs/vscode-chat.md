@@ -58,7 +58,7 @@ Switch models from the panel's header at any time without losing the conversatio
 
 ## Talking to it
 
-- **Type while it works.** A message you send mid-turn joins the running turn after its current tool calls. `/title` and `/hitl on|off` apply at once. Other `/commands`, `!commands`, and `$skills` wait as a chip above the prompt until the turn ends. **↑** on an empty prompt takes the last one back to edit, and stopping the turn drops them.
+- **Type while it works.** **Send** holds a message as a chip above the prompt until the work is done. The chip's send arrow (or Ctrl+Enter instead of Enter) hands it to the model at its next call without stopping anything: after its current tool calls, or as the next turn of a `/goal` run starts. Its pencil (or **↑** on an empty prompt, for the last chip) takes it back into the prompt. `/title` and `/hitl on|off` apply at once, for the whole of a `/goal` run too. Other `/commands`, `!commands`, and `$skills` wait as a chip. Stopping the turn drops the chips.
 - **Completions** for `/commands`, `$skills`, and `@paths`.
 - **Images:** paste a screenshot, or attach images with the paperclip.
 - **Long pastes** (more than 10 lines or 2,000 characters) show as `[pasted #1 · 40 lines]` and are sent in full. **Ctrl+O** shows them.
