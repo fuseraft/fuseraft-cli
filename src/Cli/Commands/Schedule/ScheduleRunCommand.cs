@@ -197,9 +197,9 @@ public sealed class ScheduleRunCommand : AsyncCommand<ScheduleRunSettings>
         return exitCode;
     }
 
-    private static List<string> BuildArgs(ScheduledJob job)
+    internal static List<string> BuildArgs(ScheduledJob job)
     {
-        var args = new List<string> { job.Task, "--no-banner" };
+        var args = new List<string> { "run", job.Task, "--no-banner" };
         if (job.Config  is { Length: > 0 } cfg) { args.Add("--config");   args.Add(cfg); }
         if (job.WorkDir is { Length: > 0 } wd)  { args.Add("--work-dir"); args.Add(wd); }
         return args;
