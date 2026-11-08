@@ -117,7 +117,7 @@ public sealed class WireModelsTests
         var wire = WireScheduledJob.From(new ScheduledJob { Name = "nightly", Cron = "0 2 * * *", Task = "t" }, T0);
 
         Assert.Equal(
-            ["name", "description", "cron", "task", "config", "workDir", "enabled", "due", "createdAt", "lastRun", "nextRun"],
+            ["name", "description", "cron", "task", "config", "workDir", "enabled", "due", "createdAt", "lastRun", "nextRun", "lastExitCode"],
             Keys(wire));
     }
 

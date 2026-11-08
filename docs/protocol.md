@@ -142,6 +142,7 @@ A REPL chat.
 | `due` | bool | Enabled and its next run time has passed. |
 | `createdAt` | timestamp | |
 | `lastRun`, `nextRun` | timestamp \| null | |
+| `lastExitCode` | int \| null | The last run's exit code: 0 when it succeeded. Null if it hasn't run, or last ran before fuseraft 1.21. |
 
 ### ConfigSummary
 

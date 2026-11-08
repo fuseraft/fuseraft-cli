@@ -25,6 +25,16 @@ public sealed class ScheduleUtilTests
     }
 
     [Fact]
+    public void LastExitCode_RoundTrips_AndIsNullInOlderFiles()
+    {
+        var back = ScheduleUtil.Deserialize(ScheduleUtil.Serialize(new ScheduledJob { Name = "j", LastExitCode = 2 }))!;
+        var old  = ScheduleUtil.Deserialize("name: j\ncron: 0 2 * * *\ntask: t\nlast_run: 2026-10-31T13:49:06Z\n")!;
+
+        Assert.Equal(2, back.LastExitCode);
+        Assert.Null(old.LastExitCode);
+    }
+
+    [Fact]
     public void Serialize_WritesOneScalarPerTimestamp()
     {
         var yaml = ScheduleUtil.Serialize(new ScheduledJob { Name = "j", CreatedAt = Created, NextRun = Next });

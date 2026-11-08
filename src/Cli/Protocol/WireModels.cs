@@ -131,11 +131,11 @@ public sealed record WireContextFile(string RelativePath, long SizeBytes);
 /// <summary>A scheduled job from <c>fuseraft schedule list --json</c>.</summary>
 public sealed record WireScheduledJob(
     string Name, string? Description, string Cron, string Task, string? Config, string? WorkDir,
-    bool Enabled, bool Due, DateTimeOffset CreatedAt, DateTimeOffset? LastRun, DateTimeOffset? NextRun)
+    bool Enabled, bool Due, DateTimeOffset CreatedAt, DateTimeOffset? LastRun, DateTimeOffset? NextRun, int? LastExitCode)
 {
     public static WireScheduledJob From(ScheduledJob j, DateTimeOffset now) => new(
         j.Name, j.Description, j.Cron, j.Task, j.Config, j.WorkDir,
-        j.Enabled, j.Enabled && j.NextRun <= now, j.CreatedAt, j.LastRun, j.NextRun);
+        j.Enabled, j.Enabled && j.NextRun <= now, j.CreatedAt, j.LastRun, j.NextRun, j.LastExitCode);
 }
 
 /// <summary>A plugin from <c>fuseraft plugins --json</c>; <c>Source</c> is <c>builtin</c> or <c>mcp</c>.</summary>

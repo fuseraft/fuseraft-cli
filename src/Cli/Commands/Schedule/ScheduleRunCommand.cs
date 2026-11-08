@@ -184,7 +184,8 @@ public sealed class ScheduleRunCommand : AsyncCommand<ScheduleRunSettings>
                     AnsiConsole.MarkupLine($"[yellow]⚠ Could not parse cron expression '{Markup.Escape(reloaded.Cron)}' for {Markup.Escape(job.Name)} — NextRun will not be set:[/] {Markup.Escape(ex.Message)}");
                 }
 
-                reloaded.LastRun = DateTimeOffset.UtcNow;
+                reloaded.LastRun      = DateTimeOffset.UtcNow;
+                reloaded.LastExitCode = exitCode;
                 reloaded.NextRun = cronExpr?.GetNextOccurrence(DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
                 await File.WriteAllTextAsync(jobFilePath, ScheduleUtil.Serialize(reloaded), ct);
             }
