@@ -184,7 +184,8 @@ public sealed class ScheduleRunCommand : AsyncCommand<ScheduleRunSettings>
                     AnsiConsole.MarkupLine($"[yellow]⚠ Could not parse cron expression '{Markup.Escape(reloaded.Cron)}' for {Markup.Escape(job.Name)} — NextRun will not be set:[/] {Markup.Escape(ex.Message)}");
                 }
 
-                reloaded.LastRun = DateTimeOffset.UtcNow;
+                reloaded.LastRun      = DateTimeOffset.UtcNow;
+                reloaded.LastExitCode = exitCode;
                 reloaded.NextRun = cronExpr?.GetNextOccurrence(DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
                 await File.WriteAllTextAsync(jobFilePath, ScheduleUtil.Serialize(reloaded), ct);
             }
@@ -197,9 +198,9 @@ public sealed class ScheduleRunCommand : AsyncCommand<ScheduleRunSettings>
         return exitCode;
     }
 
-    private static List<string> BuildArgs(ScheduledJob job)
+    internal static List<string> BuildArgs(ScheduledJob job)
     {
-        var args = new List<string> { job.Task, "--no-banner" };
+        var args = new List<string> { "run", job.Task, "--no-banner" };
         if (job.Config  is { Length: > 0 } cfg) { args.Add("--config");   args.Add(cfg); }
         if (job.WorkDir is { Length: > 0 } wd)  { args.Add("--work-dir"); args.Add(wd); }
         return args;

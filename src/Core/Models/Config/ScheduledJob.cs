@@ -59,9 +59,13 @@ public sealed class ScheduledJob
     [YamlMember(Alias = "created_at")]
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
-    /// <summary>UTC timestamp of the last successful execution. Null if never run.</summary>
+    /// <summary>UTC timestamp of the last execution, whether or not it succeeded. Null if never run.</summary>
     [YamlMember(Alias = "last_run")]
     public DateTimeOffset? LastRun { get; set; }
+
+    /// <summary>Exit code of the last execution: 0 when it succeeded. Null if never run.</summary>
+    [YamlMember(Alias = "last_exit_code")]
+    public int? LastExitCode { get; set; }
 
     /// <summary>
     /// UTC timestamp when this job is next scheduled to run.

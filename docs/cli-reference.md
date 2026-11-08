@@ -2232,7 +2232,7 @@ For each due job (or the named job when `-n` is used):
 
 1. A `.lock` file (`{slug}.lock`) is created to prevent concurrent execution. If the lock already exists, the job is skipped with a warning.
 2. The session is launched via `fuseraft run <task> --no-banner [--config …] [--work-dir …]`, capturing output to the configured `OutputPath` (or stdout if none is set).
-3. After the run completes, `last_run` is set to the current UTC time and `next_run` is computed from the cron expression. The job YAML is updated atomically.
+3. After the run completes, `last_run` is set to the current UTC time, `last_exit_code` to the run's exit code (0 when it succeeded), and `next_run` is computed from the cron expression. The job YAML is updated atomically.
 4. The lock file is removed.
 
 **Examples**
@@ -2300,6 +2300,7 @@ output_path: ~/.fuseraft/logs/nightly-audit-{date}.txt
 enabled: true
 created_at: 2026-05-17T10:00:00+00:00
 last_run: 2026-05-17T02:00:00+00:00
+last_exit_code: 0
 next_run: 2026-05-18T02:00:00+00:00
 ```
 
