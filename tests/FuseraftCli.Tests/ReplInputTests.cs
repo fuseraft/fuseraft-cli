@@ -47,4 +47,61 @@ public sealed class ReplInputTests : IDisposable
         pump.Start();
         Assert.Null(await asked);
     }
+
+    [Fact]
+    public async Task AskOverBridge_AsksAFreeTextQuestion_AndReturnsTheAnswer()
+    {
+        var pump = Answering("sql");
+
+        var asked = ReplInput.AskOverBridgeAsync(pump, "[dim]Server name[/]");
+        pump.Start();
+
+        Assert.Equal("sql", await asked);
+        Assert.Contains("\"question\":\"Server name\"", _events.ToString());
+        Assert.Contains("\"options\":[]", _events.ToString());
+        Assert.Contains("\"allowOther\":true", _events.ToString());
+    }
+
+    [Fact]
+    public async Task AskOverBridge_OffersTheDefaultAsAChoice()
+    {
+        var pump = Answering("Authorization");
+
+        var asked = ReplInput.AskOverBridgeAsync(pump, "Header name", defaultValue: "Authorization");
+        pump.Start();
+
+        Assert.Equal("Authorization", await asked);
+        Assert.Contains("\"options\":[\"Authorization\"]", _events.ToString());
+    }
+
+    [Fact]
+    public async Task AskOverBridge_BlankChoice_IsAnEmptyAnswer()
+    {
+        var pump = Answering(ReplInput.BlankChoice);
+
+        var asked = ReplInput.AskOverBridgeAsync(pump, "Arguments", allowEmpty: true);
+        pump.Start();
+
+        Assert.Equal("", await asked);
+    }
+
+    [Fact]
+    public async Task AskOverBridge_Skipped_IsCancelled()
+    {
+        var pump = new ReplStdinPump(new StringReader("""{"type":"question_response","answer":null}"""), () => null);
+
+        var asked = ReplInput.AskOverBridgeAsync(pump, "Header value");
+        pump.Start();
+
+        Assert.Null(await asked);
+    }
+
+    [Fact]
+    public async Task AskOverBridge_Secret_IsNeverAsked()
+    {
+        var pump = Answering("sk-live");
+
+        Assert.Null(await ReplInput.AskOverBridgeAsync(pump, "API key", secret: true));
+        Assert.DoesNotContain("question", _events.ToString());
+    }
 }

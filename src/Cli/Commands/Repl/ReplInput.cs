@@ -152,10 +152,12 @@ internal static class ReplInput
 
     /// <summary>
     /// A line of text, <paramref name="defaultValue"/> when left empty; asked again when it's empty and required, as
-    /// Spectre's TextPrompt does. Null when the TUI's panel is dismissed.
+    /// Spectre's TextPrompt does. Null when the TUI's panel or the panel's question is dismissed.
     /// </summary>
     internal static string? Ask(string prompt, string? defaultValue = null, bool secret = false, bool allowEmpty = false)
     {
+        if (Screen is null && Bridge is { } bridge)
+            return AskOverBridgeAsync(bridge, prompt, defaultValue, secret, allowEmpty).GetAwaiter().GetResult();
         if (Screen is not { } screen)
         {
             var textPrompt = new TextPrompt<string>(prompt).PromptStyle("white");
@@ -180,6 +182,32 @@ internal static class ReplInput
             AnsiConsole.MarkupLine(prompt + ": " + Markup.Escape(secret ? new string('•', Math.Min(answer.Length, 8)) : answer));
             return answer;
         }
+    }
+
+    internal const string BlankChoice = "(none)";
+
+    // A blank question_response means the question was skipped, so a default or a blank answer is offered as a
+    // choice instead. A secret would be shown and kept in the chat's log, so it isn't asked here at all.
+    internal static async Task<string?> AskOverBridgeAsync(ReplStdinPump bridge, string prompt, string? defaultValue = null,
+        bool secret = false, bool allowEmpty = false)
+    {
+        if (secret)
+        {
+            AnsiConsole.MarkupLine(prompt + ": [dim](can't be asked here; run fuseraft repl in a terminal)[/]");
+            return null;
+        }
+        string[] options = defaultValue is not null ? [defaultValue] : allowEmpty ? [BlankChoice] : [];
+        var answer = await bridge.ReadQuestionResponseAsync(CancellationToken.None,
+            () => ReplJsonBridge.Emit(new { type = "question", question = Plain(prompt), options, allowOther = true }));
+        if (answer is null)
+        {
+            AnsiConsole.MarkupLine(prompt + ": [dim](cancelled)[/]");
+            return null;
+        }
+        if (allowEmpty && defaultValue is null && answer == BlankChoice)
+            answer = string.Empty;
+        AnsiConsole.MarkupLine(prompt + ": " + Markup.Escape(answer));
+        return answer;
     }
 
     /// <summary>One of <paramref name="choices"/>; null when the TUI's panel is dismissed. The caller reports what was chosen.</summary>
