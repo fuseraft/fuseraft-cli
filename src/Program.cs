@@ -427,7 +427,8 @@ app.Configure(cfg =>
 
         branch.AddCommand<SettingsShowCommand>("show")
             .WithDescription("Display the global config, keyed by the names settings set takes.")
-            .WithExample(["settings", "show"]);
+            .WithExample(["settings", "show"])
+            .WithExample(["settings", "show", "--json"]);
 
         branch.AddCommand<SettingsSetCommand>("set")
             .WithDescription("Set one global config field by dotted key. Run with no arguments to list valid keys.")

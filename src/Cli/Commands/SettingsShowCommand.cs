@@ -1,22 +1,37 @@
+using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli.Commands.Repl;
+using fuseraft.Cli.Protocol;
+using fuseraft.Core.Models.Config;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Storage;
 
 namespace fuseraft.Cli.Commands;
 
+public sealed class SettingsShowSettings : CommandSettings
+{
+    [CommandOption("--json")]
+    [Description("Print every setting with its value, default and type as one JSON object (see docs/protocol.md).")]
+    public bool Json { get; set; }
+}
+
 /// <summary>
 /// Pretty-prints the global <c>~/.fuseraft/config</c> file (provider, sampling, REPL, memory, subagent,
 /// telemetry, skill, and MCP server sections) — the global counterpart to <see cref="ShowConfigCommand"/>,
 /// which renders a project's <c>orchestration.yaml</c> instead.
 /// </summary>
-public sealed class SettingsShowCommand : AsyncCommand
+public sealed class SettingsShowCommand : AsyncCommand<SettingsShowSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, SettingsShowSettings settings, CancellationToken cancellationToken)
     {
         var (config, _) = UserConfigStore.Load();
+        if (settings.Json)
+        {
+            var current = config ?? new UserConfig();
+            return WireProtocol.WriteList(SettingsCatalog.All.Select(s => WireSetting.From(s, current)));
+        }
         if (config is null)
         {
             AnsiConsole.MarkupLine($"[yellow]No global config yet at[/] [bold]{Markup.Escape(UserConfigStore.ConfigPath)}[/][yellow].[/]");

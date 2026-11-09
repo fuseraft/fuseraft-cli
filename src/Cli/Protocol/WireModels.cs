@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using fuseraft.Cli.Commands;
 using fuseraft.Core.Models.Agents;
 using fuseraft.Core.Models.Config;
 using fuseraft.Core.Models.Knowledge;
@@ -149,3 +150,16 @@ public sealed record WireFunction(string Name, string Description);
 
 /// <summary>A model from <c>fuseraft models --json</c>.</summary>
 public sealed record WireModel(string Id, bool Current);
+
+/// <summary>
+/// A global setting from <c>fuseraft settings show --json</c> and <c>fuseraft settings set --json</c>. <c>Value</c> is
+/// what the config file holds, null when unset; the setting then takes <c>Default</c>, or the provider's own when that's null too.
+/// </summary>
+public sealed record WireSetting(
+    string Key, string Kind, string Description, string? Value, string? Default,
+    double? Min, double? Max, IReadOnlyList<string>? Choices, bool Clearable)
+{
+    public static WireSetting From(SettingInfo s, UserConfig config) => new(
+        s.Key, s.Kind.ToString().ToLowerInvariant(), s.Description, s.Read(config), s.Default,
+        s.Min, s.Max, s.Choices, s.Clearable);
+}
