@@ -46,6 +46,8 @@ A command that returns one thing uses `"item":{ ... }` in place of `items`. An e
 | `fuseraft schedule list --json` | [ScheduledJob](#scheduledjob) | Ordered by next run. |
 | `fuseraft plugins --json` | [Plugin](#plugin) | `--plugin <name>` filters; no match is an error envelope. |
 | `fuseraft models --json` | [Model](#model) | Queries the configured provider. Never starts the setup wizard; unconfigured is an error envelope. |
+| `fuseraft settings show --json` | [Setting](#setting) | Every key `fuseraft settings set` takes, in display order. With no config yet, every `value` is `null`. |
+| `fuseraft settings set <key> <value> --json` | [Setting](#setting) (as `item`) | The setting after the change. An unknown key or a rejected value is an error envelope, and nothing is saved. |
 | `fuseraft config --list --json` | [ConfigSummary](#configsummary) | `--dir` picks the directory (default `.fuseraft/config`). Files in an `agents/` folder are skipped. |
 | `fuseraft validate <path> --json` | [Validation](#validation) (as `item`) | Exits `1` when the config has errors, but still prints the item, not an error envelope. Can't be combined with `--diagram` or `--show-paths`. |
 | `fuseraft init --list-templates --json` | [Template](#template) | |
@@ -193,6 +195,19 @@ A REPL chat.
 |-------|------|-------------|
 | `id` | string | Pass to `fuseraft repl --model <id>`. |
 | `current` | bool | The configured default. |
+
+### Setting
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `key` | string | Dotted key, as `fuseraft settings set` takes it. The part before the dot is its section. |
+| `kind` | string | `text`, `bool`, `integer`, `number`, `choice` or `list` (comma-separated). |
+| `description` | string | What the setting does. |
+| `value` | string, nullable | What the config file holds, as `settings set` would take it. `null` when unset. |
+| `default` | string, nullable | What applies when `value` is `null`. `null` means the provider's or model's own. |
+| `min` / `max` | number, nullable | Inclusive range for `integer` and `number` settings. |
+| `choices` | array, nullable | Allowed values for a `choice` setting. |
+| `clearable` | bool | Whether `""` resets it. A `bool` setting is always `false` here: it can only be set to `true` or `false`. |
 
 ## Live sessions
 

@@ -2808,8 +2808,8 @@ export SOME_OTHER_TOOL_KEY=$(fuseraft keychain --get)
 View or edit the global `~/.fuseraft/config` file — provider, sampling, REPL, telemetry, skill-curation, and model-override defaults shared by every project on the machine. For a project's own `orchestration.yaml`/`.json`, see [`fuseraft config`](#fuseraft-config) instead.
 
 ```
-fuseraft settings show
-fuseraft settings set <key> [value]
+fuseraft settings show [--json]
+fuseraft settings set [key] [value] [--json]
 ```
 
 ### `fuseraft settings show`
@@ -2820,6 +2820,8 @@ Prints the whole file as one aligned list, grouped into Provider, Sampling, REPL
 fuseraft settings show
 ```
 
+With `--json`, prints every settable key instead, with its value, default, type and allowed range, as one [Setting](protocol.md#setting) list. This is what the VS Code extension's settings panel reads.
+
 ### `fuseraft settings set`
 
 Sets one field by a dotted, case-insensitive key. Loads the existing config (or starts a fresh one if none exists yet — a non-interactive alternative to the REPL's `/provider setup` wizard, handy for scripting or CI) and saves after applying the change. Run with no arguments to print the full list of valid keys.
@@ -2828,8 +2830,10 @@ Sets one field by a dotted, case-insensitive key. Loads the existing config (or 
 
 | Argument | Description |
 |----------|-------------|
-| `<key>` | Dotted setting key, e.g. `sampling.temperature`. |
-| `[value]` | New value. Omit or pass an empty string (`""`) to clear a value back to its default. |
+| `[key]` | Dotted setting key, e.g. `sampling.temperature`. Omit it to list every key. |
+| `[value]` | New value. Omit or pass an empty string (`""`) to clear a value back to its default. A `true`/`false` setting, `provider.modelId` and `repl.resumeReplayTurns` can't be cleared; set them to the value you want. |
+
+Numbers are checked against the range in the table below, and `repl.dock` against its two choices, before anything is saved. With `--json`, the updated [Setting](protocol.md#setting) is printed as `item`, or a rejected value as an error envelope.
 
 **Valid keys**
 

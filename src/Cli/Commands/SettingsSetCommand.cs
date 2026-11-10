@@ -4,6 +4,7 @@ using System.Linq;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using fuseraft.Cli.Commands.Repl;
+using fuseraft.Cli.Protocol;
 using fuseraft.Core.Models.Config;
 using fuseraft.Core.Subagents;
 using fuseraft.Infrastructure;
@@ -13,13 +14,17 @@ namespace fuseraft.Cli.Commands;
 
 public sealed class SettingsSetSettings : CommandSettings
 {
-    [CommandArgument(0, "<key>")]
+    [CommandArgument(0, "[key]")]
     [Description("Dotted setting key, e.g. provider.modelId, sampling.temperature, repl.noBanner. Run without arguments to list valid keys.")]
     public string Key { get; set; } = string.Empty;
 
     [CommandArgument(1, "[value]")]
     [Description("New value. Pass an empty string (\"\") to clear a value back to its default.")]
     public string? Value { get; set; }
+
+    [CommandOption("--json")]
+    [Description("Print the updated setting, or the error, as one JSON object on stdout (see docs/protocol.md).")]
+    public bool Json { get; set; }
 }
 
 /// <summary>
@@ -29,67 +34,13 @@ public sealed class SettingsSetSettings : CommandSettings
 /// </summary>
 public sealed class SettingsSetCommand : Command<SettingsSetSettings>
 {
-    // (key, description) — printed on an unknown key or when Key is empty.
-    private static readonly (string Key, string Description)[] ValidKeys =
-    [
-        ("provider.modelId",        "Model ID, e.g. claude-sonnet-4-6"),
-        ("provider.endpoint",       "Provider base URL"),
-        ("provider.type",           "Provider identifier, e.g. openai, anthropic, ollama"),
-        ("provider.apiKeyEnvVar",   "Env var name to read the API key from"),
-        ("provider.requestTimeoutSeconds",    "Whole-request timeout for model calls, 30-7200 (default 1200; Ollama keeps its own 100 s unless set), or \"\" to reset"),
-        ("provider.streamIdleTimeoutSeconds", "Seconds a streaming reply may go without content before it is treated as stalled, 30-3600 (default 300), or \"\" to reset"),
-        ("provider.maxRetries",     "Retries of a transient HTTP failure (429/5xx/network) per model call, 0-10 (default 3); setting it also turns off the SDK's own stacked retries, so 0 means one attempt. \"\" resets"),
-        ("sampling.temperature",    "0.0-2.0, or \"\" to clear"),
-        ("sampling.topP",           "0.0-1.0, or \"\" to clear"),
-        ("sampling.seed",           "Integer, or \"\" to clear"),
-        ("sampling.maxOutputTokens","Integer, or \"\" to clear"),
-        ("repl.contextBudget",      "Token budget override, or \"\" to clear"),
-        ("repl.theme",              "Full-screen REPL color theme: default, bright, light, mono, rust, or a file in ~/.fuseraft/themes; \"\" to reset"),
-        ("repl.dock",               "Where the full-screen REPL puts the prompt: bottom (default) or top; \"\" to reset"),
-        ("repl.bell",               "true/false — ring the terminal bell when a turn ends or a question waits while you're away (default true)"),
-        ("repl.autoTitle",          "true/false — name each chat from its first exchange, using memory.model if set (default true)"),
-        ("repl.noBanner",           "true/false"),
-        ("repl.verbose",            "true/false"),
-        ("repl.safeMode",           "true/false — engage /safe-mode at startup"),
-        ("repl.yolo",               "true/false — start every session as if --yolo were passed: no HITL prompts, no sandbox (default false)"),
-        ("repl.autoCompact",        "true/false — auto-compact at 75% context instead of only warning"),
-        ("repl.resumeReplayTurns",  "Integer >= 0 — recent turns to re-display when a session is resumed (0 disables; default 3)"),
-        ("repl.hitlAutoApproveReadOnly", "true/false — in HITL mode, skip the y/N prompt for provably read-only shell commands (default false)"),
-        ("repl.autoCompactThreshold",     "Context fraction at which the REPL warns/auto-compacts, 0.5-0.95 (default 0.75), or \"\" to reset"),
-        ("repl.compactPreserveTailRatio", "Context fraction kept verbatim as recent turns when compacting, 0.05-0.5 (default 0.2), or \"\" to reset"),
-        ("repl.maxConsecutiveToolFailures","Consecutive failing tool calls that end a turn, 2-50 (default 3), or \"\" to reset"),
-        ("repl.maxIdenticalToolCalls",    "Consecutive identical tool calls that end a turn, 3-50 (default 5), or \"\" to reset"),
-        ("repl.warnIdenticalToolCalls",   "Identical calls in a row at which the model is nudged, 2-49 and below the cutoff (default 3), or \"\" to reset"),
-        ("repl.maxStreamRetries",         "Automatic retries of a stream that dropped mid-response, 0-5 (default 2), or \"\" to reset"),
-        ("repl.maxTodoNudges",            "Follow-up turns sent when the model stops with its own todo items still open, 0-10 (default 2; 0 turns them off), or \"\" to reset"),
-        ("repl.maxTurnInputTokens",       "Uncached input tokens one turn may spend across all its model calls before stopping, 100000-100000000 (default 1000000), or \"\" to reset"),
-        ("repl.plugins",            "Comma-separated plugin list, e.g. Scratchpad,Http"),
-        ("telemetry.otlpEndpoint",  "OTLP endpoint URL, or \"\" to disable"),
-        ("telemetry.serviceName",   "Requires telemetry.otlpEndpoint to already be set"),
-        ("skillCuration.enabled",   "true/false"),
-        ("skills.searchDepth",      "Directory levels scanned inside each skill for resources/scripts, 1-10 (default 5), or \"\" to reset"),
-        ("memory.autoSave",         "true/false — extract memories automatically on exit and before /clear, /switch or compaction (default false; /memory save always works)"),
-        ("memory.model",            "Model ID for the memory-extraction call (e.g. a cheap model), or \"\" to use the main chat model"),
-        ("memory.provider",         "Provider for memory.model (openai, anthropic, ...), or \"\" to auto-detect"),
-        ("memory.endpoint",         "Base URL for memory.model; reuses the main provider's API key unless memory.apiKeyEnvVar is set"),
-        ("memory.apiKeyEnvVar",     "Env var holding the API key for memory.model"),
-        ("subagent.model",          "Model ID for /explore, /locate, /delegate subagents (e.g. a cheap model), or \"\" to use the main chat model"),
-        ("subagent.provider",       "Provider for subagent.model (openai, anthropic, ...), or \"\" to auto-detect"),
-        ("subagent.endpoint",       "Base URL for subagent.model; reuses the main provider's API key unless subagent.apiKeyEnvVar is set"),
-        ("subagent.apiKeyEnvVar",   "Env var holding the API key for subagent.model"),
-        ("subagent.exploreMaxIterations",  "Round cap for /explore, 1-100 (default 20), or \"\" to reset"),
-        ("subagent.delegateMaxIterations", "Round cap for /delegate, 1-100 (default 40), or \"\" to reset"),
-        ("subagent.exploreTimeoutMinutes",  "Wall-clock limit for /explore in minutes, 1-240 (default 8), or \"\" to reset"),
-        ("subagent.locateTimeoutMinutes",   "Wall-clock limit for /locate in minutes, 1-240 (default 2), or \"\" to reset"),
-        ("subagent.delegateTimeoutMinutes", "Wall-clock limit for /delegate in minutes, 1-240 (default 15), or \"\" to reset"),
-    ];
-
     public override int Execute(CommandContext context, SettingsSetSettings settings, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(settings.Key))
         {
+            if (settings.Json) return WireProtocol.WriteError("A setting key is required. Run fuseraft settings show --json to list them.");
             PrintValidKeys();
-            return 1;
+            return 0;
         }
 
         var key   = settings.Key.Trim();
@@ -98,13 +49,34 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
         var (existing, _) = UserConfigStore.Load();
         var config = existing ?? new UserConfig();
 
-        if (key.Equals("provider.apiKey", StringComparison.OrdinalIgnoreCase))
+        var error = key.Equals("provider.apiKey", StringComparison.OrdinalIgnoreCase)
+            ? "API keys are never stored in this file. Set FUSERAFT_API_KEY and run fuseraft keychain --set instead."
+            : Apply(config, key, value);
+
+        if (error is not null)
         {
-            AnsiConsole.MarkupLine("[red]✗[/] API keys are never stored in this file. Set [bold]FUSERAFT_API_KEY[/] and run [bold]fuseraft keychain --set[/] instead.");
+            if (settings.Json) return WireProtocol.WriteError(error);
+            AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(error)}");
+            if (SettingsCatalog.Find(key) is null) PrintValidKeys();
             return 1;
         }
 
-        string? error = key.ToLowerInvariant() switch
+        UserConfigStore.Save(config);
+        if (settings.Json) return WireProtocol.WriteItem(WireSetting.From(SettingsCatalog.Find(key)!, config));
+        var displayValue = string.IsNullOrEmpty(value) ? "[dim](cleared)[/]" : Markup.Escape(value);
+        AnsiConsole.MarkupLine($"[green]✓[/] {Markup.Escape(key)} = {displayValue}  [dim](saved to {Markup.Escape(UserConfigStore.ConfigPath)})[/]");
+        return 0;
+    }
+
+    /// <summary>Sets <paramref name="key"/> on <paramref name="config"/>; the error to show, or null once it's set.</summary>
+    internal static string? Apply(UserConfig config, string key, string value)
+    {
+        if (SettingsCatalog.Find(key) is not { } info)
+            return $"Unknown setting key: {key}";
+        if (CheckTyped(info, value) is { } typeError)
+            return typeError;
+
+        return key.ToLowerInvariant() switch
         {
             "provider.modelid"         => Assign(() => config.ModelId = value),
             "provider.endpoint"        => Assign(() => config.Endpoint = value),
@@ -170,27 +142,40 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
             "subagent.locatetimeoutminutes"   => AssignIntRange(v => UpdateSubagent(config, m => m with { LocateTimeoutMinutes = v }), value, 1, SubagentConfig.MaxTimeoutMinutes),
             "subagent.delegatetimeoutminutes" => AssignIntRange(v => UpdateSubagent(config, m => m with { DelegateTimeoutMinutes = v }), value, 1, SubagentConfig.MaxTimeoutMinutes),
 
-            _ => "unknown-key",
+            _ => $"Unknown setting key: {key}",
         };
-
-        if (error == "unknown-key")
-        {
-            AnsiConsole.MarkupLine($"[red]✗ Unknown setting key:[/] {Markup.Escape(key)}");
-            PrintValidKeys();
-            return 1;
-        }
-
-        if (error is not null)
-        {
-            AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(error)}");
-            return 1;
-        }
-
-        UserConfigStore.Save(config);
-        var displayValue = string.IsNullOrEmpty(value) ? "[dim](cleared)[/]" : Markup.Escape(value);
-        AnsiConsole.MarkupLine($"[green]✓[/] {Markup.Escape(key)} = {displayValue}  [dim](saved to {Markup.Escape(UserConfigStore.ConfigPath)})[/]");
-        return 0;
     }
+
+    // The catalog's range and choices hold for every key, so a client showing them can rely on them.
+    private static string? CheckTyped(SettingInfo info, string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return info.Clearable ? null : $"{info.Key} can't be cleared; set it to {info.Default ?? "a value"} instead.";
+        var v = raw.Trim();
+        switch (info.Kind)
+        {
+            case SettingKind.Integer when !long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) || OutOfRange(info, n):
+                return $"Expected an integer{RangeText(info)}, got '{raw}'.";
+            case SettingKind.Number when !double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) || OutOfRange(info, d):
+                return $"Expected a number{RangeText(info)}, got '{raw}'.";
+            case SettingKind.Choice when info.Choices is { } choices && !choices.Contains(v, StringComparer.OrdinalIgnoreCase):
+                return $"{info.Key} must be one of: {string.Join(", ", choices)}.";
+            default:
+                return null;
+        }
+    }
+
+    private static bool OutOfRange(SettingInfo info, double v) => v < info.Min || v > info.Max;
+
+    private static string RangeText(SettingInfo info) => (info.Min, info.Max) switch
+    {
+        ({ } min, { } max) => $" from {Fmt(min)} to {Fmt(max)}",
+        ({ } min, null)    => $" >= {Fmt(min)}",
+        (null, { } max)    => $" <= {Fmt(max)}",
+        _                  => "",
+    };
+
+    private static string Fmt(double v) => v.ToString(CultureInfo.InvariantCulture);
 
     private static string? Assign(Action assign)
     {
@@ -280,7 +265,16 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
     private static void PrintValidKeys()
     {
         AnsiConsole.MarkupLine("[dim]Valid keys:[/]");
-        foreach (var (k, desc) in ValidKeys)
-            AnsiConsole.MarkupLine($"  [bold]{Markup.Escape(k),-26}[/] [dim]{Markup.Escape(desc)}[/]");
+        foreach (var info in SettingsCatalog.All)
+        {
+            var hints = new List<string>();
+            if (info.Kind == SettingKind.Bool) hints.Add("true/false");
+            if (info.Choices is { } choices) hints.Add(string.Join(" or ", choices));
+            if (RangeText(info) is { Length: > 0 } range) hints.Add(range.Trim());
+            if (info.Default is { } d) hints.Add($"default {d}");
+            if (info.Clearable) hints.Add("\"\" to reset");
+            var hint = hints.Count > 0 ? $" ({string.Join("; ", hints)})" : "";
+            AnsiConsole.MarkupLine($"  [bold]{Markup.Escape(info.Key),-34}[/] [dim]{Markup.Escape(info.Description + hint)}[/]");
+        }
     }
 }
