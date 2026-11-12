@@ -84,12 +84,18 @@ internal static partial class ReplCommands
             var name = category[McpCategoryPrefix.Length..];
             var stopped = ctx.McpManager?.IsRunning(name) == false;
             AnsiConsole.MarkupLine($"  [bold cyan]{Markup.Escape(name)}[/] [dim]({tools.Count} tool(s))[/]" +
+                (IsManagedOnly(name) ? " [dim]· provided by the launcher[/]" : "") +
                 (stopped ? $" [yellow]not running[/] [dim]— /mcp reconnect {Markup.Escape(name)}[/]" : ""));
             foreach (var t in tools)
                 AnsiConsole.MarkupLine($"    [dim]·[/] {Markup.Escape(t.Name)}");
         }
         return CommandResult.Continue;
     }
+
+    // Came from whatever launched fuseraft (FUSERAFT_MCP_SERVERS), with no saved server of the name standing in front of it.
+    private static bool IsManagedOnly(string name) =>
+        ManagedMcpServers.Load(out _).Any(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+        && !ReplMcpServerStore.Load().Any(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
     private static async Task<CommandResult> CmdMcpAddAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
@@ -274,7 +280,8 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
-        var config = ctx.McpManager?.ConfigOf(name) ?? ReplMcpServerStore.Load()
+        // One that failed at startup isn't in the manager, so it's looked up where it came from.
+        var config = ctx.McpManager?.ConfigOf(name) ?? ManagedMcpServers.Merge(ReplMcpServerStore.Load(), ManagedMcpServers.Load(out _))
             .FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (config is null)
         {
@@ -471,17 +478,24 @@ internal static partial class ReplCommands
         }
 
         var category = $"{McpCategoryPrefix}{name}";
-        if (!ctx.ToolsByCategory.Remove(category))
+        var managedOnly = IsManagedOnly(name);
+        var saved   = ReplMcpServerStore.Load();
+        var removed = saved.Where(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        // A saved server that couldn't connect this session is still one to forget.
+        var connected = ctx.ToolsByCategory.Remove(category);
+        if (!connected && removed.Count == 0)
         {
-            AnsiConsole.MarkupLine($"[yellow]No connected MCP server named '{Markup.Escape(name)}'.[/]");
+            AnsiConsole.MarkupLine($"[yellow]No MCP server named '{Markup.Escape(name)}' is connected or saved.[/]");
             return CommandResult.Continue;
         }
 
-        ctx.DisabledCategories.Remove(category);
-        ctx.ChatOptions = ctx.BuildChatOptions();
+        if (connected)
+        {
+            ctx.DisabledCategories.Remove(category);
+            ctx.ChatOptions = ctx.BuildChatOptions();
+        }
 
-        var saved   = ReplMcpServerStore.Load();
-        var removed = saved.Where(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
         if (removed.Count > 0)
         {
             saved.RemoveAll(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
@@ -510,7 +524,11 @@ internal static partial class ReplCommands
 
         AnsiConsole.MarkupLine(disconnected
             ? $"[green]Removed '{Markup.Escape(name)}'[/] [dim]and closed its connection.[/]"
-            : $"[green]Removed '{Markup.Escape(name)}'.[/] [dim]Its tools are no longer offered to the model.[/]");
+            : connected
+                ? $"[green]Removed '{Markup.Escape(name)}'.[/] [dim]Its tools are no longer offered to the model.[/]"
+                : $"[green]Removed '{Markup.Escape(name)}'[/] [dim]from your saved servers.[/]");
+        if (managedOnly)
+            AnsiConsole.MarkupLine("[dim]Whatever launched fuseraft provides it, so it's back in your next session.[/]");
         return CommandResult.Continue;
     }
 }
