@@ -2,6 +2,7 @@ using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.Agents;
 using fuseraft.Infrastructure.Plugins;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace FuseraftCli.Tests;
@@ -42,6 +43,60 @@ public sealed class AgentToolResolverTests : IDisposable
             .Select(f => f.Name);
 
         Assert.Contains(SubagentPlugin.DelegateToolName, names);
+    }
+
+    [Fact]
+    public void McpServersWithClashingTools_GetUniqueNames_AndBuiltInsKeepTheirs()
+    {
+        // Two MCP servers (registered as AI functions) sharing query_database, one also shadowing a built-in.
+        _registry.RegisterAIFunctions("Sql",   [Fake("query_database"), Fake("read_file")]);
+        _registry.RegisterAIFunctions("Local", [Fake("query_database"), Fake("list_tables")]);
+
+        var names = Resolve(Agent("FileSystem", "Sql", "Local")).Select(t => t.Name).ToList();
+
+        Assert.Equal(names.Count, names.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains("read_file", names);
+        Assert.Contains("Sql_read_file", names);
+        Assert.Contains("Sql_query_database", names);
+        Assert.Contains("Local_query_database", names);
+        Assert.Contains("list_tables", names);
+        Assert.DoesNotContain("query_database", names);
+    }
+
+    [Fact]
+    public void SubagentPlugins_WithClashingMcpTools_GetUniqueNames()
+    {
+        _registry.RegisterAIFunctions("Sql",   [Fake("query_database")]);
+        _registry.RegisterAIFunctions("Local", [Fake("query_database")]);
+
+        var tools = AgentToolResolver.BuildSubagentTools(Agent(["Sql", "Local"], "Subagent"), _registry, null);
+
+        Assert.Equal(["Sql_query_database", "Local_query_database"], tools.Select(t => t.Name));
+    }
+
+    private static AIFunction Fake(string name) => AIFunctionFactory.Create(() => name, name, $"Fake {name}.");
+
+    private static AgentConfig Agent(params string[] plugins) => Agent(null, plugins);
+
+    private static AgentConfig Agent(List<string>? subagentPlugins, params string[] plugins) => new()
+    {
+        Name            = "TestAgent",
+        Instructions    = "You are a test agent.",
+        Plugins         = [.. plugins],
+        SubagentPlugins = subagentPlugins,
+        Model        = new ModelConfig
+        {
+            ModelId      = "grok-4-1-fast-reasoning",
+            Endpoint     = "https://api.x.ai/v1",
+            ApiKeyEnvVar = FakeApiKeyVar,
+        },
+    };
+
+    private List<AIFunction> Resolve(AgentConfig config)
+    {
+        var factory  = new ChatClientFactory();
+        var resolver = new AgentToolResolver(factory, _registry, null, null, null, null);
+        return resolver.ConvertPluginTools(config, factory.Resolve(config.Model), null, [], new object());
     }
 
     private List<string> ResolveToolNames(params string[] plugins)

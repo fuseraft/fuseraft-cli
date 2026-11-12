@@ -36,7 +36,7 @@ public sealed class SseEventIdleTimeoutStreamTests
         var stream = new SseEventIdleTimeoutStream(
             new NeverRespondsStream(), contentIdleTimeout: TimeSpan.FromMinutes(5), byteIdle: TimeSpan.FromMilliseconds(80));
 
-        var ex = await Assert.ThrowsAsync<TimeoutException>(async () => await stream.ReadAsync(new byte[16]));
+        var ex = await Assert.ThrowsAsync<TimeoutException>(async () => await stream.ReadExactlyAsync(new byte[16]));
 
         Assert.Contains("no bytes received", ex.Message);
     }

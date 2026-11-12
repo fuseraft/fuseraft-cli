@@ -188,6 +188,10 @@ Agents:
 
 The agent then sees all tools from the Puppeteer server alongside the built-in FileSystem and Shell tools.
 
+Tool names have to be unique, or the provider rejects the request. When a server's tool has the same name as a
+built-in tool or another server's tool, it's offered as `<server>_<tool>` instead, such as `Sql_query_database`.
+Built-in tools always keep their names. This applies in `fuseraft repl` too.
+
 ---
 
 ## Servers provided by the launcher

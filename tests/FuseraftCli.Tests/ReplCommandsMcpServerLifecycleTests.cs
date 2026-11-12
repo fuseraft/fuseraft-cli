@@ -125,4 +125,22 @@ public sealed class ReplCommandsMcpServerLifecycleTests : IDisposable
 
         Assert.Null(ctx.McpManager);
     }
+
+    [Fact]
+    public void ServersWithTheSameToolName_AreOfferedUnderNamesTheModelCanTellApart()
+    {
+        AIFunction Tool(string name) => AIFunctionFactory.Create(() => "ok", name);
+        var ctx = NewContext(new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["FileSystem"] = [Tool("read_file")],
+            ["mcp:Sql"]    = [Tool("query_database")],
+            ["mcp:Local"]  = [Tool("query_database"), Tool("read_file")],
+        });
+
+        var names = ctx.GetActiveTools().Select(t => t.Name).ToList();
+        var sent  = ctx.ChatOptions!.Tools!.Select(t => t.Name).ToList();
+
+        Assert.Equal(["read_file", "Sql_query_database", "Local_query_database", "Local_read_file"], names);
+        Assert.Equal(names, sent);
+    }
 }
