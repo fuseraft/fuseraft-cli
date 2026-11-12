@@ -9,7 +9,7 @@ namespace FuseraftCli.Tests;
 /// </summary>
 public sealed class McpSessionManagerStderrTests
 {
-    private static McpServerConfig Server(string script, Dictionary<string, string>? env = null) => OperatingSystem.IsWindows()
+    private static McpServerConfig Server(string script, Dictionary<string, string?>? env = null) => OperatingSystem.IsWindows()
         ? new() { Name = "noisy", Command = "cmd.exe", Args = ["/c", script], Env = env ?? [] }
         : new() { Name = "noisy", Command = "sh", Args = ["-c", script], Env = env ?? [] };
 

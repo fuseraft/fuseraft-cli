@@ -510,7 +510,8 @@ internal static class ReplTurn
             if (!ctx.JsonMode && ReplInput.Screen is null)
                 AnsiConsole.Markup((modeTags.Count > 0 ? $"[dim][[{string.Join("·", modeTags)}]] {turnLabel}[/]" : $"[dim]{turnLabel}[/]") + "[bold cyan]>[/] ");
 
-            ReplAutoTitle.MaybeStart(ctx);
+            // Runs alongside the next prompt: a title isn't worth making anyone wait.
+            _ = ReplAutoTitle.MaybeStart(ctx);
             if (ctx.TitleUnsaved) await SaveSnapshotAsync(ctx);
 
             // Sent while the REPL was busy with something no turn read from (a command, plan steps): it starts the next turn.
