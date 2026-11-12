@@ -378,9 +378,15 @@ internal sealed class ReplSessionContext
         RecoveryHint = null;
     }
 
-    public List<AIFunction> GetActiveTools() => [.. ToolsByCategory
+    public List<AIFunction> GetActiveTools() => McpToolNames.Disambiguate([.. ToolsByCategory
         .Where(kv => !DisabledCategories.Contains(kv.Key))
-        .SelectMany(kv => kv.Value.Where(f => IsToolAllowed(f.Name) && PassesSafeMode(kv.Key, f)))];
+        .SelectMany(kv => kv.Value
+            .Where(f => IsToolAllowed(f.Name) && PassesSafeMode(kv.Key, f))
+            .Select(f => (McpServerOf(kv.Key), f)))]);
+
+    // An MCP server's tools sit under "mcp:<server>"; every other category is built in.
+    private static string? McpServerOf(string category) =>
+        category.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase) ? category["mcp:".Length..] : null;
 
     /// <summary>
     /// Safe mode's check for an MCP server's tools, which no capability map names: like Http, a server can reach

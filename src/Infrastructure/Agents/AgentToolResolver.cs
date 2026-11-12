@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.AI;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Mcp;
 using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Infrastructure.Agents;
@@ -34,11 +35,13 @@ internal sealed class AgentToolResolver(
         HashSet<ITurnResettable> turnResettables,
         object resettablesLock)
     {
-        var tools = new List<AIFunction>();
+        // Each tool with the MCP server it came from (null for built-in ones), so clashing names can be told apart.
+        var tools = new List<(string? Server, AIFunction Tool)>();
 
         foreach (var pluginName in config.Plugins)
         {
             IEnumerable<AIFunction> functions;
+            string? server = null;
 
             // "Skills" is handled by AgentSkillsProvider (UseAIContextProviders), which
             // injects load_skill / run_skill_script as tools on the chat client pipeline.
@@ -92,6 +95,7 @@ internal sealed class AgentToolResolver(
             else if (pluginRegistry.TryGetAIFunctions(pluginName, out var aiFunctions))
             {
                 functions = aiFunctions;
+                server    = pluginName;
             }
             else if (pluginRegistry.TryGetAll(pluginName, out var plugins))
             {
@@ -115,7 +119,7 @@ internal sealed class AgentToolResolver(
             if (config.Capabilities.TryGetValue(pluginName, out var caps) && caps.Count > 0)
                 functions = functions.Where(f => PluginCapabilityMap.IsAllowed(f.Name, caps));
 
-            tools.AddRange(functions);
+            tools.AddRange(functions.Select(f => (server, f)));
         }
 
         // Collect any newly-seen ITurnResettable plugin instances so OnAgentTurnStarting
@@ -126,7 +130,7 @@ internal sealed class AgentToolResolver(
                 lock (resettablesLock) turnResettables.Add(tr);
         }
 
-        return tools;
+        return McpToolNames.Disambiguate(tools);
     }
 
     /// <summary>
@@ -174,7 +178,7 @@ internal sealed class AgentToolResolver(
     // Assembles the tool list for a subagent spawned by SubagentPlugin.
     // When config.SubagentPlugins is set, uses those plugins (capability-filtered like normal agents).
     // Otherwise falls back to the expanded default: FileSystem read, Search, Shell run, Git read.
-    private static List<AIFunction> BuildSubagentTools(
+    internal static List<AIFunction> BuildSubagentTools(
         AgentConfig config,
         PluginRegistry pluginRegistry,
         SecurityConfig? securityConfig)
@@ -184,11 +188,13 @@ internal sealed class AgentToolResolver(
         if (config.SubagentPlugins is { Count: > 0 })
         {
             // Custom plugin list — resolve and capability-filter the same way BuildTools does.
+            var custom = new List<(string? Server, AIFunction Tool)>();
             foreach (var name in config.SubagentPlugins)
             {
                 IEnumerable<AIFunction> fns;
+                string? server = null;
                 if (pluginRegistry.TryGetAIFunctions(name, out var aiFns))
-                    fns = aiFns;
+                    (fns, server) = (aiFns, name);
                 else if (pluginRegistry.TryGetAll(name, out var ps))
                     fns = ps.SelectMany(PluginRegistry.GetFunctionsFromObject);
                 else
@@ -199,9 +205,9 @@ internal sealed class AgentToolResolver(
                 if (config.Capabilities.TryGetValue(name, out var caps) && caps.Count > 0)
                     fns = fns.Where(f => PluginCapabilityMap.IsAllowed(f.Name, caps));
 
-                tools.AddRange(fns);
+                custom.AddRange(fns.Select(f => (server, f)));
             }
-            return tools;
+            return McpToolNames.Disambiguate(custom);
         }
 
         // Default: expanded read-oriented set. FileSystem (sandboxed, read ops only).
