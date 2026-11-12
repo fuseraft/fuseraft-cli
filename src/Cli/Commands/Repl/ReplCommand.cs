@@ -660,7 +660,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 activePlugins.Add(p);
             }
 
-            foreach (var server in ReplMcpServerStore.Load())
+            var managedMcp = ManagedMcpServers.Load(out var managedMcpError);
+            if (managedMcpError is not null)
+                AnsiConsole.MarkupLine($"[yellow]⚠ {Markup.Escape(managedMcpError)}[/]");
+            foreach (var server in ManagedMcpServers.Merge(ReplMcpServerStore.Load(), managedMcp))
             {
                 try
                 {

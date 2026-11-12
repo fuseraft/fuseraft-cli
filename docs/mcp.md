@@ -190,6 +190,29 @@ The agent then sees all tools from the Puppeteer server alongside the built-in F
 
 ---
 
+## Servers provided by the launcher
+
+A program that starts fuseraft can give it MCP servers of its own through the `FUSERAFT_MCP_SERVERS`
+environment variable: a JSON array of the `McpServerConfig` fields above. fuseraft-web uses this for the
+MCP servers an admin adds on its MCP servers page, which reach every account's chats and runs.
+
+```sh
+export SQL_MCP_TOKEN=...
+export FUSERAFT_MCP_SERVERS='[{"Name":"Sql","Transport":"http","Url":"http://localhost:8080/mcp",
+  "TransportMode":"streamable-http","Headers":{"Authorization":"Bearer ${SQL_MCP_TOKEN}"}}]'
+```
+
+Keep secrets in their own variables and refer to them with `${NAME}`, as above. Values of variables whose
+names look like secrets (`..._TOKEN`, `..._KEY`) are masked in tool output; `FUSERAFT_MCP_SERVERS` itself isn't.
+
+- **REPL**: each one connects at startup along with your saved servers, and `/mcp list` marks it *provided by
+  the launcher*. A saved server with the same name is used instead. `/mcp remove` drops it for the session only.
+- **Orchestration**: one connects only if an agent names it in `Plugins` and the config's own `McpServers`
+  doesn't use the name. If it can't connect, the run logs a warning and carries on without its tools, rather
+  than failing as a server in `McpServers` would.
+
+---
+
 ## Building your own MCP server
 
 Any MCP-compliant server works. For .NET, use the `ModelContextProtocol` NuGet package.

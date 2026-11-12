@@ -84,12 +84,18 @@ internal static partial class ReplCommands
             var name = category[McpCategoryPrefix.Length..];
             var stopped = ctx.McpManager?.IsRunning(name) == false;
             AnsiConsole.MarkupLine($"  [bold cyan]{Markup.Escape(name)}[/] [dim]({tools.Count} tool(s))[/]" +
+                (IsManagedOnly(name) ? " [dim]· provided by the launcher[/]" : "") +
                 (stopped ? $" [yellow]not running[/] [dim]— /mcp reconnect {Markup.Escape(name)}[/]" : ""));
             foreach (var t in tools)
                 AnsiConsole.MarkupLine($"    [dim]·[/] {Markup.Escape(t.Name)}");
         }
         return CommandResult.Continue;
     }
+
+    // Came from whatever launched fuseraft (FUSERAFT_MCP_SERVERS), with no saved server of the name standing in front of it.
+    private static bool IsManagedOnly(string name) =>
+        ManagedMcpServers.Load(out _).Any(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+        && !ReplMcpServerStore.Load().Any(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
     private static async Task<CommandResult> CmdMcpAddAsync(
         ReplSessionContext ctx, string arg, CancellationToken cancellationToken)
@@ -479,6 +485,7 @@ internal static partial class ReplCommands
 
         ctx.DisabledCategories.Remove(category);
         ctx.ChatOptions = ctx.BuildChatOptions();
+        var managedOnly = IsManagedOnly(name);
 
         var saved   = ReplMcpServerStore.Load();
         var removed = saved.Where(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -511,6 +518,8 @@ internal static partial class ReplCommands
         AnsiConsole.MarkupLine(disconnected
             ? $"[green]Removed '{Markup.Escape(name)}'[/] [dim]and closed its connection.[/]"
             : $"[green]Removed '{Markup.Escape(name)}'.[/] [dim]Its tools are no longer offered to the model.[/]");
+        if (managedOnly)
+            AnsiConsole.MarkupLine("[dim]Whatever launched fuseraft provides it, so it's back in your next session.[/]");
         return CommandResult.Continue;
     }
 }
