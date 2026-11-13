@@ -8,6 +8,7 @@ using fuseraft.Cli.Protocol;
 using fuseraft.Core.Models.Config;
 using fuseraft.Core.Subagents;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Context;
 using fuseraft.Infrastructure.Storage;
 
 namespace fuseraft.Cli.Commands;
@@ -125,6 +126,7 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
                 : Assign(() => config.Telemetry = config.Telemetry with { ServiceName = string.IsNullOrWhiteSpace(value) ? null : value }),
 
             "skillcuration.enabled"    => AssignBool(v => config.SkillCuration = (config.SkillCuration ?? new SkillCurationConfig()) with { Enabled = v }, value),
+            "files.trackedfiles"       => AssignIntRange(v => config.Files = (config.Files ?? new FilesConfig()) with { TrackedFiles = v }, value, 0, FilesConfig.MaxTrackedFiles),
             "skills.searchdepth"       => AssignIntRange(v => config.Skills = (config.Skills ?? new SkillsConfig()) with { SearchDepth = v }, value, 1, SkillsConfig.MaxSearchDepth),
 
             "memory.autosave"          => AssignBool(v => UpdateMemory(config, m => m with { AutoSave = v }), value),

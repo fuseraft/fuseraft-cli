@@ -46,7 +46,8 @@ public sealed class AgentFactory(
     ILoggerFactory? loggerFactory = null,
     AgentSkillsProvider? skillsProvider = null,
     ToolResultArtifactStore? toolArtifactStore = null,
-    AdaptiveTrimTracker? adaptiveTrimTracker = null)
+    AdaptiveTrimTracker? adaptiveTrimTracker = null,
+    FileLedger? fileLedger = null)
 {
     private string? _sessionId;
     private readonly ILogger _logger =
@@ -289,7 +290,7 @@ public sealed class AgentFactory(
         // see its own doc comment for why this needs FunctionInvoker specifically.
         var agentChatClient = AgentMiddlewareBuilder.BuildEventEmitMiddleware(
             effectiveClient, config, skillsProvider,
-            new AgentToolLoopGuard(config.Name, eventEmitter).InvokeAsync);
+            new AgentToolLoopGuard(config.Name, eventEmitter).InvokeAsync, ledger: fileLedger);
 
         // Construct the base ChatClientAgent with tools and chat options.
         ChatClientAgent baseAgent = new(

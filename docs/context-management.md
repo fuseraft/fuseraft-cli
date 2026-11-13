@@ -738,6 +738,33 @@ No configuration is required — the session read cache is always active when `f
 
 ---
 
+## Files that change under the agent
+
+An agent works from the copy of a file it last read, but the file can change without it: a shell command it ran (`sed`, a formatter, a code generator), the user's editor, or another process. Both `fuseraft repl` and `fuseraft run` keep track of every file the agent has read or written with the file tools (size, timestamp and a hash; the 50 most recent by default), and tell it when one of them changes.
+
+**Where the agent hears about it.** Before and after every tool call, the tracked files are checked, and anything that changed is added to that tool's result:
+
+```
+[fuseraft: files you've seen changed while shell_run ran]
+1. `src/Foo.cs` changed.
+Your copies of these are out of date. Re-read before editing; write_file on them is refused until you do.
+```
+
+- A change found **before** a call was made outside fuseraft; one found **after** a call happened while that tool ran, and the notice names the tool.
+- In the REPL, files that changed while the agent waited for you (an edit in your editor, say) are reported as a separate message right after yours, before the model answers.
+
+Each change is reported once, by name only (up to 10 files). The notice carries none of the file's content: the agent re-reads what it needs with `read_file`, whose own limits apply, so a file with long lines (JSONL, minified code) can't flood the context.
+
+**Stale rewrites are refused.** `write_file` on a file that changed after the agent last read or wrote it fails with `WRITE BLOCKED`, because content built from its old copy would undo the change. Reading the file again (any range) lifts this. `patch_file` still works, since it only replaces text it finds in the file as it is now.
+
+**In orchestration**, a file a tool changed this way counts as written (or deleted) in the [change log](#change-log-grounding), so `RequireAllFilesWritten` and the other validators that read it see a `sed` edit like a `write_file`.
+
+**Network shares.** Every tracked file is looked up before and after each tool call, and on a network share each lookup is a round trip to the server. `fuseraft settings set files.trackedFiles <n>` changes how many files are tracked (default 50, in the REPL and in `fuseraft run`); `0` turns tracking off, along with the change notices and the stale-write refusal.
+
+**What's not covered.** Only files the agent has read or written are tracked, so a file a shell command creates is not reported. A subagent's changes are reported to its parent, on the call that ran the subagent. `/clear`, `/switch` and starting a new task in `fuseraft serve` forget the tracked files.
+
+---
+
 ## Adaptive context-trim retry
 
 When a provider call fails due to a context or payload size error — HTTP 413, a Bedrock

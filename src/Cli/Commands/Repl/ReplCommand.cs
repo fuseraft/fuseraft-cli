@@ -255,6 +255,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
         var keyStore = ApiKeyStoreFactory.Create();
         var (userCfg, legacyKey) = UserConfigStore.Load();
+        FileLedger.Shared.TrackedFiles = userCfg?.Files?.TrackedFiles ?? FilesConfig.DefaultTrackedFiles;
 
         if (OrchestratorConfigLoader.VsCodeMode)
         {
@@ -524,7 +525,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             // The session's offloaded tool results (see ToolResultArtifactStore) live outside the workspace, and
             // the stub that replaces one sends the model to read it with these tools.
             fsPluginForCategory = new FileSystemPlugin(sandboxRoot: sandboxRoot, approveAction: approveToolAction("FileSystem"), approveWrite: approveFileWrite, includedRoots: includedRoots, denyPatterns: fsDenyPatterns,
-                exemptedPaths: [toolArtifactsDir]);
+                exemptedPaths: [toolArtifactsDir], ledger: FileLedger.Shared);
             fsFunctions    = PluginRegistry.GetFunctionsFromObject(fsPluginForCategory)
                 .Concat(PluginRegistry.GetFunctionsFromObject(new FileSystemManagementOps(fsPluginForCategory, sandboxRoot: sandboxRoot, includedRoots: includedRoots, exemptedPaths: [toolArtifactsDir])))
                 .ToList();

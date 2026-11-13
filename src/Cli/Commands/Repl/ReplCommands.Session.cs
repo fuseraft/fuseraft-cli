@@ -19,6 +19,7 @@ internal static partial class ReplCommands
 
         var sys = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
         ctx.History.Clear();
+        FileLedger.Shared.Clear();
         if (sys is not null) ctx.History.Add(sys);
         ctx.TurnIndex              = 0;
         ctx.LastExtractedTurnIndex = -1;

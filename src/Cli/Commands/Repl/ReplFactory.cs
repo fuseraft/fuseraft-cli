@@ -158,7 +158,7 @@ internal static class ReplFactory
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? functionInvoker =
                 freeForm ? new ReplToolLoopGuard(limits, new ReplToolScheduler().InvokeAsync).InvokeAsync : null;
             client = AgentMiddlewareBuilder.BuildEventEmitMiddleware(
-                client, agentConfig, skillsProvider: null, functionInvoker, allowConcurrentInvocation: freeForm);
+                client, agentConfig, skillsProvider: null, functionInvoker, allowConcurrentInvocation: freeForm, ledger: FileLedger.Shared);
         }
         return client;
     }

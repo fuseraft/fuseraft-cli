@@ -96,6 +96,8 @@ A validator failure injects a `ChatRole.User` correction message and re-invokes 
 
 `ChangeTracker` wraps every agent and records `write_file`, `patch_file`, `copy_file`, `move_file`, `delete_file`, `delete_directory`, `shell_run`, `shell_run_script`, `shell_run_background`, `git_commit` calls to a JSONL log (`.fuseraft/changes.json` by default). `copy_file` and `move_file` destinations are recorded in `FilesWritten`; `move_file` sources and `delete_directory` paths are recorded in `FilesDeleted`.
 
+Files a tool changed without naming them (a `sed` run through `shell_run`, say) reach it through `FileLedger`: the tool-calling setup checks the files the agent has seen around every call, and `FlushTurnAsync` adds the ones that changed during a call to `FilesWritten`/`FilesDeleted`. Only files the agent has read or written are tracked.
+
 `RequireAllFilesWrittenValidator` and `HandoffToReviewerValidator` cross-reference this log. `RequireShellPassValidator` uses it as a fallback when the history scan finds no matching tool result.
 
 **All tools that modify external state (files, shell, git) must be wrapped by `ChangeTracker`.** A tool that bypasses `ChangeTracker` will silently break validators — they will see no evidence of the tool's actions and block routes that should pass. New tools that write files, run commands, or commit to git are invalid unless `ChangeTracker` records them.
