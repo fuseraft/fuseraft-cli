@@ -844,6 +844,9 @@ internal static class ReplTurn
         await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex,
             payload: new { content = input, images = attachments?.Count ?? 0 });
         ctx.History.Add(BuildUserMessage(input, attachments, mentioned));
+        // Files the model has seen that changed while it waited (an edit in the user's editor, say), before it answers from its copy.
+        if (FileLedger.Shared.Sweep() is { Count: > 0 } changed)
+            ctx.History.Add(new ChatMessage(ChatRole.User, FileChangeNotice.Build(changed, during: null)));
         if (attachments is { Count: > 0 })
         {
             var dropped = ImageAttachments.StripOlderImages(ctx.History);

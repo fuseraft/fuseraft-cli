@@ -121,4 +121,62 @@ public sealed class EnvSecretMaskerTests
     [InlineData("")]
     public void Mask_NullOrEmpty_ReturnsEmpty(string? text) =>
         Assert.Equal(string.Empty, EnvSecretMasker.Mask(text));
+
+    [Fact]
+    public void MaskResult_ObjectHoldingASecret_BecomesItsMaskedJson()
+    {
+        const string name = "FUSERAFT_TEST_MASKRESULT_TOKEN";
+        const string value = "tok-test-0123456789abcdef";
+        Environment.SetEnvironmentVariable(name, value);
+        try
+        {
+            var masked = Assert.IsType<System.Text.Json.JsonElement>(EnvSecretMasker.MaskResult(new { output = $"env: {value}" }));
+
+            Assert.Equal($"env: {EnvSecretMasker.Placeholder}", masked.GetProperty("output").GetString());
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public void MaskResult_JsonString_StaysAJsonStringWithoutExtraQuotes()
+    {
+        const string name = "FUSERAFT_TEST_MASKRESULT_ELEMENT_TOKEN";
+        const string value = "tok-test-element-0123456789";
+        Environment.SetEnvironmentVariable(name, value);
+        try
+        {
+            var element = System.Text.Json.JsonSerializer.SerializeToElement($"KEY={value}");
+
+            var masked = Assert.IsType<System.Text.Json.JsonElement>(EnvSecretMasker.MaskResult(element));
+
+            Assert.Equal($"KEY={EnvSecretMasker.Placeholder}", masked.GetString());
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
+
+    [Fact]
+    public void MaskResult_ObjectWithoutASecret_IsReturnedAsIs()
+    {
+        var result = new { output = "nothing to hide here" };
+
+        Assert.Same(result, EnvSecretMasker.MaskResult(result));
+    }
+
+    [Fact]
+    public void SecretNamesIn_NamesTheVariable_NeverTheValue()
+    {
+        const string name = "FUSERAFT_TEST_NAMES_API_KEY";
+        const string value = "key-test-0123456789abcdef";
+        Environment.SetEnvironmentVariable(name, value);
+        try
+        {
+            var names = EnvSecretMasker.SecretNamesIn($"KEY={value}");
+
+            Assert.Contains(name, names);
+            Assert.DoesNotContain(names, n => n.Contains(value));
+            Assert.True(EnvSecretMasker.ContainsSecret(value));
+            Assert.False(EnvSecretMasker.ContainsSecret("no secrets in this text"));
+        }
+        finally { Environment.SetEnvironmentVariable(name, null); }
+    }
 }

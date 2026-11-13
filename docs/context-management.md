@@ -738,6 +738,34 @@ No configuration is required — the session read cache is always active when `f
 
 ---
 
+## Files that change under the agent
+
+An agent works from the copy of a file it last read, but the file can change without it: a shell command it ran (`sed`, a formatter, a code generator), the user's editor, or another process. Both `fuseraft repl` and `fuseraft run` keep track of every file the agent has read or written with the file tools (size, timestamp and a hash; up to 500 files), and tell it when one of them changes.
+
+**Where the agent hears about it.** Before and after every tool call, the tracked files are checked, and anything that changed is added to that tool's result:
+
+```
+[fuseraft: files you've seen changed while shell_run ran]
+1. `src/Foo.cs` changed (+3/−1 lines).
+Your copies of these are out of date. Re-read before editing; write_file on them is refused until you do.
+```
+
+- A change found **before** a call was made outside fuseraft, so the notice includes the changed lines (up to 40), since the agent has no other way to know them.
+- A change found **after** a call happened while that tool ran. The agent knows what it ran, so the notice names the files without a diff.
+- In the REPL, files that changed while the agent waited for you (an edit in your editor, say) are reported as a separate message right after yours, before the model answers.
+
+Each change is reported once. Files under 64 KB get line counts and diffs; larger ones are reported as changed.
+
+**Stale rewrites are refused.** `write_file` on a file that changed after the agent last read or wrote it fails with `WRITE BLOCKED`, because content built from its old copy would undo the change. Reading the file again (any range) lifts this. `patch_file` still works, since it only replaces text it finds in the file as it is now.
+
+**Secrets.** Diffs pass through the same [secret masking](security.md#secret-values-in-tool-output) as every tool result. When a change puts the value of a secret-looking environment variable into a file, for example a shell command that appended `$GITHUB_TOKEN` to a config file, the notice names the variable (never the value) so the agent can remove it and tell you.
+
+**In orchestration**, a file a tool changed this way counts as written (or deleted) in the [change log](#change-log-grounding), so `RequireAllFilesWritten` and the other validators that read it see a `sed` edit like a `write_file`.
+
+**What's not covered.** Only files the agent has read or written are tracked, so a file a shell command creates is not reported. A subagent's changes are reported to its parent, on the call that ran the subagent. `/clear`, `/switch` and starting a new task in `fuseraft serve` forget the tracked files.
+
+---
+
 ## Adaptive context-trim retry
 
 When a provider call fails due to a context or payload size error — HTTP 413, a Bedrock

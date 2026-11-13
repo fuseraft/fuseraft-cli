@@ -93,6 +93,23 @@ public sealed class ChangeTrackerTests : IDisposable
     // -------------------------------------------------------------------------
 
     [Fact]
+    public async Task FlushTurnAsync_FilesAToolChanged_CountAsWrittenOrDeleted()
+    {
+        var ledger  = new fuseraft.Infrastructure.Context.FileLedger();
+        var tracker = new ChangeTracker(LogPath, ledger: ledger);
+        ledger.NoteToolChanges([
+            new("/repo/src/a.cs", Deleted: false, "a", "b", new SortedSet<string>()),
+            new("/repo/src/old.cs", Deleted: true, "a", null, new SortedSet<string>()),
+        ]);
+
+        await tracker.FlushTurnAsync("Developer", 0);
+
+        var entry = Assert.Single((await ReadLog()).Entries);
+        Assert.Contains("/repo/src/a.cs", entry.FilesWritten);
+        Assert.Contains("/repo/src/old.cs", entry.FilesDeleted);
+    }
+
+    [Fact]
     public async Task FlushTurnAsync_EmptyQueue_DoesNotWriteFile()
     {
         var tracker = Tracker();

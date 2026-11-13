@@ -42,7 +42,12 @@ public sealed class ChangeTracker
     private readonly ILogger<ChangeTracker>? _logger;
     private readonly StateProjector? _stateProjector;
     private readonly ConcurrentQueue<InvocationRecord> _pending = new();
+    private readonly FileLedger? _ledger;
     private string? _sessionId;
+
+    // Files a tool changed without naming them, e.g. one a shell command rewrote; see FileLedger.NoteToolChanges.
+    internal const string ToolChangedFile = "tool_changed_file";
+    internal const string ToolDeletedFile = "tool_deleted_file";
 
     // Current turn index — set by BeginTurn before each agent.RunAsync call so that
     // CapturingMiddleware can stamp intents with the correct turn index even before
@@ -81,9 +86,11 @@ public sealed class ChangeTracker
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public ChangeTracker(string logPath, EventEmitter? eventEmitter = null, EvidenceStore? evidenceStore = null, IntentLog? intentLog = null, ILogger<ChangeTracker>? logger = null, RepositoryGraphBuilder? graphBuilder = null, StateProjector? stateProjector = null)
+    public ChangeTracker(string logPath, EventEmitter? eventEmitter = null, EvidenceStore? evidenceStore = null, IntentLog? intentLog = null, ILogger<ChangeTracker>? logger = null, RepositoryGraphBuilder? graphBuilder = null, StateProjector? stateProjector = null, FileLedger? ledger = null)
     {
         _store          = new JsonFileStore<ChangeLog>(logPath, JsonOpts, logger, nameof(ChangeTracker));
+        _ledger         = ledger;
+        if (ledger is not null) ledger.CollectToolChanges = true;
         _eventEmitter   = eventEmitter;
         _evidenceStore  = evidenceStore;
         _intentLog      = intentLog;
@@ -146,6 +153,9 @@ public sealed class ChangeTracker
     {
         var records = new List<InvocationRecord>();
         while (_pending.TryDequeue(out var r)) records.Add(r);
+        foreach (var change in _ledger?.TakeToolChanges() ?? [])
+            records.Add(new InvocationRecord(change.Deleted ? ToolDeletedFile : ToolChangedFile,
+                new Dictionary<string, object?> { ["path"] = change.Path }, Succeeded: true, Agent: agentName, TurnIndex: turnIndex));
 
         // Symbol and caller nodes are read-only and flush independently of change records
         // so recon turns (which only call search_symbol / search_callers) still populate
@@ -231,6 +241,9 @@ public sealed class ChangeTracker
             .Concat(records
                 .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
                 .Select(r => OrchestratorHelpers.GetArg(r.Args, "destination")))
+            .Concat(records
+                .Where(r => r.Name == ToolChangedFile)
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "path")))
             .OfType<string>()],
 
         FilesDeleted = [.. records
@@ -242,6 +255,9 @@ public sealed class ChangeTracker
             .Concat(records
                 .Where(r => FunctionNameMatches(r.Name, "move_file") && r.Succeeded)
                 .Select(r => OrchestratorHelpers.GetArg(r.Args, "source")))
+            .Concat(records
+                .Where(r => r.Name == ToolDeletedFile)
+                .Select(r => OrchestratorHelpers.GetArg(r.Args, "path")))
             .OfType<string>()],
 
         CommandsRun = [.. records

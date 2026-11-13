@@ -43,6 +43,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly string  _summaryDir;
     private readonly FileVersionStore?  _versionStore;
     private readonly SessionReadCache?  _sessionCache;
+    private readonly FileLedger?        _ledger;
     private readonly Action?            _onWrite;
     private readonly Action?            _onCacheHit;
     private readonly UndoSnapshotStore  _undoStore = new();
@@ -100,8 +101,9 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null, IncludedRootsState? includedRoots = null, IReadOnlyList<string>? denyPatterns = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null, IncludedRootsState? includedRoots = null, IReadOnlyList<string>? denyPatterns = null, FileLedger? ledger = null)
     {
+        _ledger            = ledger;
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _exemptedPrefixes  = (exemptedPaths ?? [])
             .Select(p => FuseraftPaths.ExpandPath(p).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar)
@@ -220,8 +222,24 @@ public sealed class FileSystemPlugin : ITurnResettable
         var budgetResult = ReadWithBudget(resolved, fileInfo, slice, effectiveStart, totalLines, startLine, maxLines, out var content);
         if (budgetResult is not null) return budgetResult;
 
+        NoteSeen(resolved);
         return content!;
     }
+
+    // A subagent's reads and writes aren't the parent's: the parent's own check around the subagent call reports what it changed.
+    private void NoteSeen(string resolved)
+    {
+        if (ReadScope.Current is null) _ledger?.RecordSeen(resolved);
+    }
+
+    // A full rewrite built from a copy older than the file would quietly undo whatever changed it since.
+    private string? StaleCopyDenial(string resolved) =>
+        _ledger is not null && ReadScope.Current is null && _ledger.IsStale(resolved)
+            ? PluginResult.Error(
+                $"WRITE BLOCKED — '{resolved}' changed after you last read or wrote it, so content built from your copy " +
+                "would undo that change. 1. Re-read it with read_file (startLine/maxLines for the part you need). " +
+                "2. Then make the edit with patch_file, or write_file the full updated content.")
+            : null;
 
     // Session-level read cache: if the file is in the cache and unchanged on disk
     // (matching mtime + size), return a hint instead of re-dumping the full content.
@@ -491,6 +509,9 @@ public sealed class FileSystemPlugin : ITurnResettable
         var elisionDenial = FilePatchDiffing.DetectElisionPlaceholder(normalNew);
         if (elisionDenial is not null) return elisionDenial;
 
+        var placeholderDenial = SecretPlaceholderDenial(resolved, content, normalOld, normalNew);
+        if (placeholderDenial is not null) return placeholderDenial;
+
         var idx = normalContent.IndexOf(normalOld, StringComparison.Ordinal);
         if (idx < 0)
         {
@@ -551,6 +572,7 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         await _undoStore.RecordBeforeMutationAsync(resolved, knownContent: content);
         await File.WriteAllTextAsync(resolved, patched, encoding);
+        NoteSeen(resolved);
 
         // Invalidate caches — content has changed.
         _readThisTurn.Remove(resolved);
@@ -567,7 +589,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         var newLines = normalNew.Split('\n').Length;
         return PluginResult.Ok(
             $"Patched '{resolved}': replaced {oldLines}-line block with {newLines}-line block " +
-            $"at line {FilePatchDiffing.LineNumberAt(normalContent, idx)}.");
+            $"at line {FilePatchDiffing.LineNumberAt(normalContent, idx)}.") + NewSecretWarning(content, patched);
     }
 
     // Sniffs the file's byte-order mark so patch_file/write_file round-trip the same encoding
@@ -610,6 +632,9 @@ public sealed class FileSystemPlugin : ITurnResettable
         var (pathDenial, resolved) = await ValidateWritePathAsync(path);
         if (pathDenial is not null) return pathDenial;
 
+        var staleDenial = StaleCopyDenial(resolved!);
+        if (staleDenial is not null) return staleDenial;
+
         var versionDenial = await CheckVersionConflictAsync(resolved!, baseVersion);
         if (versionDenial is not null) return versionDenial;
 
@@ -621,19 +646,42 @@ public sealed class FileSystemPlugin : ITurnResettable
         var diffDenial = FilePatchDiffing.ComputeAndReportDiff(resolved!, content, ext, raw, out content, out bool normalised);
         if (diffDenial is not null) return diffDenial;
 
+        var oldContent = File.Exists(resolved!)
+            ? await File.ReadAllTextAsync(resolved!, DetectEncoding(resolved!))
+            : string.Empty;
+
+        var placeholderDenial = SecretPlaceholderDenial(resolved!, oldContent, content);
+        if (placeholderDenial is not null) return placeholderDenial;
+
         // Approval fires here — once `content` is the exact, final, normalised text that will
         // be written — rather than up front, so the approver sees the real diff and the user is
         // never prompted for a write that would go on to fail version/truncation validation anyway.
-        if (_approveWrite is not null)
-        {
-            var oldContent = File.Exists(resolved!)
-                ? await File.ReadAllTextAsync(resolved!, DetectEncoding(resolved!))
-                : string.Empty;
-            if (!await _approveWrite("write_file", resolved!, oldContent, content))
-                return PluginResult.Denied("File write blocked by user.");
-        }
+        if (_approveWrite is not null && !await _approveWrite("write_file", resolved!, oldContent, content))
+            return PluginResult.Denied("File write blocked by user.");
 
-        return await CommitWriteAsync(resolved!, content, normalised);
+        return await CommitWriteAsync(resolved!, content, normalised) + NewSecretWarning(oldContent, content);
+    }
+
+    // Tool results show a secret as the placeholder, so text copied from one back into a file that holds the secret
+    // would overwrite the real value with it.
+    private static string? SecretPlaceholderDenial(string resolved, string current, params string[] texts) =>
+        texts.Any(t => t.Contains(EnvSecretMasker.Placeholder, StringComparison.Ordinal)) && EnvSecretMasker.ContainsSecret(current)
+            ? PluginResult.Error(
+                $"'{resolved}' holds a secret, which tool results show as {EnvSecretMasker.Placeholder}. This edit includes " +
+                $"that placeholder, so it would replace the real value. " +
+                $"1. Leave the line holding the secret out of the edit: use patch_file with oldText and newText that don't " +
+                $"contain {EnvSecretMasker.Placeholder}. " +
+                $"2. If the secret itself has to change, ask the user to change it.")
+            : null;
+
+    // Names (never values) of the secrets an edit adds to a file that didn't hold them before.
+    private static string NewSecretWarning(string before, string after)
+    {
+        var added = EnvSecretMasker.SecretNamesIn(after).Except(EnvSecretMasker.SecretNamesIn(before)).ToList();
+        return added.Count == 0
+            ? string.Empty
+            : $"\nWarning: this put the value of {string.Join(", ", added)} into the file in plain text. If that wasn't " +
+              "intended, remove it and tell the user, who may need to rotate it.";
     }
 
     // Validates the path argument: checks for embedded newlines, resolves through the sandbox,
@@ -697,6 +745,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         var encoding = File.Exists(resolved) ? DetectEncoding(resolved) : new System.Text.UTF8Encoding(false);
         await _undoStore.RecordBeforeMutationAsync(resolved);
         await File.WriteAllTextAsync(resolved, content, encoding);
+        NoteSeen(resolved);
 
         // Allow a within-turn verification read by removing from the per-turn set.
         // Prime the session cache (ReadCount:0) so later-turn reads get a "was written"

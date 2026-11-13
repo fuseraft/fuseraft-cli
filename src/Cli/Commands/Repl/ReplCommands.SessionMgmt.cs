@@ -291,6 +291,7 @@ internal static partial class ReplCommands
         if (restored.Count > 0 && restored[0].Role == ChatRole.System && currentSys is not null)
             restored[0] = currentSys;
         ctx.History.Clear();
+        FileLedger.Shared.Clear();
         ctx.History.AddRange(restored);
 
         ctx.TurnIndex              = snapshot.TurnIndex;

@@ -1,4 +1,6 @@
 using System.Collections;
+using System.Text.Json;
+using Microsoft.Extensions.AI;
 using System.Text.RegularExpressions;
 
 namespace fuseraft.Infrastructure.Plugins;
@@ -73,11 +75,69 @@ internal static class EnvSecretMasker
         return text;
     }
 
-    // Longest first so a value that contains a shorter one is replaced whole, not left with the
-    // tail of it exposed.
-    private static List<string> CurrentSecretValues()
+    /// <summary>
+    /// <see cref="Mask(string?)"/> for a tool's return value, whatever its type. Tools made by <c>AIFunctionFactory</c>
+    /// return a <see cref="JsonElement"/>, so a masked result comes back as one too; anything else is masked through
+    /// its JSON form, which is what the model would see. A result without a secret is returned as it was.
+    /// </summary>
+    internal static object? MaskResult(object? result)
     {
-        var values = new HashSet<string>(KnownSecretFiles.Values(), StringComparer.Ordinal);
+        switch (result)
+        {
+            case null:
+                return null;
+            case string text:
+                return Mask(text);
+            case JsonElement { ValueKind: JsonValueKind.String } element:
+                var value = element.GetString();
+                var maskedValue = Mask(value);
+                return maskedValue == value ? result : JsonSerializer.SerializeToElement(maskedValue, AIJsonUtilities.DefaultOptions);
+        }
+        string json;
+        try
+        {
+            json = result is JsonElement raw ? raw.GetRawText() : JsonSerializer.Serialize(result, AIJsonUtilities.DefaultOptions);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException or JsonException)
+        {
+            return result;   // the framework can't serialize it for the model either
+        }
+        var masked = Mask(json);
+        if (masked == json) return result;
+        try
+        {
+            using var doc = JsonDocument.Parse(masked);
+            return doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return masked;   // never the unmasked original
+        }
+    }
+
+    /// <summary>True when <paramref name="text"/> holds the value of a current secret.</summary>
+    internal static bool ContainsSecret(string? text) =>
+        !string.IsNullOrEmpty(text) && CurrentSecrets().Any(s => text.Contains(s.Value, StringComparison.Ordinal));
+
+    /// <summary>
+    /// What each secret value in <paramref name="text"/> is: the environment variable it belongs to, or "a protected
+    /// file" for a value from one of <see cref="KnownSecretFiles"/>. Never the value itself.
+    /// </summary>
+    internal static IReadOnlySet<string> SecretNamesIn(string? text)
+    {
+        var names = new SortedSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrEmpty(text)) return names;
+        foreach (var (name, value) in CurrentSecrets())
+            if (text.Contains(value, StringComparison.Ordinal)) names.Add(name);
+        return names;
+    }
+
+    private const string ProtectedFileName = "a protected file";
+
+    private static IEnumerable<(string Name, string Value)> CurrentSecrets()
+    {
+        foreach (var value in KnownSecretFiles.Values())
+            yield return (ProtectedFileName, value);
         foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
         {
             if (entry.Key is string name
@@ -85,9 +145,13 @@ internal static class EnvSecretMasker
                 && value.Length >= MinValueLength
                 && IsSensitiveName(name))
             {
-                values.Add(value);
+                yield return (name, value);
             }
         }
-        return values.OrderByDescending(v => v.Length).ToList();
     }
+
+    // Longest first so a value that contains a shorter one is replaced whole, not left with the
+    // tail of it exposed.
+    private static List<string> CurrentSecretValues() =>
+        CurrentSecrets().Select(s => s.Value).Distinct(StringComparer.Ordinal).OrderByDescending(v => v.Length).ToList();
 }

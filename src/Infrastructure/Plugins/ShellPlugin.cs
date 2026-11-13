@@ -398,7 +398,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var shellDenial = ResolveShellArg(shell, out var shellChoice);
         if (shellDenial is not null) return shellDenial;
 
-        var placeholderDenial = CheckForElisionPlaceholder(command);
+        var placeholderDenial = CheckForElisionPlaceholder(command) ?? CheckForSecretPlaceholder(command);
         if (placeholderDenial is not null) return placeholderDenial;
 
         var sudoDenial = CheckForSudo(command);
@@ -556,7 +556,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var shellDenial = ResolveShellArg(shell, out var shellChoice);
         if (shellDenial is not null) return shellDenial;
 
-        var placeholderDenial = CheckForElisionPlaceholder(script);
+        var placeholderDenial = CheckForElisionPlaceholder(script) ?? CheckForSecretPlaceholder(script);
         if (placeholderDenial is not null) return placeholderDenial;
 
         var sudoDenial = CheckForSudo(script);
@@ -680,7 +680,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var shellDenial = ResolveShellArg(shell, out var shellChoice);
         if (shellDenial is not null) return shellDenial;
 
-        var placeholderDenial = CheckForElisionPlaceholder(command);
+        var placeholderDenial = CheckForElisionPlaceholder(command) ?? CheckForSecretPlaceholder(command);
         if (placeholderDenial is not null) return placeholderDenial;
 
         var sudoDenial = CheckForSudo(command);
@@ -909,6 +909,17 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
                 "(\"[ELIDED — ... NOT the real value ...]\"), not a real command. Your earlier call's " +
                 "arguments were replaced with that note when they aged out of context; do not copy them. " +
                 "Write the full command out again.")
+            : null;
+
+    // Tool results show a secret's value as the placeholder, so a command carrying it was almost always copied from one:
+    // run, it would write the placeholder where the real value belongs, or pass it where the secret was meant.
+    private static string? CheckForSecretPlaceholder(string commandOrScript) =>
+        commandOrScript.Contains(EnvSecretMasker.Placeholder, StringComparison.Ordinal)
+            ? PluginResult.Error(
+                $"NOT RUN — this command contains {EnvSecretMasker.Placeholder}, which tool results show in place of a " +
+                "secret's value; it is not the value. 1. To use the secret, reference its variable instead ($NAME). " +
+                "2. To edit a file around a secret, use patch_file and leave the line holding it alone. " +
+                "3. To search for the literal text, drop the angle brackets (secret-hidden).")
             : null;
 
     // The regex is kept as a backstop (it also catches a `sudo` at the start of a line inside a

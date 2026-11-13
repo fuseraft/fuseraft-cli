@@ -37,7 +37,8 @@ internal sealed class ToolResultLoggingFilter(AIFunction inner, EventEmitter emi
             throw;
         }
 
-        EmitResult(Name, ToolResultText.ToStringOrDefault(result));
+        // The log is kept on disk and shown in the panel, so it gets what the model gets, not the raw result.
+        EmitResult(Name, EnvSecretMasker.Mask(ToolResultText.ToStringOrDefault(result)));
         return result;
     }
 
@@ -82,7 +83,7 @@ internal sealed class ToolResultLoggingFilter(AIFunction inner, EventEmitter emi
         foreach (var (key, value) in arguments)
         {
             if (value is null) { dict[key] = null; continue; }
-            var s = value is System.Text.Json.JsonElement je ? je.ToString() : value.ToString() ?? string.Empty;
+            var s = EnvSecretMasker.Mask(value is System.Text.Json.JsonElement je ? je.ToString() : value.ToString() ?? string.Empty);
             dict[key] = s.Length > MaxArgValueChars
                 ? s[..MaxArgValueChars] + $"…[{s.Length - MaxArgValueChars} chars truncated]"
                 : s;

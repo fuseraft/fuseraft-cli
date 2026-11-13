@@ -316,15 +316,16 @@ internal sealed class AgentMiddlewareBuilder(
     /// <param name="functionInvoker">
     /// Optional override for <see cref="FunctionInvokingChatClient.FunctionInvoker"/> — lets a
     /// caller observe/short-circuit each tool invocation (see <c>ReplToolLoopGuard</c>, the only
-    /// current user). Null (the default, and the only value orchestration agents pass) leaves
-    /// the framework's own invocation path untouched.
+    /// current user). Null (the default, and the only value orchestration agents pass) uses
+    /// the framework's own invocation path. Either way <see cref="MaskingInvoker"/> masks each result.
     /// </param>
     public static IChatClient BuildEventEmitMiddleware(
         IChatClient effectiveClient,
         AgentConfig config,
         AgentSkillsProvider? skillsProvider,
         Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? functionInvoker = null,
-        bool allowConcurrentInvocation = false)
+        bool allowConcurrentInvocation = false,
+        FileLedger? ledger = null)
     {
         // Pre-configure FunctionInvokingChatClient so ChatClientAgent reuses our instance
         // (it only adds its own when none is present in the pipeline). This lets us set
@@ -337,7 +338,7 @@ internal sealed class AgentMiddlewareBuilder(
             {
                 c.MaximumIterationsPerRequest = maxIterations;
                 c.AllowConcurrentInvocation   = allowConcurrentInvocation;
-                if (functionInvoker is not null) c.FunctionInvoker = functionInvoker;
+                c.FunctionInvoker             = MaskingInvoker(ledger is null ? functionInvoker : ChangeReportingInvoker(functionInvoker, ledger));
             })
             .Build();
 
@@ -350,6 +351,41 @@ internal sealed class AgentMiddlewareBuilder(
 
         return agentChatClient;
     }
+
+    /// <summary>
+    /// Runs each tool through <paramref name="next"/> (or the framework's own invocation) and masks secret values in
+    /// what it returns, so no tool, MCP server or skill script can put one in the model's context.
+    /// </summary>
+    internal static Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> MaskingInvoker(
+        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? next) =>
+        async (context, cancellationToken) => EnvSecretMasker.MaskResult(next is not null
+            ? await next(context, cancellationToken)
+            : await context.Function.InvokeAsync(context.Arguments, cancellationToken));
+
+    /// <summary>
+    /// Checks the files the agent has seen before and after each tool runs, and adds to the tool's result what changed:
+    /// before it, outside fuseraft (with a short diff); during it, while that tool ran. A shell command that rewrote a
+    /// file the agent has open, or a formatter, an editor or another process, is reported where the agent will read it.
+    /// </summary>
+    internal static Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> ChangeReportingInvoker(
+        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? next, FileLedger ledger) =>
+        async (context, cancellationToken) =>
+        {
+            // A subagent's tools run inside the parent's call, whose own check reports what the subagent changed.
+            var report  = ReadScope.Current is null;
+            var outside = report ? ledger.Sweep() : [];
+            var result  = next is not null
+                ? await next(context, cancellationToken)
+                : await context.Function.InvokeAsync(context.Arguments, cancellationToken);
+            var during  = report ? ledger.Sweep() : [];
+            ledger.NoteToolChanges(during);
+            if (outside.Count == 0 && during.Count == 0) return result;
+
+            var text = ToolResultText.ToStringOrDefault(result);
+            if (outside.Count > 0) text += "\n\n" + FileChangeNotice.Build(outside, during: null);
+            if (during.Count > 0)  text += "\n\n" + FileChangeNotice.Build(during, context.Function.Name);
+            return text;
+        };
 
     /// <summary>
     /// Applies the governance middleware ring: wraps <paramref name="baseAgent"/> with
