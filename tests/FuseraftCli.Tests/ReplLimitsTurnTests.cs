@@ -354,6 +354,114 @@ public sealed class ReplLimitsTurnTests : IDisposable
         Assert.Contains("input-token budget", history[^1].Text);
     }
 
+    // ── forced tool choice ───────────────────────────────────────────────────
+
+    // Refuses any request that forces a tool call, as Anthropic's thinking models do.
+    private sealed class RefusesForcedToolChoice : IChatClient
+    {
+        public readonly List<ChatToolMode?> Modes = [];
+
+        public ChatClientMetadata Metadata => new("test", null!, "stub");
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            Modes.Add(options?.ToolMode);
+            if (options?.ToolMode is RequiredChatToolMode)
+                throw new InvalidOperationException(
+                    "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"tool_choice: type \\\"tool\\\" and \\\"any\\\" are not supported for this model.\"}}");
+            return Answer("It's in src/config.cs.");
+        }
+
+        public object? GetService(Type serviceType, object? key = null) => null;
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task AWhereIsQuestion_IsAskedAgainWithoutForcingATool_WhenTheModelRefusesForcing()
+    {
+        var client = new RefusesForcedToolChoice();
+        var (ctx, _) = NewContext(client, repl: null);
+        ctx.ChatOptions = new ChatOptions { Tools = [AIFunctionFactory.Create(() => "x", "read_file")] };
+
+        await ReplTurn.ExecuteAsync(ctx, "where is the config loaded?", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None);
+
+        Assert.Equal(2, client.Modes.Count);
+        Assert.IsType<RequiredChatToolMode>(client.Modes[0]);
+        Assert.IsNotType<RequiredChatToolMode>(client.Modes[1]);
+        Assert.Equal("It's in src/config.cs.", ctx.History[^1].Text);
+    }
+
+    [Fact]
+    public void OnlyAToolChoiceError_CountsAsARefusalOfForcing()
+    {
+        Assert.True(ReplTurn.IsToolChoiceRejection(new InvalidOperationException("tool_choice: type \"any\" is not supported for this model.")));
+        Assert.False(ReplTurn.IsToolChoiceRejection(new InvalidOperationException("prompt is too long")));
+    }
+
+    // ── dropped replies ──────────────────────────────────────────────────────
+
+    // A write the tool refused, then a reply that's only the tool's error line, which the REPL drops as leaked
+    // tool text.
+    private static async IAsyncEnumerable<ChatResponseUpdate> RefusedWriteThenUnusableReply(string callId)
+    {
+        yield return new ChatResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            Contents = [new FunctionCallContent(callId, "write_file", new Dictionary<string, object?> { ["path"] = "a.md" })],
+        };
+        await Task.Yield();
+        yield return new ChatResponseUpdate { Role = ChatRole.Tool, Contents = [new FunctionResultContent(callId, "[ERROR] WRITE BLOCKED")] };
+        yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new TextContent("[ERROR] WRITE BLOCKED")] };
+        yield return Usage(10);
+    }
+
+    [Fact]
+    public async Task DroppedReply_KeepsTheToolWork_SoTheRetryKnowsItRan()
+    {
+        var client = new ScriptedClient(n => n == 0 ? RefusedWriteThenUnusableReply("c0") : Answer("The write was refused."));
+        var (ctx, _) = NewContext(client, repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.Equal(2, client.Streams);
+        Assert.Equal(1, ResultCount(client.Requests[1], "c0"));
+        Assert.DoesNotContain(client.Requests[1], m => m.Role == ChatRole.Assistant && m.Text.StartsWith("[ERROR]", StringComparison.Ordinal));
+        Assert.Equal(1, ResultCount(ctx.History, "c0"));
+        Assert.Equal("The write was refused.", ctx.History[^1].Text);
+    }
+
+    [Fact]
+    public async Task ReplyDroppedTwice_KeepsBothAttemptsToolWork()
+    {
+        var client = new ScriptedClient(n => RefusedWriteThenUnusableReply($"c{n}"));
+        var (ctx, _) = NewContext(client, repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.Equal(2, client.Streams);
+        Assert.Equal(1, ResultCount(ctx.History, "c0"));
+        Assert.Equal(1, ResultCount(ctx.History, "c1"));
+        Assert.StartsWith(ReplTurn.StoppedEarlyNotePrefix, ctx.History[^1].Text);
+    }
+
+    [Fact]
+    public async Task EmptyReplyWithNoTools_AddsNothingBeforeTheRetry()
+    {
+        var client = new ScriptedClient(n => n == 0 ? Answer("") : Answer("Hello."));
+        var (ctx, _) = NewContext(client, repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.Equal(2, client.Streams);
+        Assert.DoesNotContain(client.Requests[1], m => m.Text.StartsWith(ReplTurn.StoppedEarlyNotePrefix, StringComparison.Ordinal));
+        Assert.Equal("Hello.", ctx.History[^1].Text);
+    }
+
     // Previously the failure cutoff on a turn with no text fell into the empty-reply retry: the
     // stopped turn's tool calls were dropped and a whole extra turn ran. Now the tool calls are
     // kept, and an unattended turn (JSON mode here) gets one reply without tools, not a retry.

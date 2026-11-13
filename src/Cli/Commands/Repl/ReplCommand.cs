@@ -260,8 +260,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         {
             // A host that names the model (fuseraft-web, per account) needs no config file: --model plus
             // FUSERAFT_API_KEY is a complete setup. Nothing here is saved unless --save asks.
-            if (userCfg is null && !string.IsNullOrWhiteSpace(settings.Model))
-                userCfg = new UserConfig { ModelId = settings.Model.Trim(), Provider = settings.Provider?.Trim() ?? string.Empty };
+            userCfg = WithHostModel(userCfg, settings.Model, settings.Provider);
 
             // Running from VS Code. Prefer an API key explicitly injected by the
             // extension (FUSERAFT_API_KEY), then fall back to any legacy plaintext
@@ -1013,6 +1012,23 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The config a host's --model completes: a new one when there's no config file, or the file's when it has settings
+    /// but no model yet, as after <c>fuseraft settings set</c> or the VS Code settings panel on a fresh install.
+    /// </summary>
+    internal static UserConfig? WithHostModel(UserConfig? userCfg, string? model, string? provider)
+    {
+        if (string.IsNullOrWhiteSpace(model)) return userCfg;
+        if (userCfg is null)
+            return new UserConfig { ModelId = model.Trim(), Provider = provider?.Trim() ?? string.Empty };
+        if (string.IsNullOrWhiteSpace(userCfg.ModelId))
+        {
+            userCfg.ModelId = model.Trim();
+            if (!string.IsNullOrWhiteSpace(provider)) userCfg.Provider = provider.Trim();
+        }
+        return userCfg;
     }
 
     private static string? ResolveModelId(ReplSettings settings, UserConfig? userCfg)
