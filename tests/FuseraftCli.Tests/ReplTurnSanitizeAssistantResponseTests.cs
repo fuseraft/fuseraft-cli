@@ -97,4 +97,32 @@ public sealed class ReplTurnSanitizeAssistantResponseTests
         Assert.Equal(string.Empty, result);
         Assert.Null(warning);
     }
+
+    [Fact]
+    public void AnAnswerQuotingAToolErrorInACodeFence_IsKept()
+    {
+        // From a live session: the model reported a refused write by quoting the error, and the answer was dropped.
+        const string answer =
+            "The tool refused the write. Its exact error message was:\n\n```\n" +
+            "[ERROR] WRITE BLOCKED — '/repo/config.txt' changed after you last read or wrote it, so content built from " +
+            "your copy would undo that change. 1. Re-read it with read_file (startLine/maxLines for the part you need). " +
+            "2. Then make the edit with patch_file, or write_file the full updated content.\n```\n\n" +
+            "I stopped there and didn't retry. `config.txt` is unchanged.";
+
+        var result = ReplTurn.SanitizeAssistantResponse(answer, out var warning);
+
+        Assert.Equal(answer, result);
+        Assert.Null(warning);
+    }
+
+    [Fact]
+    public void ResultLinesOutsideAFence_AreStillDropped_WhenAFencedBlockIsNearby()
+    {
+        const string leaked = "[OK] Written 120 chars to foo.cs\n[OK] Patched 'bar.cs': replaced 2-line block\n```\nx\n```";
+
+        var result = ReplTurn.SanitizeAssistantResponse(leaked, out var warning);
+
+        Assert.Equal(string.Empty, result);
+        Assert.NotNull(warning);
+    }
 }

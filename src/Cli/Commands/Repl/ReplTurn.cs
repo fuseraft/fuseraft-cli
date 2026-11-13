@@ -187,6 +187,11 @@ internal static class ReplTurn
         return forced;
     }
 
+    // A provider's refusal of the forced tool choice BuildRequestOptions asked for, rather than of the request as a whole.
+    internal static bool IsToolChoiceRejection(Exception ex) =>
+        ex is not OperationCanceledException &&
+        $"{ex.Message} {ex.InnerException?.Message}".Contains("tool_choice", StringComparison.OrdinalIgnoreCase);
+
     // The options for a reply that mustn't call tools. The tools stay declared, since a provider may reject a
     // history with tool calls in it when none are, and the model is told not to use them.
     internal static ChatOptions? WithoutToolCalls(ChatOptions? baseOptions)
@@ -898,6 +903,17 @@ internal static class ReplTurn
         responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
         if (!capturePlan && responseText.Length == 0 && !stoppedEarly)
         {
+            // The reply is dropped, but the tools it called have run. Keep their calls and results, so the retry below
+            // and later turns know what was done: told nothing, the model ran a refused write again, and would rerun
+            // a commit or a deploy the same way.
+            var kept = CompletedRounds(rawUpdates);
+            if (kept.Count > 0)
+            {
+                ctx.History.AddRange(kept);
+                RepairDanglingToolCalls(ctx.History);
+                AppendStoppedEarlyNote(ctx.History, "the reply after these tool calls was empty or not a user-facing answer, so it was dropped");
+            }
+
             // Gated on its own emptyResponseRetried flag rather than the shared isCorrectionTurn
             // flag — an empty response can legitimately occur mid-way through an in-progress
             // todo-correction chain (a nudge message can provoke a bare tool call with no
@@ -1350,12 +1366,14 @@ internal static class ReplTurn
     // response's non-blank content, by character count rather than raw line count — a leaked
     // single tool result is often accompanied by a short structural wrapper (e.g. a "Tool
     // Calls]" header or a bare tool name line) that would otherwise dilute a naive per-line
-    // majority check below the threshold that actually caught the real #119 incident.
+    // majority check below the threshold that actually caught the real #119 incident. Lines in a code
+    // fence don't count as leaked: a model quoting a tool's error to the user puts it in one.
     private static bool IsDominatedByToolResultLines(string trimmed)
     {
         var totalChars   = 0;
         var matchedChars = 0;
         var hasMatch     = false;
+        var inFence      = false;
 
         foreach (var rawLine in trimmed.Split('\n'))
         {
@@ -1363,7 +1381,12 @@ internal static class ReplTurn
             if (line.Length == 0) continue;
 
             totalChars += line.Length;
-            if (ToolResultLinePattern.IsMatch(line))
+            if (line.StartsWith("```", StringComparison.Ordinal) || line.StartsWith("~~~", StringComparison.Ordinal))
+            {
+                inFence = !inFence;
+                continue;
+            }
+            if (!inFence && ToolResultLinePattern.IsMatch(line))
             {
                 hasMatch = true;
                 matchedChars += line.Length;
@@ -2050,6 +2073,12 @@ internal static class ReplTurn
             reqCts.Dispose();
             ctx.ActiveCts = null;
             return TurnStreamResult.MakeFailed(toolCallsThisTurn, limits.MaxIdenticalToolCalls);
+        }
+        catch (Exception ex) when (requestOptions?.ToolMode is RequiredChatToolMode && rawUpdates.Count == 0 && IsToolChoiceRejection(ex))
+        {
+            // Some models refuse a forced tool call (Anthropic's thinking models: "tool_choice ... not supported for this
+            // model"). Forcing one only nudges a where-is question toward evidence, so ask again without it.
+            requestOptions = ctx.ChatOptions;
         }
         catch (Exception ex) when (IsTransientStreamError(ex) && streamAttempt < limits.MaxStreamRetries)
         {
