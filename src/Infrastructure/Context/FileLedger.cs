@@ -17,6 +17,7 @@ public sealed class FileLedger
     public static FileLedger Shared { get; } = new();
 
     private const int  MaxHashBytes     = 4 * 1024 * 1024;
+    private static readonly TimeSpan RecentWrite = TimeSpan.FromSeconds(2);
 
     private sealed class Entry
     {
@@ -132,10 +133,14 @@ public sealed class FileLedger
         return changes;
     }
 
-    // Size and timestamp first; the hash settles a touch that changed the timestamp but not the bytes.
+    // Size and timestamp first; the hash settles a touch that changed the timestamp but not the bytes. A recent timestamp
+    // isn't trusted: a write in the same clock tick (about 15 ms on Windows) wouldn't move it, so until it's older the
+    // file is compared by hash.
     private static bool Differs(Entry entry, FileInfo info)
     {
-        if (entry.Size == info.Length && entry.WriteUtc == info.LastWriteTimeUtc) return false;
+        var sameStamp = entry.Size == info.Length && entry.WriteUtc == info.LastWriteTimeUtc;
+        // Too large to hash: size and time are all there is.
+        if (sameStamp && (entry.Hash is null || DateTime.UtcNow - info.LastWriteTimeUtc >= RecentWrite)) return false;
         if (entry.Hash is null || info.Length != entry.Size) return true;
         try
         {

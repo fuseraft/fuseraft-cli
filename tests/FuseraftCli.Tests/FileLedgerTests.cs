@@ -41,6 +41,20 @@ public sealed class FileLedgerTests : IDisposable
     }
 
     [Fact]
+    public void Sweep_ASameSizeEditInTheSameClockTick_IsStillReported()
+    {
+        var path = Seen("a.txt", "one\n");
+        var time = File.GetLastWriteTimeUtc(path);
+        File.WriteAllText(path, "ONE\n");
+        // A coarse clock (about 15 ms on Windows) gives a write right after the read the same time.
+        File.SetLastWriteTimeUtc(path, time);
+
+        Assert.Single(_ledger.Sweep());
+        Assert.True(_ledger.IsStale(path));
+        Assert.Empty(_ledger.Sweep());
+    }
+
+    [Fact]
     public void Sweep_DeletedFile_IsReportedAndForgotten()
     {
         var path = Seen("a.txt", "one\n");
