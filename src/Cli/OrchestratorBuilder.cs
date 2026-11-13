@@ -244,7 +244,7 @@ public static class OrchestratorBuilder
             ? ApprovalScope.Guard(humanApprovalService.PromptFileWriteAsync)
             : null;
 
-        pluginRegistry.Configure(config.Security, profiles, shellApprover, toolActionApprover: toolActionApprover, fileWriteApprover: fileWriteApprover);
+        pluginRegistry.Configure(config.Security, profiles, shellApprover, toolActionApprover: toolActionApprover, fileWriteApprover: fileWriteApprover, fileLedger: FileLedger.Shared);
 
         // When a filesystem sandbox is configured, resolve relative validation and
         // change-tracking paths against the sandbox root so that validators and
@@ -432,7 +432,7 @@ public static class OrchestratorBuilder
 
             await stateProjector.InitializeAsync();
 
-            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>(), knowledgeLayer.GraphBuilder, stateProjector);
+            changeTracker = new ChangeTracker(ctConfig.Path, eventEmitter, evidenceStore, intentLog, loggerFactory.CreateLogger<ChangeTracker>(), knowledgeLayer.GraphBuilder, stateProjector, FileLedger.Shared);
             pluginRegistry.Register("Changes",      () => new ChangesPlugin(ctConfig.Path));
             pluginRegistry.Register("Investigation", () => new InvestigationPlugin(investigationLogPath, sessionId ?? string.Empty, stateProjector));
         }
@@ -471,7 +471,7 @@ public static class OrchestratorBuilder
         // so write_file, get_file_info, and read_file participate in version-aware conflict
         // detection and cross-turn read deduplication. Thread the cache-hit callback so
         // SessionMetrics can count duplicate reads across the session.
-        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit, eventSink: stateProjector, toolActionApprover: toolActionApprover, fileWriteApprover: fileWriteApprover);
+        pluginRegistry.Configure(config.Security ?? new SecurityConfig(), profiles, shellApprover, fileVersionStore, sessionReadCache, onCacheHit: sessionMetrics.RecordCacheHit, eventSink: stateProjector, toolActionApprover: toolActionApprover, fileWriteApprover: fileWriteApprover, fileLedger: FileLedger.Shared);
 
         // Session context plugin: shared handoff notes that agents write before routing
         // and read on re-entry. Stored in the global session directory.
@@ -494,6 +494,7 @@ public static class OrchestratorBuilder
                 ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionReadCache, newSessionId, projectSlug)
                 : null;
             sessionReadCache.Rebind(newReadCachePath);
+            FileLedger.Shared.Clear();
 
             var newToolArtifactsDir = newSessionId is { Length: > 0 }
                 ? FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionToolArtifacts, newSessionId, projectSlug)
@@ -694,8 +695,10 @@ public static class OrchestratorBuilder
         var providerErrorLog  = config.Events is { } evtPath
             ? Path.Combine(Path.GetDirectoryName(evtPath.Path) ?? FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalLogs, projectSlug), "provider_errors.jsonl")
             : FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalProviderErrors, projectSlug);
+        var userConfig        = UserConfigStore.Load().Config;
+        FileLedger.Shared.TrackedFiles = userConfig?.Files?.TrackedFiles ?? FilesConfig.DefaultTrackedFiles;
         var chatClientFactory = new ChatClientFactory(config.Models.Count > 0 ? config.Models : null, providerErrorLog, eventEmitter, loggerFactory,
-            TransportOptions.From(UserConfigStore.Load().Config));
+            TransportOptions.From(userConfig));
 
         // Eagerly resolve every agent's model config so that undefined aliases
         // (e.g. "fast" not declared in the Models registry) fail here at startup
@@ -1517,7 +1520,7 @@ public static class OrchestratorBuilder
 
         var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, knowledgeLayer.ProvenanceRegistry, config.TestSelector, resolvedSandbox, contextAssembler);
 
-        var agentFactory = new AgentFactory(chatClientFactory, infra.PluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, infra.IdentityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(loggerFactory), infra.ToolArtifactStore, infra.AdaptiveTrimTracker);
+        var agentFactory = new AgentFactory(chatClientFactory, infra.PluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, infra.IdentityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(loggerFactory), infra.ToolArtifactStore, infra.AdaptiveTrimTracker, FileLedger.Shared);
 
         // Unified context assembly pipeline — shared across all orchestrator types.
         // Provides always-on knowledge retrieval, relevance-ranked memory, and metrics

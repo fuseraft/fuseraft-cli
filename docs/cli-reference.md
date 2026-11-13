@@ -2874,6 +2874,7 @@ Numbers are checked against the range in the table below, and `repl.dock` agains
 | `telemetry.otlpEndpoint` | OTLP endpoint URL, or `""` to disable |
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
 | `skillCuration.enabled` | `true`/`false` |
+| `files.trackedFiles` | Integer 0–5000 — how many recently read or written files are checked for changes around each tool call, in the REPL and in `fuseraft run` (default `50`; lower it on a slow network share, `0` turns change tracking off); `""` resets |
 | `skills.searchDepth` | Directory levels scanned inside each skill for resources and scripts, 1–10 (default `5`; `3` reaches `references/components/x.md`), or `""` to reset |
 | `memory.autoSave` | `true`/`false` — extract memories automatically on exit and before `/clear`, `/switch`, `/provider setup` or compaction discards the conversation (default `false`; `/memory save` always works) |
 | `memory.model` | Model ID for the REPL's memory-extraction call, or `""` to use the main chat model |

@@ -43,6 +43,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly string  _summaryDir;
     private readonly FileVersionStore?  _versionStore;
     private readonly SessionReadCache?  _sessionCache;
+    private readonly FileLedger?        _ledger;
     private readonly Action?            _onWrite;
     private readonly Action?            _onCacheHit;
     private readonly UndoSnapshotStore  _undoStore = new();
@@ -100,8 +101,9 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null, IncludedRootsState? includedRoots = null, IReadOnlyList<string>? denyPatterns = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null, IncludedRootsState? includedRoots = null, IReadOnlyList<string>? denyPatterns = null, FileLedger? ledger = null)
     {
+        _ledger            = ledger;
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _exemptedPrefixes  = (exemptedPaths ?? [])
             .Select(p => FuseraftPaths.ExpandPath(p).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar)
@@ -220,8 +222,24 @@ public sealed class FileSystemPlugin : ITurnResettable
         var budgetResult = ReadWithBudget(resolved, fileInfo, slice, effectiveStart, totalLines, startLine, maxLines, out var content);
         if (budgetResult is not null) return budgetResult;
 
+        NoteSeen(resolved);
         return content!;
     }
+
+    // A subagent's reads and writes aren't the parent's: the parent's own check around the subagent call reports what it changed.
+    private void NoteSeen(string resolved)
+    {
+        if (ReadScope.Current is null) _ledger?.RecordSeen(resolved);
+    }
+
+    // A full rewrite built from a copy older than the file would quietly undo whatever changed it since.
+    private string? StaleCopyDenial(string resolved) =>
+        _ledger is not null && ReadScope.Current is null && _ledger.IsStale(resolved)
+            ? PluginResult.Error(
+                $"WRITE BLOCKED — '{resolved}' changed after you last read or wrote it, so content built from your copy " +
+                "would undo that change. 1. Re-read it with read_file (startLine/maxLines for the part you need). " +
+                "2. Then make the edit with patch_file, or write_file the full updated content.")
+            : null;
 
     // Session-level read cache: if the file is in the cache and unchanged on disk
     // (matching mtime + size), return a hint instead of re-dumping the full content.
@@ -551,6 +569,7 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         await _undoStore.RecordBeforeMutationAsync(resolved, knownContent: content);
         await File.WriteAllTextAsync(resolved, patched, encoding);
+        NoteSeen(resolved);
 
         // Invalidate caches — content has changed.
         _readThisTurn.Remove(resolved);
@@ -609,6 +628,9 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         var (pathDenial, resolved) = await ValidateWritePathAsync(path);
         if (pathDenial is not null) return pathDenial;
+
+        var staleDenial = StaleCopyDenial(resolved!);
+        if (staleDenial is not null) return staleDenial;
 
         var versionDenial = await CheckVersionConflictAsync(resolved!, baseVersion);
         if (versionDenial is not null) return versionDenial;
@@ -697,6 +719,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         var encoding = File.Exists(resolved) ? DetectEncoding(resolved) : new System.Text.UTF8Encoding(false);
         await _undoStore.RecordBeforeMutationAsync(resolved);
         await File.WriteAllTextAsync(resolved, content, encoding);
+        NoteSeen(resolved);
 
         // Allow a within-turn verification read by removing from the per-turn set.
         // Prime the session cache (ReadCount:0) so later-turn reads get a "was written"

@@ -85,6 +85,7 @@ public static class UserConfigStore
                         Telemetry     = onDisk.Telemetry,
                         SkillCuration = onDisk.SkillCuration,
                         Skills        = onDisk.Skills,
+                        Files         = onDisk.Files,
                         Memory        = onDisk.Memory,
                         Subagent      = onDisk.Subagent,
                     };
@@ -167,6 +168,7 @@ public static class UserConfigStore
             Telemetry     = config.Telemetry,
             SkillCuration = config.SkillCuration,
             Skills        = config.Skills,
+            Files         = config.Files,
             Memory        = config.Memory,
             Subagent      = config.Subagent,
         };
@@ -198,6 +200,10 @@ public static class UserConfigStore
         [JsonPropertyName("skills")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public SkillsConfig? Skills { get; set; }
+
+        [JsonPropertyName("files")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public FilesConfig? Files { get; set; }
 
         [JsonPropertyName("memory")]
         public MemoryExtractionConfig? Memory { get; set; }

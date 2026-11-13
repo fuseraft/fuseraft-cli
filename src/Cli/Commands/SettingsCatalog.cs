@@ -3,6 +3,7 @@ using fuseraft.Cli.Commands.Repl;
 using fuseraft.Core.Models.Config;
 using fuseraft.Core.Subagents;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Context;
 
 namespace fuseraft.Cli.Commands;
 
@@ -81,6 +82,8 @@ public static class SettingsCatalog
         new("telemetry.serviceName",  SettingKind.Text, "Service name on exported traces. Needs telemetry.otlpEndpoint.", c => c.Telemetry?.ServiceName),
 
         new("skillCuration.enabled", SettingKind.Bool, "After a successful orchestration session, save reusable procedures from it as skills.", c => Bool(c.SkillCuration?.Enabled), "false"),
+        new("files.trackedFiles", SettingKind.Integer, "Recently read or written files checked for changes around each tool call. Lower it on a slow network share; 0 turns change tracking off.",
+            c => Int(c.Files?.TrackedFiles), Int(FilesConfig.DefaultTrackedFiles), 0, FilesConfig.MaxTrackedFiles),
         new("skills.searchDepth", SettingKind.Integer, "Directory levels scanned inside each skill for resources and scripts.",
             c => Int(c.Skills?.SearchDepth), Int(SkillsConfig.DefaultSearchDepth), 1, SkillsConfig.MaxSearchDepth),
 

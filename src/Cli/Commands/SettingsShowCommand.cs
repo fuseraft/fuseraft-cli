@@ -5,6 +5,7 @@ using fuseraft.Cli.Commands.Repl;
 using fuseraft.Cli.Protocol;
 using fuseraft.Core.Models.Config;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.Context;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Storage;
 
@@ -148,6 +149,11 @@ public sealed class SettingsShowCommand : AsyncCommand<SettingsShowSettings>
         }
 
         var sc = config.SkillCuration;
+        Section("Files");
+        Row("files.trackedFiles", (config.Files?.TrackedFiles ?? FilesConfig.DefaultTrackedFiles) is > 0 and var tracked
+            ? $"{tracked} files" + (config.Files?.TrackedFiles is null ? Dim(" (default)") : "")
+            : OnOff(false));
+
         Section("Skills");
         Row("skills.searchDepth",    Tuned(config.Skills?.SearchDepth, SkillsConfig.DefaultSearchDepth, v => v.ToString()));
         Row("skillCuration.enabled", OnOff(sc?.Enabled == true));

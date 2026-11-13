@@ -35,6 +35,10 @@ public sealed class UserConfig
     [JsonPropertyName("skills")]
     public SkillsConfig? Skills { get; set; }
 
+    /// <summary>File tracking settings (how many files are checked for changes).</summary>
+    [JsonPropertyName("files")]
+    public FilesConfig? Files { get; set; }
+
     /// <summary>Model override for the REPL's end-of-session memory-extraction call.</summary>
     [JsonPropertyName("memory")]
     public MemoryExtractionConfig? Memory { get; set; }
