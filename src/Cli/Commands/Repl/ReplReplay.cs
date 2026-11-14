@@ -67,7 +67,8 @@ internal static class ReplReplay
             {
                 var t = m.Text ?? string.Empty;
 
-                if (t.StartsWith(ReplCommands.CompactedContextPrefix, StringComparison.Ordinal))
+                if (t.StartsWith(ReplCommands.CompactedContextPrefix, StringComparison.Ordinal) ||
+                    t.StartsWith(ReplCommands.LegacyCompactedContextPrefix, StringComparison.Ordinal))
                 {
                     compacted = true;
                     Close();

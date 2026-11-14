@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.FileSystemGlobbing;
 using fuseraft.Core;
+using fuseraft.Infrastructure.Agents;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -168,6 +169,13 @@ public sealed class GitPlugin
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
         if (pathDenial is not null) return pathDenial;
+
+        // grok-4.7 committed five fixes in a row with this note as the whole message, copied from older calls whose
+        // arguments had been shortened to fit its context.
+        if (ElisionMarkers.PlaceholderTail.IsMatch(message))
+            return PluginResult.Error(
+                "message is a context-trimming placeholder, not a commit message. Nothing was committed. " +
+                "Write the real message: what the commit changes, in a short summary line.");
 
         var approvalDenial = await CheckApprovalAsync("git_commit", message);
         if (approvalDenial is not null) return approvalDenial;

@@ -7,6 +7,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using fuseraft.Core;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Chat;
 using fuseraft.Infrastructure.Plugins;
 
 namespace fuseraft.Infrastructure.Agents;
@@ -42,7 +43,8 @@ internal sealed class AgentMiddlewareBuilder(
         int toolSchemaChars,
         long maxPayloadBytes,
         bool hasHandoff,
-        EventEmitter? emitter = null)
+        EventEmitter? emitter = null,
+        int triggerChars = 0)
     {
         // Always wrap: the adaptive context-trim retry fires on any provider rejection
         // classified as ContextExceeded, regardless of whether explicit limits are set.
@@ -54,8 +56,14 @@ internal sealed class AgentMiddlewareBuilder(
         // the sliding tool-pair window so it only engages once a turn is actually
         // approaching its budget, keeping the request prefix (and a provider's prompt cache)
         // stable below that. Falls back to DefaultTriggerChars when the caller has no
-        // configured context-window size (e.g. a REPL session with no MaxContextTokens set).
-        var triggerChars = maxContextChars > 0 ? maxContextChars : AgentContextCompactionFilters.DefaultTriggerChars;
+        // configured context-window size and passes no trigger of its own.
+        if (triggerChars <= 0)
+            triggerChars = maxContextChars > 0 ? maxContextChars : AgentContextCompactionFilters.DefaultTriggerChars;
+
+        // The in-turn budgets are in estimated chars; this shrinks them by how far the provider's own count of the
+        // last request outran the estimate (see InputTokenCalibration).
+        // Requests under a quarter of the trigger are too small to judge by (see InputTokenCalibration).
+        var calibration = new InputTokenCalibration(minSampleChars: triggerChars / 4);
 
         return chatClient.AsBuilder()
             .Use(
@@ -65,8 +73,9 @@ internal sealed class AgentMiddlewareBuilder(
                     // cap the sliding tool-pair window and char budget — see
                     // AgentContextCompactionFilters.ApplyInTurnFilters for the full rationale.
                     messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                        messages, maxInTurnToolPairs, maxInTurnChars, triggerChars, ct,
+                        messages, maxInTurnToolPairs, calibration.Scale(maxInTurnChars), calibration.Scale(triggerChars), ct,
                         AgentContextCompactionFilters.CacheStableTrimStep);
+                    messages = WithPlainTextToolResults(messages);
 
                     // Stop the FunctionInvokingChatClient loop immediately after handoff —
                     // no follow-up LLM call is made, so the agent cannot call more tools.
@@ -89,7 +98,7 @@ internal sealed class AgentMiddlewareBuilder(
                         _ = emitter.EmitAsync(EventTypes.InnerCallContext,
                             agent: config.Name, turn: null,
                             payload: BuildInnerCallContextPayload(
-                                baseMsg, toolSchemaChars, callSeq));
+                                baseMsg, toolSchemaChars, callSeq, calibration.Factor));
 
                     // Adaptive retry: on ContextExceeded the context is progressively
                     // trimmed (tool results truncated → dropped) and the call retried.
@@ -119,6 +128,9 @@ internal sealed class AgentMiddlewareBuilder(
                                     });
 
                             var response = await inner.GetResponseAsync(ctx, merged, ct);
+                            calibration.Record(
+                                AgentContextCompactionFilters.EstimateTotalChars(ctx) + toolSchemaChars,
+                                response.Usage.PromptTokens());
 
                             if (emitter is not null)
                                 _ = emitter.EmitAsync(EventTypes.ModelResponse,
@@ -191,8 +203,9 @@ internal sealed class AgentMiddlewareBuilder(
             [EnumeratorCancellation] CancellationToken ct)
         {
             messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                messages, maxInTurnToolPairs, maxInTurnChars, triggerChars, ct,
+                messages, maxInTurnToolPairs, calibration.Scale(maxInTurnChars), calibration.Scale(triggerChars), ct,
                 AgentContextCompactionFilters.CacheStableTrimStep);
+            messages = WithPlainTextToolResults(messages);
             if (hasHandoff && HandoffWasInvoked(messages))
                 yield break;
 
@@ -214,7 +227,7 @@ internal sealed class AgentMiddlewareBuilder(
             if (emitter is not null)
                 _ = emitter.EmitAsync(EventTypes.InnerCallContext,
                     agent: config.Name, turn: null,
-                    payload: BuildInnerCallContextPayload(baseMsg, toolSchemaChars, callSeq));
+                    payload: BuildInnerCallContextPayload(baseMsg, toolSchemaChars, callSeq, calibration.Factor));
 
             // Reactive adaptive-trim retry — same stages as the non-streaming path above,
             // but only viable before the first update reaches the caller. A context-limit
@@ -268,10 +281,12 @@ internal sealed class AgentMiddlewareBuilder(
                     // earlier or progressively — mirrors SubagentPlugin's streaming variant.
                     ChatFinishReason? finishReason = enumerator.Current.FinishReason;
                     long? inputTok = null, outputTok = null;
+                    long promptTok = 0;
                     foreach (var usage in enumerator.Current.Contents.OfType<UsageContent>())
                     {
                         inputTok  = usage.Details.InputTokenCount  ?? inputTok;
                         outputTok = usage.Details.OutputTokenCount ?? outputTok;
+                        promptTok = usage.Details.PromptTokens() is > 0 and var p ? p : promptTok;
                     }
                     yield return enumerator.Current;
 
@@ -282,9 +297,11 @@ internal sealed class AgentMiddlewareBuilder(
                         {
                             inputTok  = usage.Details.InputTokenCount  ?? inputTok;
                             outputTok = usage.Details.OutputTokenCount ?? outputTok;
+                            promptTok = usage.Details.PromptTokens() is > 0 and var p ? p : promptTok;
                         }
                         yield return enumerator.Current;
                     }
+                    calibration.Record(AgentContextCompactionFilters.EstimateTotalChars(ctxMsgs) + toolSchemaChars, promptTok);
 
                     if (emitter is not null)
                         _ = emitter.EmitAsync(EventTypes.ModelResponse,
@@ -359,9 +376,10 @@ internal sealed class AgentMiddlewareBuilder(
     /// file the agent has open, or a formatter, an editor or another process, is reported where the agent will read it.
     /// </summary>
     internal static Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> ChangeReportingInvoker(
-        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? next, FileLedger ledger) =>
+        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? next, FileLedger ledger, ToolCallSequence? toolCalls = null) =>
         async (context, cancellationToken) =>
         {
+            (toolCalls ?? ToolCallSequence.Shared).Advance();
             // A subagent's tools run inside the parent's call, whose own check reports what the subagent changed.
             var report  = ReadScope.Current is null;
             var outside = report ? ledger.Sweep() : [];
@@ -569,7 +587,7 @@ internal sealed class AgentMiddlewareBuilder(
     /// <c>inner.GetResponseAsync</c> call so growth across rounds is directly observable.
     /// </summary>
     private static object BuildInnerCallContextPayload(
-        IReadOnlyList<ChatMessage> messages, int toolSchemaChars, int seq)
+        IReadOnlyList<ChatMessage> messages, int toolSchemaChars, int seq, double calibration)
     {
         int userMsgs = 0, assistantMsgs = 0, toolMsgs = 0;
         int textChars = 0, reasoningTextChars = 0, reasoningProtectedDataChars = 0;
@@ -629,7 +647,45 @@ internal sealed class AgentMiddlewareBuilder(
             },
             protected_data_blobs = protectedDataBlobs,
             est_tokens           = TokenEstimator.EstimateTokens(grandTotal),
+            // Provider tokens per estimated token on the previous request; the in-turn budgets were divided by it.
+            calibration,
         };
+    }
+
+    /// <summary>
+    /// Sends a tool's text result as plain text. A tool's string comes back from <c>InvokeAsync</c> as a JSON string
+    /// element, and providers serialize anything that isn't a .NET string, so the model got <c>"import os\n…"</c>:
+    /// escaped code, measured at 12–14% more tokens on xAI. Results that are real JSON objects are left as they are.
+    /// </summary>
+    internal static IEnumerable<ChatMessage> WithPlainTextToolResults(IEnumerable<ChatMessage> messages)
+    {
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+        List<ChatMessage>? rewritten = null;
+        for (var i = 0; i < list.Count; i++)
+        {
+            var message = list[i];
+            if (!message.Contents.Any(IsJsonStringResult))
+            {
+                rewritten?.Add(message);
+                continue;
+            }
+
+            rewritten ??= [.. list.Take(i)];
+            var copy = message.Clone();
+            copy.Contents = [.. message.Contents.Select(c => c is FunctionResultContent fr && IsJsonStringResult(fr)
+                ? new FunctionResultContent(fr.CallId, ((System.Text.Json.JsonElement)fr.Result!).GetString())
+                {
+                    Exception            = fr.Exception,
+                    AdditionalProperties = fr.AdditionalProperties,
+                    RawRepresentation    = fr.RawRepresentation,
+                }
+                : c)];
+            rewritten.Add(copy);
+        }
+        return rewritten ?? list;
+
+        static bool IsJsonStringResult(AIContent c) =>
+            c is FunctionResultContent { Result: System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } };
     }
 
     /// <summary>

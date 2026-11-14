@@ -308,6 +308,27 @@ public sealed class AgentContextCompactionFiltersTests
         Assert.Equal(body, WrittenContent(result, "w3"));
     }
 
+    // Elided from the start, grok-4.7 wrote the "[ELIDED …]" note as the whole content of new files 7 times in 5 minutes.
+    [Theory]
+    [InlineData(1_000_000, false)]
+    [InlineData(10, true)]
+    public async Task OlderCallArguments_AreElidedOnlyNearTheBudget(int triggerChars, bool elided)
+    {
+        var body = new string('x', 2_000);
+        var messages = new List<ChatMessage>();
+        for (int i = 0; i < 4; i++)
+        {
+            messages.Add(WriteCall($"w{i}", body));
+            messages.Add(ToolResult($"w{i}", "[OK] wrote probe.kiwi"));
+        }
+
+        var result = (await AgentContextCompactionFilters.ApplyInTurnFilters(
+            messages, maxInTurnToolPairs: 0, maxInTurnChars: 0, triggerChars: triggerChars)).ToList();
+
+        Assert.Equal(elided ? ElisionMarkers.ArgValueNote(2_000) : body, WrittenContent(result, "w0"));
+        Assert.Equal(body, WrittenContent(result, "w3"));
+    }
+
     [Fact]
     public void CompressSupersededShell_StubSaysTheOutputWasDropped_NotCached()
     {

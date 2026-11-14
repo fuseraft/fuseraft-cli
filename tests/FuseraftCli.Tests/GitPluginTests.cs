@@ -89,6 +89,21 @@ public sealed class GitPluginTests : IDisposable
         Assert.Equal("fix: something", seen?.Detail);
     }
 
+    // grok-4.7 committed five fixes in a row with the trimming note as the whole message.
+    [Fact]
+    public async Task CommitAsync_APlaceholderMessage_IsRefusedBeforeApproval()
+    {
+        var asked = false;
+        var plugin = new GitPlugin(approveAction: (_, _) => { asked = true; return Task.FromResult(true); });
+
+        var result = await plugin.CommitAsync(
+            "[ELIDED — 188 chars, NOT the real value. Do not reuse this placeholder as content; re-read the file or regenerate the value if you need it again.]",
+            _dir);
+
+        Assert.Contains("placeholder, not a commit message", result);
+        Assert.False(asked);
+    }
+
     [Fact]
     public async Task CheckoutAsync_ApproveActionReturnsFalse_Blocks()
     {

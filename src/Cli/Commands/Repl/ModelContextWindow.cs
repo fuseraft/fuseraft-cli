@@ -22,11 +22,15 @@ internal static class ModelContextWindow
     // 128K+/1M-class frontier models.
     private const int LargeBudget = 150_000;
 
+    // grok models: xAI serves them with windows of 256K and up, and in-turn trimming now measures against the
+    // tokens xAI actually bills, so the budget can sit closer to the real window.
+    private const int GrokBudget = 256_000;
+
     // ~128K-class models not already covered by LargeFamilyMarkers.
     private const int MediumBudget = 100_000;
 
     private static readonly string[] LargeFamilyMarkers =
-        ["claude", "gemini", "grok", "gpt-5", "gpt-4.1", "o1", "o3"];
+        ["claude", "gemini", "gpt-5", "gpt-4.1", "o1", "o3"];
 
     private static readonly string[] MediumFamilyMarkers =
         ["gpt-4o", "gpt-4", "mistral", "deepseek"];
@@ -47,6 +51,8 @@ internal static class ModelContextWindow
 
         if (string.IsNullOrWhiteSpace(modelId)) return DefaultBudget;
 
+        if (modelId.Contains("grok", StringComparison.OrdinalIgnoreCase))
+            return GrokBudget;
         if (LargeFamilyMarkers.Any(m => modelId.Contains(m, StringComparison.OrdinalIgnoreCase)))
             return LargeBudget;
         if (MediumFamilyMarkers.Any(m => modelId.Contains(m, StringComparison.OrdinalIgnoreCase)))
@@ -59,7 +65,7 @@ internal static class ModelContextWindow
     /// The per-turn <c>read_file</c> budget, in chars, for a working context budget of
     /// <paramref name="contextTokenBudget"/> tokens: half of it. The other half is left for the
     /// system prompt, tool schemas, conversation history, and everything else the turn produces.
-    /// So a 150K-token model can read ~300K chars in a turn and an unrecognized one ~160K, instead
+    /// So a 150K-token model can read ~300K chars in a turn (a 256K grok model ~512K) and an unrecognized one ~160K, instead
     /// of every model getting the same 150K — and raising <c>repl.contextBudget</c> for a model
     /// with a larger real window raises this with it.
     /// </summary>

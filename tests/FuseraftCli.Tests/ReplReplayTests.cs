@@ -103,12 +103,14 @@ public sealed class ReplReplayTests
         Assert.Equal("later answer", t.Turns[1].Assistant);
     }
 
-    [Fact]
-    public void CompactionSummary_IsFlagged_AndNeverShownAsATurn()
+    [Theory]
+    [InlineData(ReplCommands.CompactedContextPrefix)]
+    [InlineData(ReplCommands.LegacyCompactedContextPrefix)] // sessions saved before the wording changed
+    public void CompactionSummary_IsFlagged_AndNeverShownAsATurn(string prefix)
     {
         var t = ReplReplay.BuildTranscript([
             System(),
-            User($"{ReplCommands.CompactedContextPrefix}\n\nSummary of everything so far"),
+            User($"{prefix}\n\nSummary of everything so far"),
             User("recent question"), Asst("recent answer"),
         ]);
 
