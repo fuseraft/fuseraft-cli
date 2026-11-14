@@ -15,7 +15,7 @@ public static partial class InitTemplates
     ///   <item>Planner always reads brief-review before re-handing off (fixes the short-circuit-on-stale-brief bug).</item>
     ///   <item>Planner enforces greenfield rules: manifest required, no test files, verify_command must be a smoke test.</item>
     ///   <item>ImplementationComplete drops the secondary pattern match — only the verify_command itself must succeed.</item>
-    ///   <item>Developer gets a larger per-turn context window for writing multiple new files at once.</item>
+    ///   <item>Developer keeps one more turn of history (MaxTurnAge 6) for writing multiple new files at once.</item>
     ///   <item>Tester receives changes_recent so it can detect Developer fixes and re-run automatically.</item>
     /// </list>
     /// </summary>
@@ -480,7 +480,7 @@ public static partial class InitTemplates
                 Preflight → Planner → Developer → Tester → Reviewer.
                 Optimised for new projects: no PlannerCritic, no Verifier, stricter
                 greenfield Planner rules (manifest required, no test files, smoke-test
-                verify_command), larger Developer context window, and Tester always
+                verify_command), Developer keeps one more turn of history, and Tester always
                 re-runs after Developer fixes.
 
               Security:

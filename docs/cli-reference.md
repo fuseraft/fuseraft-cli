@@ -1418,9 +1418,10 @@ Before writing anything, `init` checks whether the config file or any of its age
 
 | Template | Description |
 |----------|-------------|
-| `solo` | Single capable agent with investigation tooling and lossless compaction — the right starting point for simple tasks |
+| `solo` | Single capable agent with file and shell tools and lossless compaction — the right starting point for simple tasks |
 | `pipeline` | Planner → Developer → Tester → Reviewer as a directed graph; investigation tooling on Developer and Tester; no evidence contracts — use `swe` for production work |
-| `swe` | Full SWE pipeline: Planner → PlannerCritic → Developer → Tester → Reviewer with evidence contracts, hypothesis tracking, periodic Verifier, adaptive ContextBudget, and lossless compaction |
+| `swe` | Full SWE pipeline: Preflight → Planner → PlannerCritic → Developer → Tester → Reviewer with evidence contracts, a periodic Verifier, adaptive ContextBudget, and lossless compaction |
+| `greenfield` | Preflight → Planner → Developer → Tester → Reviewer, tuned for new projects: no PlannerCritic or Verifier, a Planner with greenfield rules (manifest required, smoke-test `verify_command`), and a Tester that re-runs after each Developer fix |
 | `brownfield` | Archaeology-first pipeline as a directed graph: Archaeologist recons the codebase once, then Planner → Developer → Reviewer; Reviewer routes to Developer (REVISION REQUIRED) or Planner (REPLAN REQUIRED) |
 | `research` | Researcher gathers cited findings → Critic adversarially reviews for gaps and unsupported claims → Writer synthesises the final document |
 | `data` | DataEngineer fetches and structures raw data → Analyst computes findings → Reporter synthesises a final document; contracts prevent fabricated analysis |
@@ -1437,7 +1438,7 @@ If `--model` is not provided, `init` first checks the `ModelId` saved in `~/.fus
 |---------------------|---------------|
 | `OPENAI_API_KEY` | `gpt-4o` |
 | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
-| `XAI_API_KEY` | `grok-4` |
+| `XAI_API_KEY` | `grok-4.3` |
 | `GOOGLE_AI_API_KEY` | `gemini-2.5-flash` |
 | `MISTRAL_API_KEY` | `mistral-medium-latest` |
 | `DEEPSEEK_API_KEY` | `deepseek-chat` |
@@ -1460,7 +1461,7 @@ fuseraft init --template solo --no-interactive
 # Standard dev pipeline (graph) — no evidence contracts
 fuseraft init --template pipeline --model claude-sonnet-4-6
 
-# Full SWE pipeline — evidence contracts, hypothesis tracking, periodic Verifier
+# Full SWE pipeline — evidence contracts, periodic Verifier
 fuseraft init --template swe --model claude-sonnet-4-6
 fuseraft init .fuseraft/config/swe.yaml --template swe --model claude-sonnet-4-6
 

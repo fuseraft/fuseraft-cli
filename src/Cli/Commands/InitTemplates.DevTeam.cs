@@ -6,8 +6,8 @@ public static partial class InitTemplates
 {
     /// <summary>
     /// Generates the <c>swe</c> template (replaces <c>devteam</c>):
-    /// Planner → PlannerCritic → Developer → Tester → Reviewer
-    /// state-machine pipeline with evidence contracts, hypothesis tracking, failure handling,
+    /// Preflight → Planner → PlannerCritic → Developer → Tester → Reviewer
+    /// state-machine pipeline with evidence contracts, failure handling,
     /// lossless compaction with adaptive ContextBudget, and a periodic Verifier agent.
     /// Durable execution state and investigation log are injected to all agents by default.
     /// This is the most fully-featured template and serves as the reference implementation.
@@ -547,8 +547,8 @@ public static partial class InitTemplates
             Orchestration:
               Name: Software Engineering Team
               Description: >-
-                Planner → PlannerCritic → Developer → Tester → Reviewer with state machine routing,
-                evidence contracts, hypothesis tracking, adaptive ContextBudget, and self-verification.
+                Preflight → Planner → PlannerCritic → Developer → Tester → Reviewer with state machine routing,
+                evidence contracts, adaptive ContextBudget, and self-verification.
 
               Security:
                 FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
