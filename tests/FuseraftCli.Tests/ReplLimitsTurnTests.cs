@@ -354,6 +354,81 @@ public sealed class ReplLimitsTurnTests : IDisposable
         Assert.Contains("input-token budget", history[^1].Text);
     }
 
+    // ── runaway output ───────────────────────────────────────────────────────
+
+    // An answer, then a loop that would go on until killed; counts the chunks the turn actually reads.
+    private static async IAsyncEnumerable<ChatResponseUpdate> AnswerThenLoop(List<int> read)
+    {
+        yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new TextContent("The third file was httpserver.kiwi. ")] };
+        string[] phrases = ["I did not use tools. ", "Stop. ", "Done. ", "End. ", "The answer is `/#`. ", "Final. ", "No more text. "];
+        for (var i = 0; i < 5_000; i++)
+        {
+            read.Add(i);
+            await Task.Yield();
+            yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new TextContent(phrases[(i * 5 + i / 7) % phrases.Length])] };
+        }
+        yield return Usage(10);
+    }
+
+    [Fact]
+    public async Task ALoopingReply_IsStopped_KeepingTheAnswerAndSayingWhy()
+    {
+        var read = new List<int>();
+        var client = new ScriptedClient(_ => AnswerThenLoop(read));
+        var (ctx, eventsPath) = NewContext(client, repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.InRange(read.Count, 1, 2_500);
+        Assert.Equal(1, client.Streams);
+        var reply = ctx.History[^1];
+        Assert.Equal(ChatRole.Assistant, reply.Role);
+        Assert.StartsWith("The third file was httpserver.kiwi.", reply.Text);
+        Assert.Contains(ReplTurn.StoppedEarlyNotePrefix, reply.Text);
+        Assert.True(reply.Text.Length < RunawayOutput.MinChars + 2_000, $"kept {reply.Text.Length} chars");
+        Assert.Contains(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"runaway_output\""));
+    }
+
+    // ── repeated answer ──────────────────────────────────────────────────────
+
+    // Answers, updates its todo list, then gives the same answer again: the shape live grok-4.7 turns took. Providers
+    // stream the answer apart from the call; `together` sends them in one update, as one could.
+    private static async IAsyncEnumerable<ChatResponseUpdate> AnswerTodoAnswer(bool together)
+    {
+        const string answer = "The third file I read was lib/httpserver.kiwi, lines 1 to 400, as you asked.";
+        var call = new FunctionCallContent("t0", "todo_write", new Dictionary<string, object?> { ["itemsJson"] = "[]" });
+        if (together)
+            yield return new ChatResponseUpdate { Role = ChatRole.Assistant, MessageId = "a1", Contents = [new TextContent(answer), call] };
+        else
+        {
+            yield return new ChatResponseUpdate { Role = ChatRole.Assistant, MessageId = "a1", Contents = [new TextContent(answer)] };
+            yield return new ChatResponseUpdate { Role = ChatRole.Assistant, MessageId = "a1", Contents = [call] };
+        }
+        await Task.Yield();
+        yield return new ChatResponseUpdate { Role = ChatRole.Tool, MessageId = "r1", Contents = [new FunctionResultContent("t0", "[x] done")] };
+        yield return new ChatResponseUpdate { Role = ChatRole.Assistant, MessageId = "a2", Contents = [new TextContent(answer)] };
+        yield return Usage(10);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnAnswerRepeatedAfterBookkeeping_IsKeptOnce(bool together)
+    {
+        var client = new ScriptedClient(_ => AnswerTodoAnswer(together));
+        var (ctx, eventsPath) = NewContext(client, repl: null);
+
+        await RunAsync(ctx);
+
+        var turn = ctx.History.SkipWhile(m => m.Role != ChatRole.User).Skip(1).ToList();
+        var text = string.Concat(turn.Where(m => m.Role == ChatRole.Assistant).Select(m => m.Text));
+        Assert.Equal(1, client.Streams); // no retry: the reply kept its answer
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(text, "The third file I read"));
+        Assert.Equal(1, ResultCount(turn, "t0"));
+        Assert.DoesNotContain(turn, m => m.Role == ChatRole.Assistant && m.Contents.Count == 0);
+        Assert.Contains(await File.ReadAllLinesAsync(eventsPath), l => l.Contains("\"repeated_answer_dropped\""));
+    }
+
     // ── forced tool choice ───────────────────────────────────────────────────
 
     // Refuses any request that forces a tool call, as Anthropic's thinking models do.

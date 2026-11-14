@@ -9,7 +9,11 @@ internal static partial class ReplCommands
 {
     // Leads the user-role message that /compact leaves in place of the summarised history;
     // ReplReplay matches on it to know earlier turns were folded into a summary.
-    internal const string CompactedContextPrefix = "[Compacted context from previous session]";
+    // Says plainly that this is the same conversation, summarized: "from previous session" framed it as a handoff to
+    // take over, and models answered it by calling the compact tool again.
+    internal const string CompactedContextPrefix = "[Earlier messages in this conversation, summarized to save context]";
+    // What sessions saved before that wording carry.
+    internal const string LegacyCompactedContextPrefix = "[Compacted context from previous session]";
 
     // -------------------------------------------------------------------------
     // /plan
@@ -186,6 +190,21 @@ internal static partial class ReplCommands
         return CommandResult.Continue;
     }
 
+    /// <summary>
+    /// Why the model's compact tool shouldn't compact now, or null when it should. Below the auto-compaction threshold a
+    /// compaction only paraphrases away detail the model still has room for, and fuseraft compacts on its own above it;
+    /// models called the tool unprompted, even right after a compaction.
+    /// </summary>
+    internal static string? CompactionNotNeeded(ReplSessionContext ctx)
+    {
+        var used      = (double)ctx.EstimateTokens() / ctx.ContextTokenBudget;
+        var threshold = ctx.Limits.AutoCompactThreshold;
+        return used < threshold
+            ? $"Not compacted: the context is {used:P0} of its budget, and fuseraft compacts it automatically at {threshold:P0}. " +
+              "Nothing to do here; carry on with the user's request."
+            : null;
+    }
+
     private static int EstimateMessageListTokens(IEnumerable<ChatMessage> messages) =>
         messages.Sum(m => TokenEstimator.EstimateTokens(m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars)));
 
@@ -195,13 +214,29 @@ internal static partial class ReplCommands
     // never separated from its FunctionResultContent, which providers reject). Walks backward
     // from the end, accumulating whole groups until at least `preserveTokens` are covered —
     // always keeps at least the single most recent group, even when preserveTokens is 0.
-    private static int FindPreserveTailStart(List<ChatMessage> history, int sysEnd, int preserveTokens)
+    // A most recent group larger than the window on its own (an agentic task run as one long turn) is split instead,
+    // at the start of a tool round, so its older rounds can be summarized: kept whole, it left nothing to compact.
+    internal static int FindPreserveTailStart(List<ChatMessage> history, int sysEnd, int preserveTokens)
     {
+        static int Tokens(ChatMessage m) =>
+            TokenEstimator.EstimateTokens(m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars));
+
         var groupStarts = new List<int>();
         for (int i = sysEnd; i < history.Count; i++)
             if (history[i].Role == ChatRole.User) groupStarts.Add(i);
 
         if (groupStarts.Count == 0) return history.Count;
+
+        // A round starts at an assistant message right after a tool result, so every result in the kept tail has its
+        // call there too, and the tail follows the summary's user message as an assistant turn.
+        var lastStart = groupStarts[^1];
+        int recent = 0;
+        for (int i = history.Count - 1; i > lastStart; i--)
+        {
+            recent += Tokens(history[i]);
+            if (recent >= preserveTokens && history[i].Role == ChatRole.Assistant && history[i - 1].Role == ChatRole.Tool)
+                return i;
+        }
 
         int total = 0;
         int keepFromGroup = groupStarts.Count;
@@ -209,7 +244,7 @@ internal static partial class ReplCommands
         {
             int groupEnd = g + 1 < groupStarts.Count ? groupStarts[g + 1] : history.Count;
             for (int i = groupStarts[g]; i < groupEnd; i++)
-                total += TokenEstimator.EstimateTokens(history[i].Contents.Sum(AgentContextCompactionFilters.EstimateContentChars));
+                total += Tokens(history[i]);
             keepFromGroup = g;
             if (total >= preserveTokens) break;
         }
@@ -240,6 +275,10 @@ internal static partial class ReplCommands
         var tailStart       = FindPreserveTailStart(ctx.History, sysEnd, preserveTokens);
         var toSummarize     = ctx.History.Skip(sysEnd).Take(tailStart - sysEnd).ToList();
         var preservedTail   = ctx.History.Skip(tailStart).ToList();
+        // Split inside a turn: the request it's answering would only survive as the summary's paraphrase.
+        var requestInProgress = tailStart < ctx.History.Count && ctx.History[tailStart].Role != ChatRole.User
+            ? ctx.History.Take(tailStart).LastOrDefault(m => m.Role == ChatRole.User)?.Text
+            : null;
 
         // Recent history alone already fits the preserved window — nothing old enough to
         // fold into a summary, so don't spend an LLM call summarising nothing.
@@ -247,8 +286,14 @@ internal static partial class ReplCommands
 
         var focusNote = string.IsNullOrWhiteSpace(focus) ? string.Empty : $"\n\nFocus for the next session: {focus}";
         var compactionPrompt =
-            "Write a concise handoff document summarising this conversation so a fresh session can continue the work. " +
-            "Include: what was being worked on, key decisions and findings, current state, and what comes next. " +
+            "Summarize the conversation above concisely. Your summary replaces those messages in this same conversation, " +
+            "so the work can carry on from it. " +
+            "Include: what was being worked on, key decisions and findings, and the state as of the last message above. " +
+            "The conversation continues past that point, and those later messages are kept word for word after this handoff, " +
+            "so don't list next steps or describe work as not yet done: the later messages show what happened next. " +
+            "Quote word for word each request and instruction the user gave in the conversation above, including how they " +
+            "asked to be answered. This message is not one of them: don't quote or describe it, or present writing this " +
+            "handoff as the user's request. " +
             "Reference file paths and symbols by name rather than quoting their full content. " +
             "Redact any sensitive values such as API keys or passwords. " +
             "For any facts about files, code, or system state that the assistant stated WITHOUT a corresponding tool call " +
@@ -294,7 +339,8 @@ internal static partial class ReplCommands
 
             var candidate = new List<ChatMessage>();
             if (sys is not null) candidate.Add(sys);
-            candidate.Add(new ChatMessage(ChatRole.User, $"{CompactedContextPrefix}\n\n{summary}"));
+            candidate.Add(new ChatMessage(ChatRole.User, $"{CompactedContextPrefix}\n\n{summary}" +
+                (string.IsNullOrWhiteSpace(requestInProgress) ? "" : $"\n\nThe request being worked on, word for word:\n{requestInProgress}")));
             candidate.AddRange(preservedTail);
 
             // Acceptance bar (mirrors Cline's overflow-recovery contract): a compaction that

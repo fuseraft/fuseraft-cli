@@ -32,7 +32,8 @@ public sealed class ReplSessionPlugin(
         "Call this when accumulated previous turns or tool reads are consuming most of the context window — " +
         "you keep seeing budget-exceeded errors, or repl_session_get_context_status shows the budget mostly used. " +
         "The compaction takes effect immediately: the next turn starts with the compact summary instead of the full history. " +
-        "Safe to call at any point in the session.")]
+        "It only compacts when the context is near its budget, which fuseraft also handles on its own; a summary of earlier " +
+        "messages in the history means that has already happened.")]
     public Task<string> CompactContextAsync(
         [Description("Optional one-line focus for the summary (e.g. 'fix build error in SharePointClient.cs'). " +
                      "Helps the summary emphasise the most relevant prior context.")] string? focus = null,

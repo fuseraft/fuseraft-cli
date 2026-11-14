@@ -1,3 +1,4 @@
+using fuseraft.Infrastructure.Agents;
 using fuseraft.Infrastructure.Plugins;
 
 namespace FuseraftCli.Tests;
@@ -209,5 +210,20 @@ public sealed class TodoPluginTests
         var read = plugin.Read();
         Assert.DoesNotContain("Stale item", read);
         Assert.Contains("Fresh item", read);
+    }
+
+    // Trimming had replaced the model's earlier list with the note, and it sent the note back as its update.
+    [Fact]
+    public void Write_AnElisionPlaceholder_ReturnsTheCurrentList_ReadyToSendBack()
+    {
+        var plugin = new TodoPlugin();
+        plugin.Write("[{\"content\":\"Add crypto::constant_time_equals\",\"status\":\"in_progress\"}]");
+
+        var result = plugin.Write(ElisionMarkers.ArgValueNote(578));
+
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("placeholder", result);
+        var json = result[result.IndexOf("\n[", StringComparison.Ordinal)..].Trim();
+        Assert.Contains("[ ] Add crypto::constant_time_equals", plugin.Write(json.Replace("in_progress", "pending")));
     }
 }

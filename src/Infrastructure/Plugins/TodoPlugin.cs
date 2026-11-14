@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using fuseraft.Infrastructure.Agents;
 
 namespace fuseraft.Infrastructure.Plugins;
 
@@ -50,6 +51,17 @@ public sealed class TodoPlugin
             "status is one of pending, in_progress, completed. Replaces the entire list.")]
         string itemsJson)
     {
+        // Trimming replaces an old todo_write's list with an "[ELIDED …]" note, and a model updating the list copies
+        // it from there (grok-4.7, live). Hand back the list as it stands, so the model can edit it and send it whole.
+        if (ElisionMarkers.PlaceholderTail.IsMatch(itemsJson))
+        {
+            List<TodoItem> current;
+            lock (_lock) current = _items;
+            return "[ERROR] itemsJson is a context-trimming placeholder, not your list: an earlier todo_write's list was " +
+                   "replaced with it to save context. The list as it stands now is below; change what you need and send all of it.\n" +
+                   JsonSerializer.Serialize(current);
+        }
+
         var candidateJson = ExtractJsonArray(TryUnwrapJsonStringEncoding(itemsJson) ?? itemsJson);
 
         List<TodoItem>? parsed;

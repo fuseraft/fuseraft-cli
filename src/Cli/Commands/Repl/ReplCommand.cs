@@ -142,15 +142,17 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         "git_add", "git_commit", "git_stash_list",
     };
 
-    // ReplSessionPlugin split in two: compact_context/get_context_status are load-bearing for
-    // the main loop's own context-budget self-management, so they stay in the default tool set.
+    // ReplSessionPlugin split in two: get_context_status stays in the default tool set so the model can check its
+    // headroom. compact_context doesn't: fuseraft compacts between turns on its own (retried each turn while over the
+    // threshold), a compaction mid-turn can't shrink the request in flight, and models called it unprompted after
+    // answering, which cost a round and repeated the answer.
     // current/list/read_event_log/read_log let the model enumerate and read a *different*
     // session's full event log by ID/prefix match — real cross-session data exposure with no
     // turn-to-turn value for the primary agent, so they're withheld from the default set and
     // handed only to /assist's diagnose loop instead (see SubagentPlugin's diagnosticTools).
     private static readonly HashSet<string> CoreSessionTools = new(StringComparer.OrdinalIgnoreCase)
     {
-        "repl_session_compact_context", "repl_session_get_context_status",
+        "repl_session_get_context_status",
     };
 
     private static readonly HashSet<string> SessionDiagnosticTools = new(StringComparer.OrdinalIgnoreCase)
@@ -859,6 +861,8 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         // Wire the compact_context and get_context_status tools now that ctx is available.
         replSessionPlugin?.SetCompactDelegate(async (focus, ct) =>
         {
+            if (ReplCommands.CompactionNotNeeded(ctx) is { } notNeeded)
+                return notNeeded;
             var (success, errorReason, before, after) =
                 await ReplCommands.CompactHistoryAsync(ctx, focus, ct);
             if (!success)
