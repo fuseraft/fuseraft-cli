@@ -332,7 +332,7 @@ Each entry shows the agent name, turn index, timestamp, files written/deleted, c
 
 Durable investigation memory: records hypotheses, rejected paths, and confirmed root causes so future agents never re-run the same dead-end investigation. All writes go to `~/.fuseraft/state/{project_slug}/investigation-log.json`. The log survives compaction and is injected into every agent's context via the `investigation_log` context source.
 
-**Availability:** Only registered when `ChangeTracking` is present in the orchestration config — same gate as [Changes](#changes). Used by the `brownfield`, `audit`, and `graph` init templates.
+**Availability:** Only registered when `ChangeTracking` is present in the orchestration config — same gate as [Changes](#changes). Used by the `pipeline`, `brownfield`, and `audit` init templates.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
@@ -643,7 +643,7 @@ Shared writable context summary for the current orchestration session. Agents wr
 
 ## Artifact
 
-Fixed-target-path artifact writers for recon and planning-style agents (e.g. the `brownfield` template's Archaeologist, `greenfield`'s Preflight, `audit`'s Auditor and Prioritizer, `devops`'s OpsPlanner, `research`'s Researcher and Reviewer). Each registered name below is the same underlying class bound at construction to exactly one file path, one required format, and one uniquely-named write tool — there is no path parameter, so a call can never be redirected at the project's own source files the way `write_file`/`patch_file` can. Pair with `Capabilities: { FileSystem: [read] }` so the agent can examine the sandbox but can only persist findings through its one write tool.
+Fixed-target-path artifact writers for recon and planning-style agents (e.g. the `brownfield` template's Archaeologist, `greenfield`'s Preflight, `audit`'s Auditor and Prioritizer, `devops`'s OpsPlanner, `research`'s Researcher and Critic). Each registered name below is the same underlying class bound at construction to exactly one file path, one required format, and one uniquely-named write tool — there is no path parameter, so a call can never be redirected at the project's own source files the way `write_file`/`patch_file` can. Pair with `Capabilities: { FileSystem: [read] }` so the agent can examine the sandbox but can only persist findings through its one write tool.
 
 Every instance validates `content` against its required format before writing (`json` parses with `System.Text.Json`, `yaml` with YamlDotNet, `md` has no required structure), and creates parent directories automatically.
 

@@ -29,7 +29,8 @@ public static partial class InitTemplates
               2. Conduct the scan systematically. For each category:
                  - Use grep_file / subagent_explore for pattern matching and structural analysis.
                  - Use shell_run for static analysis tools (e.g. semgrep, bandit, eslint, clippy).
-                 - Use read_file (with startLine/maxLines) to read relevant code sections in full.
+                 - Read relevant code in full with read_file: a file that fits in one call comes back
+                   whole with no range; for a larger one, read one range wide enough to cover the section.
               3. For each issue found, call investigation_record(summary, conclusion) so your
                  findings survive compaction and are visible to subsequent agents.
               4. Call write_file_audit_findings(content: ..., format: "json"). content must be a

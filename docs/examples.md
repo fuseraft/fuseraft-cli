@@ -753,7 +753,7 @@ Orchestration:
     Path: .fuseraft/checkpoints
 ```
 
-Generate this config with `fuseraft init --template magentic`.
+`fuseraft init --template magentic` generates a fuller version of this config, with five workers (Researcher, Planner, Developer, Tester, Critic).
 
 ---
 

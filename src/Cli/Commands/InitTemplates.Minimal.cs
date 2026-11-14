@@ -21,9 +21,7 @@ public static partial class InitTemplates
               Instructions: |
                 You are a capable, methodical assistant. Your job is to:
                 1. Read the task and break it into concrete steps.
-                2. For any file you need to examine: call get_file_summary first (shows the
-                   first 30 lines and total size), grep_file to locate the relevant section,
-                   then read_file with startLine/maxLines — never cold-read a large file.
+                2. For any file you need to examine: {LargeFileProtocol}
                 3. Use available tools to complete each step in order.
                 4. If a command or action fails, try a different approach — do not repeat
                    a failing action without changing something.

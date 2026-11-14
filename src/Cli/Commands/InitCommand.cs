@@ -56,13 +56,13 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
     private static readonly TemplateInfo[] Templates =
     [
         new("solo",       "Solo Agent",
-            "Single capable agent with investigation tooling and lossless compaction — the right starting point for simple tasks"),
+            "Single capable agent with file and shell tools and lossless compaction — the right starting point for simple tasks"),
         new("pipeline",   "Pipeline",
             "Planner → Developer → Tester → Reviewer as a directed graph with investigation tooling — no evidence contracts; use swe for production work"),
         new("swe",        "Software Engineering Team",
-            "Planner → PlannerCritic → Developer → Tester → Reviewer — full safeguards: evidence contracts, hypothesis tracking, periodic Verifier, lossless compaction"),
+            "Preflight → Planner → PlannerCritic → Developer → Tester → Reviewer — full safeguards: evidence contracts, periodic Verifier, adaptive ContextBudget, lossless compaction"),
         new("greenfield", "Greenfield Engineering Team",
-            "Planner → Developer → Tester → Reviewer — optimised for new projects: no PlannerCritic, no Verifier, greenfield-aware Planner, larger Developer context window"),
+            "Preflight → Planner → Developer → Tester → Reviewer — optimised for new projects: no PlannerCritic, no Verifier, greenfield-aware Planner, Developer keeps one more turn of history"),
         new("brownfield", "Brownfield Pipeline",
             "Archaeologist recons the codebase once → Planner → Developer → Reviewer as a graph; multi-target back-edges (REVISION REQUIRED → Developer, REPLAN REQUIRED → Planner)"),
         new("research",   "Research Team",

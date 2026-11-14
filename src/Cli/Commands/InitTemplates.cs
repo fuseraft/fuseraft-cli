@@ -46,16 +46,21 @@ public static partial class InitTemplates
     private static string EpAgent(string? endpoint) =>
         string.IsNullOrWhiteSpace(endpoint) ? string.Empty : $"\n  Endpoint: {endpoint}";
 
-    // Large-file reading protocol — canonical per-role wording shared across all templates.
-    // Update here; each template file references the constant rather than embedding the prose.
+    // File-reading protocol, the same rule the REPL prompt gives: read a file whole when it fits, and only range a
+    // file too big for that. Told "get_file_summary first, then startLine/maxLines; never cold-read", grok-4.7 read
+    // files that fit in one call in 8–80 line slices, one 275-line doc nine times.
+    private const string ReadWholeRule =
+        "call read_file with no range: a file that fits in one call (about 20,000 chars, a few hundred lines) comes back whole, and most do — read those in one call, not in pieces. " +
+        "Only a file too big for that needs a range: read_file then shows its first 30 lines and line count; ";
     private const string LargeFileProtocol =
-        "call get_file_summary first (shows first 30 lines and file size), grep_file to locate the relevant section, then read_file with startLine/maxLines for that section only — files can exceed 10,000 lines; never cold-read a large file in full.";
+        ReadWholeRule + "use grep_file to find the section you need, then read one range wide enough to cover it (a few hundred lines), not a series of small windows.";
     private const string LargeFileProtocolArchaeologist =
-        "call get_file_summary first (shows the first 30 lines and total line count), grep_file to locate key structures (classes, entry points, imports), then read_file with startLine/maxLines for those sections only — files can exceed 10,000 lines; never cold-read a large file in full.";
+        ReadWholeRule + "use grep_file to find its key structures (classes, entry points, imports), then read one wide range around each (a few hundred lines), not a series of small windows.";
     private const string LargeFileProtocolDeveloper =
-        "call get_file_summary to check its size, grep_file to locate the exact section to edit, then read_file with startLine/maxLines for that section only — never cold-read a large file in full.";
+        ReadWholeRule + "use grep_file to find the section to edit, then read one range wide enough to cover it. " +
+        "A file you read this session and haven't changed since needn't be read again: take patch_file's oldText from that read.";
     private const string LargeFileProtocolReviewer =
-        "call get_file_summary first, grep_file to locate the section to inspect, then read_file with startLine/maxLines — never cold-read a large file in full.";
+        ReadWholeRule + "use grep_file to find the section to inspect, then read one range wide enough to cover it.";
 
     // Guards against the most common verify_command failure mode: backgrounding a
     // build-and-run wrapper (go run, npm run dev, cargo run) leaves an orphaned child
