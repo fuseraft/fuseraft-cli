@@ -65,7 +65,9 @@ internal sealed class SystemPromptBuilder
         if (toolCount == 0) return this;
 
         _sb.Append(
-            "\n- For large files: call get_file_summary first (shows first 30 lines and file size), grep_file to locate the relevant section, then read_file with startLine/maxLines for that section only — never cold-read a large file in full.\n" +
+            "\n- Reading files: read_file with no range returns a file whole when it fits in one call (about 20,000 chars, a few hundred lines), and most files do. Read those in one call, not in pieces. " +
+            "Only a file too big for that needs a range: find the part you need with grep_file or search_symbol, then read one range wide enough to cover it (a few hundred lines), not a series of 20–50 line windows.\n" +
+            "- A file you read this session and haven't changed since is still verified while its content is in your context: take patch_file's oldText from that read instead of reading the lines again. Re-read when the file changed, or when its result was elided.\n" +
             "- Context may contain [UNVERIFIED ASSUMPTION: ...] markers from a prior compaction — treat these as unconfirmed claims that require tool verification before acting on them.\n" +
             "\nBefore signaling completion, verify:\n" +
             "  Tools & verification:\n" +
@@ -103,7 +105,8 @@ internal sealed class SystemPromptBuilder
                 $"Started:    {sessionStarted}\n" +
                 $"Snapshot:   {snapshotPath}\n" +
                 $"Event log:  {FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalReplEventsLog, sessionId, FuseraftPaths.ProjectSlug(cwd))}\n" +
-                $"Use repl_session_compact_context to free up context budget and repl_session_get_context_status to check current usage.");
+                $"Use repl_session_get_context_status to check how much of the context budget is used. fuseraft compacts older " +
+                $"messages on its own when it runs low.");
         }
 
         // Orient the agent to the .fuseraft/ layout so it never wastes context

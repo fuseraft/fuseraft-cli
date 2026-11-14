@@ -41,4 +41,26 @@ public class UsageDetailsCacheExtensionsTests
         Assert.Equal(5_000, new UsageDetails { InputTokenCount = 5_000 }.UncachedInputTokens());
         Assert.Equal(0, ((UsageDetails?)null).UncachedInputTokens());
     }
+
+    [Fact]
+    public void PromptTokens_IsTheWholePrompt_ForBothProviderFamilies()
+    {
+        var openAi = new UsageDetails
+        {
+            InputTokenCount  = 60_000,
+            AdditionalCounts = new() { [CacheUsageBackfillChatClient.CacheReadInputTokensKey] = 58_000 },
+        };
+        var anthropic = new UsageDetails
+        {
+            InputTokenCount  = 300,
+            AdditionalCounts = new()
+            {
+                ["CacheCreationInputTokens"] = 1_200,
+                [CacheUsageBackfillChatClient.CacheReadInputTokensKey] = 58_500,
+            },
+        };
+
+        Assert.Equal(60_000, openAi.PromptTokens());
+        Assert.Equal(60_000, anthropic.PromptTokens());
+    }
 }

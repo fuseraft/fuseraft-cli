@@ -140,15 +140,25 @@ internal static class ProcessHelper
         // inheriting the terminal and blocking indefinitely (git credential helpers, pagers).
         process.StandardInput.Close();
 
-        // Read stdout and stderr concurrently to avoid buffer-deadlocks.
+        // Read stdout and stderr concurrently to avoid buffer-deadlocks. They're collected as they arrive, not read to
+        // the end, so a command that times out still shows what it printed: which test was running, how far a build got.
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         if (timeoutSeconds > 0)
             cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
-        var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
+        var stdoutText = new System.Text.StringBuilder();
+        var stderrText = new System.Text.StringBuilder();
+        var stdoutTask = CollectAsync(process.StandardOutput, stdoutText);
+        var stderrTask = CollectAsync(process.StandardError, stderrText);
 
-        static async Task KillAndDrainAsync(System.Diagnostics.Process p, Task<string> o, Task<string> e, int timeoutSeconds)
+        ProcessResult TimedOut() => new(
+            Snapshot(stdoutText),
+            Snapshot(stderrText).TrimEnd() + (stderrText.Length > 0 ? "\n" : "") +
+                PluginResult.Timeout($"Process exceeded {timeoutSeconds}s limit." +
+                    (stdoutText.Length + stderrText.Length > 0 ? " The output above is what it printed before it was stopped." : "")),
+            -1);
+
+        static async Task KillAndDrainAsync(System.Diagnostics.Process p, Task o, Task e, int timeoutSeconds)
         {
             try { p.Kill(entireProcessTree: true); } catch { /* best effort */ }
             // Give the readers a short window to drain after the kill, then abandon them.
@@ -173,10 +183,10 @@ internal static class ProcessHelper
             {
                 // Something is still holding the pipe open; kill the process tree and bail.
                 await KillAndDrainAsync(process, stdoutTask, stderrTask, timeoutSeconds);
-                return new ProcessResult(string.Empty, PluginResult.Timeout($"Process exceeded {timeoutSeconds}s limit."), -1);
+                return TimedOut();
             }
 
-            return new ProcessResult(await stdoutTask, await stderrTask, process.ExitCode);
+            return new ProcessResult(Snapshot(stdoutText), Snapshot(stderrText), process.ExitCode);
         }
         catch (OperationCanceledException)
         {
@@ -184,8 +194,26 @@ internal static class ProcessHelper
             // The caller cancelled (Ctrl+C in the REPL): the process tree is gone, so the
             // cancellation can go on up. Before, it left the child running and the turn stuck.
             cancellationToken.ThrowIfCancellationRequested();
-            return new ProcessResult(string.Empty, PluginResult.Timeout($"Process exceeded {timeoutSeconds}s limit."), -1);
+            return TimedOut();
         }
+    }
+
+    // Appends what the stream yields until it ends; a stream closed or disposed under it just ends the collection.
+    private static async Task CollectAsync(StreamReader reader, System.Text.StringBuilder into)
+    {
+        var buffer = new char[4096];
+        try
+        {
+            int n;
+            while ((n = await reader.ReadAsync(buffer.AsMemory()).ConfigureAwait(false)) > 0)
+                lock (into) into.Append(buffer, 0, n);
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or IOException or InvalidOperationException) { }
+    }
+
+    private static string Snapshot(System.Text.StringBuilder text)
+    {
+        lock (text) return text.ToString();
     }
 
     /// <summary>
@@ -310,12 +338,42 @@ internal readonly record struct ProcessResult(string Stdout, string Stderr, int 
             var head    = failOutput[..FailureHeadChars];
             var tail    = failOutput[^FailureTailChars..];
             var omitted = failOutput.Length - FailureHeadChars - FailureTailChars;
+            var failures = FailureLines(failOutput[FailureHeadChars..^FailureTailChars]);
             failOutput  = head
-                + $"\n\n[... {omitted:N0} chars omitted — fix the first errors above, or use grep/sed to inspect the full log ...]\n\n"
-                + tail;
+                + $"\n\n[... {omitted:N0} chars omitted — fix the first errors above, or use grep/sed to inspect the full log ...]\n"
+                + (failures.Length > 0 ? $"[failure lines from the omitted part:]\n{failures}\n" : "")
+                + "\n" + tail;
         }
 
         return failOutput;
+    }
+
+    // A failing test in the middle of a long log used to be cut away with the rest of it, and the model reran the
+    // suite through a filter to find it. Lines that read like failures are kept from what's omitted.
+    private static readonly System.Text.RegularExpressions.Regex FailureLine = new(
+        @"\b(FAIL(ED|URE)?|ERROR|[Ee]rror|[Ee]xception|[Pp]anic|[Aa]ssert\w*)\b",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+    private const int MaxFailureLines     = 40;
+    private const int MaxFailureLineChars = 300;
+    private const int MaxFailureLinesChars = 4_000;
+
+    internal static string FailureLines(string omitted)
+    {
+        var kept = new System.Text.StringBuilder();
+        var count = 0;
+        foreach (var raw in omitted.Split('\n'))
+        {
+            var line = raw.TrimEnd();
+            if (!FailureLine.IsMatch(line)) continue;
+            if (line.Length > MaxFailureLineChars) line = line[..MaxFailureLineChars] + "…";
+            if (++count > MaxFailureLines || kept.Length + line.Length > MaxFailureLinesChars)
+            {
+                kept.Append("…");
+                break;
+            }
+            kept.Append(line).Append('\n');
+        }
+        return kept.ToString().TrimEnd();
     }
 }
 

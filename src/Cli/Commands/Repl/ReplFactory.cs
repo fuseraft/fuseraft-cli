@@ -132,13 +132,13 @@ internal static class ReplFactory
             // that returns hundreds of KB, say — rides along unbounded for the rest of the
             // turn instead of being caught by TrimInTurnContext's Phase 2 (which truncates
             // even the most recent trimmable result once the turn is over budget).
-            var maxInTurnChars = maxContextChars > 0 ? maxContextChars : DefaultMaxInTurnChars;
+            var (maxInTurnChars, triggerChars) = InTurnLimits(maxContextChars, config.ModelId, limits?.ContextBudget);
 
             client = middleware.BuildMiddlewareChain(
                 chatClient: client, config: agentConfig, chatOptions: null,
                 maxContextChars: maxContextChars, maxInTurnChars: maxInTurnChars, maxInTurnToolPairs: InTurnToolPairLimit,
                 toolSchemaChars: toolSchemaChars, maxPayloadBytes: resolved.MaxPayloadBytes,
-                hasHandoff: false, emitter: emitter);
+                hasHandoff: false, emitter: emitter, triggerChars: triggerChars);
 
             // Directly under the function-invocation loop, so each of its rounds is counted once —
             // and above the adaptive-trim retry, which re-sends one round rather than starting another.
@@ -171,9 +171,19 @@ internal static class ReplFactory
     // tool-call/result groups in full per inner LLM call within a single REPL turn.
     private const int InTurnToolPairLimit = 12;
 
-    // Matches AgentFactory.DefaultMaxInTurnChars — conservative floor for the in-turn char
-    // budget when the model's own context window isn't known (see BuildClient).
-    private const int DefaultMaxInTurnChars = 200_000;
+    /// <summary>
+    /// The in-turn char cap and the size at which older tool results start being elided. With the model's window
+    /// known, both are that window. Without it, both follow the REPL's own working budget for the model
+    /// (repl.contextBudget, or the family estimate), as compaction and the context warning do. A fixed 200K-char
+    /// fallback used to apply here: with grok-4.7 (no registry size, a 150K-token REPL budget) it elided every read but
+    /// the last 12 rounds at about 45K tokens, and the model spent its turn reading the same files again.
+    /// </summary>
+    internal static (int MaxInTurnChars, int TriggerChars) InTurnLimits(int maxContextChars, string? modelId, int? contextBudget)
+    {
+        if (maxContextChars > 0) return (maxContextChars, maxContextChars);
+        var budgetChars = TokenEstimator.EstimateChars(ModelContextWindow.GetBudget(modelId, contextBudget));
+        return (budgetChars, budgetChars);
+    }
 
     internal static async Task<(UserConfig? Config, string? ApiKey, bool SelectedFromList)> RunSetupWizardAsync(
         string? currentModelId, UserConfig? currentCfg)

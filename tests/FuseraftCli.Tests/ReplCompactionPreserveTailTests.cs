@@ -185,4 +185,66 @@ public sealed class ReplCompactionPreserveTailTests : IDisposable
         Assert.True(wide > atDefault, $"0.5 kept {wide}, default kept {atDefault}");
         Assert.Equal(1, narrow); // the most recent group is always kept, however small the ratio
     }
+
+    // One request answered by many tool rounds, as an agentic task runs: a single turn-group far larger than the window.
+    private const string RequestMarker = "UNIQUE-REQUEST: implement it, then tell me plainly what you couldn't check";
+
+    private static void AddOneLongTurn(ReplSessionContext ctx, int rounds = 20)
+    {
+        ctx.History.Add(new ChatMessage(ChatRole.User, RequestMarker));
+        for (int i = 0; i < rounds; i++)
+        {
+            ctx.History.Add(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent($"c{i}", "read_file", new Dictionary<string, object?> { ["path"] = $"f{i}" })]));
+            ctx.History.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent($"c{i}", new string('r', 25_000))]));
+        }
+    }
+
+    [Fact]
+    public async Task CompactHistoryAsync_SplitsOneLongTurn_KeepingItsRecentRoundsAndTheRequestWordForWord()
+    {
+        var client = new ScriptedStubChatClient(_ => "concise handoff summary");
+        var ctx = NewContext(client);
+        AddOneLongTurn(ctx);
+
+        var (success, error, _, _) = await ReplCommands.CompactHistoryAsync(ctx, focus: null, CancellationToken.None);
+
+        Assert.True(success, error);
+        var body = ctx.History.Where(m => m.Role != ChatRole.System).ToList();
+        Assert.Equal(ChatRole.User, body[0].Role);
+        Assert.Contains(RequestMarker, body[0].Text);
+        // The kept rounds start with a call, and every kept result has its call.
+        Assert.Equal(ChatRole.Assistant, body[1].Role);
+        var calls   = body.SelectMany(m => m.Contents).OfType<FunctionCallContent>().Select(c => c.CallId).ToHashSet();
+        var results = body.SelectMany(m => m.Contents).OfType<FunctionResultContent>().Select(r => r.CallId).ToList();
+        Assert.All(results, id => Assert.Contains(id, calls));
+        Assert.Contains("c19", results);
+        Assert.DoesNotContain("c0", results);
+    }
+
+    [Fact]
+    public async Task CompactHistoryAsync_AsksTheSummaryToQuoteTheUsersRequests()
+    {
+        string? prompt = null;
+        var ctx = NewContext(new ScriptedStubChatClient(m => { prompt = m.Last().Text; return "summary"; }));
+        AddSyntheticHistory(ctx);
+
+        await ReplCommands.CompactHistoryAsync(ctx, focus: null, CancellationToken.None);
+
+        Assert.Contains("each request and instruction the user gave in the conversation above", prompt);
+        Assert.Contains("This message is not one of them", prompt);
+        Assert.Contains("later messages are kept word for word after this handoff", prompt);
+    }
+
+    [Fact]
+    public void CompactionNotNeeded_BelowTheAutoCompactThreshold_SaysSo_AndAboveItDoesNot()
+    {
+        var ctx = NewContext(new ScriptedStubChatClient(_ => "summary"));
+        ctx.History.Add(new ChatMessage(ChatRole.User, "hi"));
+
+        Assert.Contains("Not compacted", ReplCommands.CompactionNotNeeded(ctx));
+
+        AddSyntheticHistory(ctx);
+        Assert.Null(ReplCommands.CompactionNotNeeded(ctx));
+    }
 }

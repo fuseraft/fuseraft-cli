@@ -124,13 +124,15 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     private string? _sessionTempDir;
 
     // Per-turn command dedup: tracks only the most recently run command.
-    // If the exact same command is called again with no other shell command in between,
+    // If the exact same command is called again with no other tool call in between,
     // the cached result is returned so the agent can act on the failure rather than
     // re-running an identical command in a tight loop.
-    // Any other intervening shell_run clears the entry, so file changes made via shell
-    // (cat >, tee, heredocs, etc.) are always reflected on the next verify run.
+    // Any other call in between (an edit, a git checkout, another command) means the
+    // command may now do something else, so it runs again.
     private string? _lastRunKey;
     private string? _lastRunOutput;
+    private long    _lastRunCall;
+    private readonly ToolCallSequence _toolCalls;
 
     void ITurnResettable.BeginTurn()
     {
@@ -321,8 +323,9 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         try { originalProcess.Dispose(); } catch { /* already exited */ }
     }
 
-    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null, bool blockCredentialFiles = true, IReadOnlyList<string>? denyPatterns = null)
+    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null, bool blockCredentialFiles = true, IReadOnlyList<string>? denyPatterns = null, ToolCallSequence? toolCalls = null)
     {
+        _toolCalls = toolCalls ?? ToolCallSequence.Shared;
         _blockCredentialFiles = blockCredentialFiles;
         _sandboxRoot    = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _denyMatcher    = FileSystemSandbox.BuildDenyMatcher(denyPatterns);
@@ -416,15 +419,15 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var denial = ValidateWorkingDirectory(workingDirectory, out var resolvedDir);
         if (denial is not null) return denial;
 
-        // Per-turn command dedup: if the exact same command was the last command run this
-        // turn, return the cached output. Re-running an identical command back-to-back
-        // almost always means the agent is looping — returning the cached result breaks
-        // the loop and keeps the failure in context where the agent can act on it.
-        // Any other intervening shell_run clears the cached entry so that file changes
-        // made via shell (cat >, tee, heredocs, etc.) are reflected on the next verify run.
-        // Applies regardless of quiet — the loop-detection concern is the same either way.
+        // Per-turn command dedup: re-running an identical command back-to-back almost always
+        // means the agent is looping — returning the cached result breaks the loop and keeps
+        // the failure in context where the agent can act on it. Only back-to-back: a live run
+        // patched a test between two identical runs and was handed the old failure.
+        // ToolCallSequence counts this call too, so "nothing in between" is a difference of one;
+        // with no invoker counting calls (tests, ProbePlugin) it's zero.
         var cacheKey = command.Trim() + "\0" + (resolvedDir ?? "(default)") + "\0" + shellChoice;
-        if (_lastRunKey == cacheKey)
+        var thisCall = _toolCalls.Current;
+        if (_lastRunKey == cacheKey && thisCall - _lastRunCall <= 1)
             return $"[Command already ran this turn — cached output follows]\n\n{_lastRunOutput}";
 
         ProcessResult result;
@@ -460,6 +463,7 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var output = Present(result, resolvedDir);
         _lastRunKey    = cacheKey;
         _lastRunOutput = output;
+        _lastRunCall   = thisCall;
 
         if (_eventSink is not null && IsBuildCommand(command))
         {

@@ -58,10 +58,14 @@ internal static class AgentContextCompactionFilters
 
     // How far ApplyInTurnFilters' sliding window and char-budget trim move their cut points at a
     // time once a turn is past budget (its cacheStep). Every move rewrites a message near the
-    // start of the request and costs a full prompt-cache miss, so moving 8 at a time instead of
-    // 1 per round lets roughly 7 of every 8 rounds hit the cache. Larger steps keep up to
+    // start of the request and costs a full prompt-cache miss, so moving 16 at a time instead of
+    // 1 per round lets roughly 15 of every 16 rounds hit the cache. Larger steps keep up to
     // step - 1 extra groups per request or trim up to step - 1 results early.
-    internal const int CacheStableTrimStep = 8;
+    // Not 8: xAI reuses nothing past the first changed message, so each move re-bills the whole
+    // request (85–127K tokens on grok-4.7) at the uncached price, about 4x the cached one. Moving
+    // 8 at a time cost more in misses than the dropped groups saved, and the misses alone ran a
+    // bug hunt into the 1M uncached-tokens-per-turn stop.
+    internal const int CacheStableTrimStep = 16;
 
     /// <summary>
     /// Truncates verbose content in intermediate (tool-calling) assistant messages:
@@ -827,16 +831,19 @@ internal static class AgentContextCompactionFilters
         messages = DropSupersededWritePairs(messages, DefaultMinSupersededDropChars);
         messages = DropSupersededObservationalPairs(messages, DefaultMinSupersededDropChars);
         messages = CompressSupersededShellPairs(messages);
-        messages = TruncateIntermediateAssistantReasoning(messages);
 
-        if (maxInTurnToolPairs > 0)
+        // Nothing below runs until the turn nears its budget. Shortening every older call's arguments from the start
+        // filled the history with writes whose content was only an "[ELIDED …]" note, and grok-4.7 wrote that note as
+        // the whole content of new files and patches, 7 times in 5 minutes. Below the budget the request also stays
+        // byte-identical round to round, so the provider's prompt cache keeps serving it.
+        var list = messages as IList<ChatMessage> ?? messages.ToList();
+        var nearBudget = triggerChars <= 0 || EstimateTotalChars(list) >= triggerChars * CompactionTriggerRatio;
+        messages = nearBudget ? TruncateIntermediateAssistantReasoning(list) : list;
+
+        if (maxInTurnToolPairs > 0 && nearBudget)
         {
-            var list = messages as IList<ChatMessage> ?? messages.ToList();
-            var shouldCollapse = triggerChars <= 0
-                || EstimateTotalChars(list) >= triggerChars * CompactionTriggerRatio;
-            messages = shouldCollapse
-                ? await KeepLastToolPairs(list, StableWindowSize(list, maxInTurnToolPairs, cacheStep), cancellationToken)
-                : list;
+            list = messages as IList<ChatMessage> ?? messages.ToList();
+            messages = await KeepLastToolPairs(list, StableWindowSize(list, maxInTurnToolPairs, cacheStep), cancellationToken);
         }
 
         if (maxInTurnChars > 0)

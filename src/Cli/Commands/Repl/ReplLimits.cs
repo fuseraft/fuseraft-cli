@@ -29,6 +29,8 @@ internal sealed record ReplLimits
     internal int    MaxStreamRetries        { get; init; } = DefaultMaxStreamRetries;
     internal int    MaxTurnInputTokens      { get; init; } = DefaultMaxTurnInputTokens;
     internal int    MaxTodoNudges           { get; init; } = ReplTurn.MaxTodoCorrectionRounds;
+    /// <summary>The user's repl.contextBudget, or null for the model family's estimate (see ModelContextWindow).</summary>
+    internal int?   ContextBudget           { get; init; }
 
     internal static ReplLimits From(ReplDefaultsConfig? cfg)
     {
@@ -51,6 +53,7 @@ internal sealed record ReplLimits
                 ? Math.Clamp(r, PreserveTailRatioMin, PreserveTailRatioMax) : DefaultPreserveTailRatio,
             MaxConsecutiveToolFailures = cfg.MaxConsecutiveToolFailures is { } f
                 ? Math.Clamp(f, ToolFailuresMin, ToolFailuresMax) : ReplTurn.MaxConsecutiveToolFailures,
+            ContextBudget          = cfg.ContextBudget,
             MaxIdenticalToolCalls  = hard,
             WarnIdenticalToolCalls = warn,
             MaxStreamRetries = cfg.MaxStreamRetries is { } s

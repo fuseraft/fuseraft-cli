@@ -178,7 +178,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // own read/write/patch pipeline, from one configured instance rather than two.
     internal Matcher? DenyMatcher => _denyMatcher;
 
-    [Description("Read text file content. Use startLine+maxLines for large files. Binary files rejected.")]
+    [Description("Read text file content. With no range, a file that fits in one call comes back whole; most do. Pass startLine+maxLines only for a file too big for that. Binary files rejected.")]
     public async Task<string> ReadFileAsync(
         [Description("File path.")] string path,
         [Description("1-based start line.")] int startLine = 1,
@@ -297,8 +297,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         {
             _onCacheHit?.Invoke();
             return PluginResult.Info(
-                $"'{resolved}' already read this turn — content is in context. " +
-                $"Use grep_file to locate a section, then read_file with startLine/maxLines for a targeted excerpt. " +
+                $"'{resolved}' already read this turn and unchanged since — work from that read, which is in context. " +
                 $"If that content was elided from your context, call read_file again to get it.");
         }
 

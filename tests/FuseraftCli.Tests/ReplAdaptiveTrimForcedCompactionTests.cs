@@ -170,4 +170,25 @@ public sealed class ReplAdaptiveTrimForcedCompactionTests : IDisposable
         var compactionCount = events.Count(l => l.Contains("\"event_type\":\"compaction\""));
         Assert.Equal(1, compactionCount);
     }
+
+    // A failed auto-compaction used to disarm the check for good: the context kept growing until TrimHistory dropped
+    // the oldest turns, the user's request among them, without a summary.
+    [Fact]
+    public async Task AutoCompaction_IsTriedAgain_AfterAnEarlierAttemptAtTheThreshold()
+    {
+        var ctx = NewContext();
+        for (int i = 0; i < 10; i++)
+        {
+            ctx.History.Add(new ChatMessage(ChatRole.User, new string('a', 25_000)));
+            ctx.History.Add(new ChatMessage(ChatRole.Assistant, new string('b', 25_000)));
+        }
+        ctx.ContextWarningShown = true;
+
+        Assert.True(await ReplTurn.ExecuteAsync(
+            ctx, "hello", isStepRequest: false, capturePlan: false, activeStep: null, CancellationToken.None));
+
+        var events = await File.ReadAllLinesAsync(ctx.EventsPath);
+        Assert.Equal(1, events.Count(l => l.Contains("\"event_type\":\"compaction\"")));
+        Assert.DoesNotContain(events, l => l.Contains("\"event_type\":\"history_trimmed\""));
+    }
 }

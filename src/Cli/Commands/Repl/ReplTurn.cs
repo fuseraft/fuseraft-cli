@@ -898,10 +898,25 @@ internal static class ReplTurn
         var lastRepeatedToolCallDetail = stream.LastRepeatedToolCallDetail;
         var repeatedToolCallLimit      = stream.RepeatedToolCallLimit;
         var hitTurnTokenBudget         = stream.HitTurnTokenBudget;
+        var hitRunawayOutput           = stream.HitRunawayOutput;
         // The turn was cut off by one of its own guards rather than finishing. Its tool calls and
         // results are kept even when no closing text arrived, and no correction turn follows —
         // re-prompting the model is exactly the spending the guard just stopped.
-        var stoppedEarly = hitConsecutiveFailureLimit || hitRepeatedToolCallLimit || hitTurnTokenBudget;
+        var stoppedEarly = hitConsecutiveFailureLimit || hitRepeatedToolCallLimit || hitTurnTokenBudget || hitRunawayOutput;
+
+        // An answer given again after nothing but bookkeeping is kept once, in the history and in the reply. A client
+        // fed by the bridge has already shown both as they streamed.
+        if (!stoppedEarly && RepeatedAnswer.Find(rawUpdates) is { } repeat)
+        {
+            DropTrailingText(rawUpdates, repeat.Length);
+            rawUpdates.RemoveAll(u => !u.Contents.Any(c => c is not UsageContent));
+            // The first answer reaches the reply only when it streamed apart from its tool call; when it came in the
+            // same update, the repeat is the reply's only copy, so it stays.
+            var trimmed = responseText.TrimEnd();
+            if (trimmed.EndsWith(repeat.TrimEnd(), StringComparison.Ordinal) && trimmed[..^repeat.TrimEnd().Length].Trim().Length > 0)
+                responseText = trimmed[..^repeat.TrimEnd().Length].TrimEnd();
+            await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new { message = "repeated_answer_dropped" });
+        }
 
         responseText = SanitizeAssistantResponse(responseText, out var warningMessage);
         if (!capturePlan && responseText.Length == 0 && !stoppedEarly)
@@ -960,6 +975,7 @@ internal static class ReplTurn
             // it with an assistant message so the history keeps its user/assistant alternation.
             if (stoppedEarly)
                 AppendStoppedEarlyNote(ctx.History,
+                    hitRunawayOutput           ? "its reply stopped saying anything new and kept repeating itself, so fuseraft cut it off; what came before the repetition is kept" :
                     hitTurnTokenBudget         ? $"it reached the per-turn uncached input-token budget ({ctx.Limits.MaxTurnInputTokens:N0}, repl.maxTurnInputTokens)" :
                     hitConsecutiveFailureLimit ? $"{ctx.Limits.MaxConsecutiveToolFailures} rounds of tool calls in a row failed" :
                                                  "the same tool calls kept repeating without progress");
@@ -1095,6 +1111,16 @@ internal static class ReplTurn
                 AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(repeatMsg)}[/]");
         }
 
+        if (hitRunawayOutput)
+        {
+            await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new { message = "runaway_output" });
+            const string runawayMsg = "Stopped the reply: it kept repeating itself instead of finishing. What came before the repetition was kept.";
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "warning", text = runawayMsg });
+            else
+                AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(runawayMsg)}[/]");
+        }
+
         // Per-turn input-token budget (see ReplLimits.MaxTurnInputTokens) — the one guard that
         // also stops a turn that is making progress, just too expensively.
         if (hitTurnTokenBudget)
@@ -1133,7 +1159,11 @@ internal static class ReplTurn
         // trimming, which caps it near maxInTurnChars no matter how large ctx.History grows, so
         // on its own it never reaches the threshold and every later turn resends a history that
         // has to be re-trimmed — with the prompt-cache misses that brings — on every round.
-        if (!ctx.ContextWarningShown && !isStepRequest && !capturePlan && (responseText.Length > 0 || stoppedEarly))
+        // With auto-compaction on, the check runs after every turn while the context is over the threshold, not once:
+        // a compaction that failed (or found nothing it could fold) must be retried, or the history grows until
+        // TrimHistory below drops the oldest turns, the user's request among them, without a summary.
+        var autoCompactOn = ctx.UserCfg?.Repl?.AutoCompact ?? true;
+        if ((!ctx.ContextWarningShown || autoCompactOn) && !isStepRequest && !capturePlan && (responseText.Length > 0 || stoppedEarly))
         {
             var isActual  = ctx.LastActualContextTokens >= postEst;
             var effective = Math.Max(ctx.LastActualContextTokens ?? 0, postEst);
@@ -1141,7 +1171,7 @@ internal static class ReplTurn
             if (pct >= ctx.Limits.AutoCompactThreshold)
             {
                 ctx.ContextWarningShown = true;
-                var autoCompact = ctx.UserCfg?.Repl?.AutoCompact ?? true;
+                var autoCompact = autoCompactOn;
                 await ctx.Emitter.EmitAsync(EventTypes.ContextWarning, turn: ctx.TurnIndex, payload: new
                 {
                     estimated_tokens = effective,
@@ -1176,7 +1206,9 @@ internal static class ReplTurn
                                 $"[dim yellow]  ⚡ Context was {pct:P0} full — auto-compacted[/] " +
                                 $"[dim]({beforeTok:N0} → {afterTok:N0} tok)[/]");
                     }
-                    else if (!ctx.JsonMode)
+                    else if (ctx.JsonMode)
+                        ReplJsonBridge.Emit(new { type = "warning", text = $"Auto-compaction failed: {compactError ?? "unknown error"}." });
+                    else
                     {
                         AnsiConsole.MarkupLine(
                             $"[red]  Auto-compaction failed:[/] {Markup.Escape(compactError ?? "unknown error")} " +
@@ -1634,7 +1666,8 @@ internal static class ReplTurn
         bool HitRepeatedToolCallLimit,
         string? LastRepeatedToolCallDetail,
         int RepeatedToolCallLimit,
-        bool HitTurnTokenBudget)
+        bool HitTurnTokenBudget,
+        bool HitRunawayOutput = false)
     {
         // toolCallsThisTurn is preserved from the aborted attempt (not always empty) so a
         // step halted mid-stream can still report which tools it managed to call before
@@ -1712,6 +1745,9 @@ internal static class ReplTurn
         // MoveNextAsync, which is what would make the next model call.
         var turnTokenBudgetReached         = false;
         var hitTurnTokenBudget             = false;
+        var hitRunawayOutput               = false;
+        var runawayCut                     = 0;
+        var nextRunawayCheck               = RunawayOutput.MinChars;
 
         var reqCts    = new CancellationTokenSource();
         ctx.ActiveCts = reqCts;
@@ -1834,7 +1870,7 @@ internal static class ReplTurn
                     turnOutputTokens += usage.Details.OutputTokenCount ?? 0;
                     turnCacheReadTokens += usage.Details.CacheReadTokens();
                     turnUncachedInputTokens += usage.Details.UncachedInputTokens();
-                    turnFirstInputTokens ??= (int?)usage.Details.InputTokenCount;
+                    turnFirstInputTokens ??= usage.Details.PromptTokens() is > 0 and var prompt ? (int)prompt : null;
                     sawUsageThisChunk = true;
                 }
                 if (sawUsageThisChunk) usageRounds++;
@@ -2049,6 +2085,22 @@ internal static class ReplTurn
                 sb.Append(text);
                 if (isRoundBoundary) pendingParagraphBreak = true;
 
+                // A reply that has stopped saying anything new would otherwise stream until it's killed.
+                if (sb.Length >= nextRunawayCheck)
+                {
+                    nextRunawayCheck = sb.Length + 2_000;
+                    if (RunawayOutput.LoopStart(sb.ToString()) is { } cut)
+                    {
+                        hitRunawayOutput = true;
+                        runawayCut       = cut;
+                        if (!capturePlan && ctx.JsonMode)
+                            ReplJsonBridge.Emit(new { type = "token", text });
+                        else if (!capturePlan && screen is not null)
+                            screen.Text(text);
+                        break;
+                    }
+                }
+
                 // Terminal REPL never prints text live — only the spinner/tool chain is
                 // shown while generating; the full response is markdown-rendered once the
                 // turn completes (see below). JSON mode still streams tokens for the
@@ -2193,6 +2245,13 @@ internal static class ReplTurn
         spinCts.Dispose();
         ReleaseInterjections(cancelled: false);
 
+        // Keep the reply up to where it started looping, in what's shown and in what history keeps.
+        if (hitRunawayOutput && runawayCut < sb.Length)
+        {
+            DropTrailingText(rawUpdates, sb.Length - runawayCut);
+            sb.Length = runawayCut;
+        }
+
         CommitUsage();
         ctx.LastActualContextTokens = turnFirstInputTokens;
         // Every model call this turn made, retried attempts included — they were real calls.
@@ -2203,7 +2262,30 @@ internal static class ReplTurn
             turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnUncachedInputTokens, turnFirstInputTokens, rawUpdates,
             hitConsecutiveFailureLimit, lastToolFailureDetail,
             hitRepeatedToolCallLimit, lastRepeatedToolCallDetail, repeatedToolCallLimit,
-            hitTurnTokenBudget);
+            hitTurnTokenBudget, hitRunawayOutput);
+    }
+
+    // Removes the last `count` characters of streamed text from the updates, newest first.
+    internal static void DropTrailingText(List<ChatResponseUpdate> updates, int count)
+    {
+        for (var u = updates.Count - 1; u >= 0 && count > 0; u--)
+        {
+            var contents = updates[u].Contents;
+            for (var c = contents.Count - 1; c >= 0 && count > 0; c--)
+            {
+                if (contents[c] is not TextContent { Text: { Length: > 0 } t }) continue;
+                if (t.Length <= count)
+                {
+                    count -= t.Length;
+                    contents.RemoveAt(c);
+                }
+                else
+                {
+                    contents[c] = new TextContent(t[..^count]);
+                    count = 0;
+                }
+            }
+        }
     }
 
     /// <summary>

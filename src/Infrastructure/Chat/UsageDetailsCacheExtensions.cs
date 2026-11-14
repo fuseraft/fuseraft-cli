@@ -41,4 +41,13 @@ internal static class UsageDetailsCacheExtensions
             return input + details.CacheCreationTokens();
         return Math.Max(0, input - details.CacheReadTokens());
     }
+
+    /// <summary>The whole prompt the call sent, cached part included, for either provider family (see <see cref="UncachedInputTokens"/>).</summary>
+    public static long PromptTokens(this UsageDetails? details)
+    {
+        var input = details?.InputTokenCount ?? 0;
+        if (details?.AdditionalCounts?.ContainsKey(CacheCreationInputTokensKey) == true)
+            return input + details.CacheCreationTokens() + details.CacheReadTokens();
+        return input;
+    }
 }

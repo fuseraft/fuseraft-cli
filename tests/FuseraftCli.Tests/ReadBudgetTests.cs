@@ -14,7 +14,8 @@ public sealed class ReadBudgetTests : IDisposable
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
     [Theory]
-    [InlineData("xai.grok-4.6", 300_000)]
+    [InlineData("xai.grok-4.6", 512_000)]
+    [InlineData("claude-sonnet-5-5", 300_000)]
     [InlineData("gpt-4o", 200_000)]
     [InlineData("llama3:8b", 160_000)]
     public void ReadBudget_IsHalfTheContextBudget_InChars(string model, int expectedChars) =>
