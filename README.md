@@ -18,7 +18,7 @@ fuseraft
 
 **[Documentation](https://fuseraft.ai/fuseraft-cli/)** · [Getting started](https://fuseraft.ai/fuseraft-cli/getting-started/) · [Releases](https://github.com/fuseraft/fuseraft-cli/releases)
 
-<img src="docs/.assets/fuseraft-repl.png" alt="A fuseraft REPL session asking to approve a file edit, with the diff shown">
+<img src="docs/.assets/fuseraft-demo.gif" alt="fuseraft fixing a failing test: it reads the code, asks to run the tests, shows the diff for approval, and confirms both tests pass">
 
 ## Why fuseraft
 
