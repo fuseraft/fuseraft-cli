@@ -376,10 +376,9 @@ internal sealed class AgentMiddlewareBuilder(
     /// file the agent has open, or a formatter, an editor or another process, is reported where the agent will read it.
     /// </summary>
     internal static Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> ChangeReportingInvoker(
-        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? next, FileLedger ledger, ToolCallSequence? toolCalls = null) =>
+        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>? next, FileLedger ledger) =>
         async (context, cancellationToken) =>
         {
-            (toolCalls ?? ToolCallSequence.Shared).Advance();
             // A subagent's tools run inside the parent's call, whose own check reports what the subagent changed.
             var report  = ReadScope.Current is null;
             var outside = report ? ledger.Sweep() : [];

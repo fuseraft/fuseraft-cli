@@ -44,7 +44,6 @@ public sealed class FileSystemPlugin : ITurnResettable
     private readonly FileVersionStore?  _versionStore;
     private readonly SessionReadCache?  _sessionCache;
     private readonly FileLedger?        _ledger;
-    private readonly Action?            _onWrite;
     private readonly Action?            _onCacheHit;
     private readonly UndoSnapshotStore  _undoStore = new();
     private readonly Func<string, string, Task<bool>>? _approveAction;
@@ -101,7 +100,7 @@ public sealed class FileSystemPlugin : ITurnResettable
     // maxLines: 99999 is asking for everything and should be gated the same as omitting it.
     private const int LargeFileColdReadLines  = 500;
 
-    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onWrite = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null, IncludedRootsState? includedRoots = null, IReadOnlyList<string>? denyPatterns = null, FileLedger? ledger = null)
+    public FileSystemPlugin(string? sandboxRoot = null, int readFileSizeLimit = 20_000, int readBudgetPerTurn = 150_000, FileVersionStore? versionStore = null, SessionReadCache? sessionCache = null, Action? onCacheHit = null, IReadOnlyList<string>? exemptedPaths = null, Func<string, string, Task<bool>>? approveAction = null, Func<string, string, string, string, Task<bool>>? approveWrite = null, IncludedRootsState? includedRoots = null, IReadOnlyList<string>? denyPatterns = null, FileLedger? ledger = null)
     {
         _ledger            = ledger;
         _sandboxRoot       = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
@@ -115,7 +114,6 @@ public sealed class FileSystemPlugin : ITurnResettable
         _summaryDir        = Path.Combine(baseDir, ".fuseraft", "summaries");
         _versionStore      = versionStore;
         _sessionCache      = sessionCache;
-        _onWrite           = onWrite;
         _onCacheHit        = onCacheHit;
         _approveAction     = approveAction;
         _approveWrite      = approveWrite;
@@ -579,7 +577,6 @@ public sealed class FileSystemPlugin : ITurnResettable
 
         // Record that this path was patched so write_file can detect the pattern.
         _patchedThisTurn.Add(resolved);
-        _onWrite?.Invoke();
 
         var oldLines = normalOld.Split('\n').Length;
         var newLines = normalNew.Split('\n').Length;
@@ -745,7 +742,6 @@ public sealed class FileSystemPlugin : ITurnResettable
             ? $" (content was normalised: code fences or over-escaped quotes were stripped)"
             : string.Empty;
         var versionNote = newVersion.HasValue ? $" [v{newVersion}]" : string.Empty;
-        _onWrite?.Invoke();
         return PluginResult.Ok($"Written {content.Length} chars to {resolved}{note}{versionNote}");
     }
 

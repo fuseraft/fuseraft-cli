@@ -19,7 +19,7 @@ namespace fuseraft.Infrastructure.Plugins;
 /// constrained to that root. Commands that omit a <c>workingDirectory</c> argument default
 /// to the sandbox root rather than the process current directory.
 /// </summary>
-public sealed class ShellPlugin : IDisposable, ITurnResettable
+public sealed class ShellPlugin : IDisposable
 {
     private static readonly string Shell     = ShellEnvironment.Shell;
     private static readonly string ShellFlag = ShellEnvironment.ShellFlag;
@@ -122,34 +122,6 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
     private readonly IEventSink? _eventSink;
     private readonly object _tempDirLock = new();
     private string? _sessionTempDir;
-
-    // Per-turn command dedup: tracks only the most recently run command.
-    // If the exact same command is called again with no other tool call in between,
-    // the cached result is returned so the agent can act on the failure rather than
-    // re-running an identical command in a tight loop.
-    // Any other call in between (an edit, a git checkout, another command) means the
-    // command may now do something else, so it runs again.
-    private string? _lastRunKey;
-    private string? _lastRunOutput;
-    private long    _lastRunCall;
-    private readonly ToolCallSequence _toolCalls;
-
-    void ITurnResettable.BeginTurn()
-    {
-        _lastRunKey    = null;
-        _lastRunOutput = null;
-    }
-
-    /// <summary>
-    /// Clears the per-turn command cache so that the next shell_run call executes
-    /// fresh even within the same turn. Called by FileSystemPlugin after a successful
-    /// write_file or patch_file so verify commands pick up changes immediately.
-    /// </summary>
-    internal void InvalidateRunCache()
-    {
-        _lastRunKey    = null;
-        _lastRunOutput = null;
-    }
 
     // Background job registry
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, BackgroundJob> _jobs = new();
@@ -323,9 +295,8 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         try { originalProcess.Dispose(); } catch { /* already exited */ }
     }
 
-    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null, bool blockCredentialFiles = true, IReadOnlyList<string>? denyPatterns = null, ToolCallSequence? toolCalls = null)
+    public ShellPlugin(string? sandboxRoot = null, Func<string, Task<bool>>? approveCommand = null, ShellPolicy? shellPolicy = null, IEventSink? eventSink = null, IncludedRootsState? includedRoots = null, bool blockCredentialFiles = true, IReadOnlyList<string>? denyPatterns = null)
     {
-        _toolCalls = toolCalls ?? ToolCallSequence.Shared;
         _blockCredentialFiles = blockCredentialFiles;
         _sandboxRoot    = sandboxRoot is not null ? FuseraftPaths.ExpandPath(sandboxRoot) : null;
         _denyMatcher    = FileSystemSandbox.BuildDenyMatcher(denyPatterns);
@@ -419,17 +390,6 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         var denial = ValidateWorkingDirectory(workingDirectory, out var resolvedDir);
         if (denial is not null) return denial;
 
-        // Per-turn command dedup: re-running an identical command back-to-back almost always
-        // means the agent is looping — returning the cached result breaks the loop and keeps
-        // the failure in context where the agent can act on it. Only back-to-back: a live run
-        // patched a test between two identical runs and was handed the old failure.
-        // ToolCallSequence counts this call too, so "nothing in between" is a difference of one;
-        // with no invoker counting calls (tests, ProbePlugin) it's zero.
-        var cacheKey = command.Trim() + "\0" + (resolvedDir ?? "(default)") + "\0" + shellChoice;
-        var thisCall = _toolCalls.Current;
-        if (_lastRunKey == cacheKey && thisCall - _lastRunCall <= 1)
-            return $"[Command already ran this turn — cached output follows]\n\n{_lastRunOutput}";
-
         ProcessResult result;
         if (OperatingSystem.IsWindows() && PowerShellScriptFor(command, shellChoice) is { } script)
         {
@@ -461,9 +421,6 @@ public sealed class ShellPlugin : IDisposable, ITurnResettable
         }
 
         var output = Present(result, resolvedDir);
-        _lastRunKey    = cacheKey;
-        _lastRunOutput = output;
-        _lastRunCall   = thisCall;
 
         if (_eventSink is not null && IsBuildCommand(command))
         {
