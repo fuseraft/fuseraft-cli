@@ -1100,7 +1100,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
             // Derive a task description from the first user message in the session.
             var taskDescription = ctx.History
-                .FirstOrDefault(m => m.Role == ChatRole.User)?.Text?.Trim()
+                .FirstOrDefault(m => m.Role == ChatRole.User && !ReplCommands.IsCompactedSummary(m.Text))?.Text?.Trim()
                 ?? "REPL session";
 
             var checkpoint = new SessionCheckpoint

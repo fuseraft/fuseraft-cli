@@ -50,7 +50,8 @@ internal static class ReplAutoTitle
     {
         var userAt = -1;
         for (var i = 0; i < history.Count; i++)
-            if (history[i].Role == ChatRole.User && !string.IsNullOrWhiteSpace(history[i].Text)) { userAt = i; break; }
+            if (history[i].Role == ChatRole.User && !string.IsNullOrWhiteSpace(history[i].Text) &&
+                !ReplCommands.IsCompactedSummary(history[i].Text)) { userAt = i; break; }
         if (userAt < 0) return null;
         for (var i = userAt + 1; i < history.Count; i++)
             if (history[i].Role == ChatRole.Assistant && !string.IsNullOrWhiteSpace(history[i].Text))

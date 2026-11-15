@@ -1093,10 +1093,10 @@ Pass an optional focus hint to steer the summary toward the next task:
 ```
 > /compact fix the auth middleware next
   compacting…
-  Session compacted — history replaced with handoff summary.
+  Earlier messages summarized to save context.
 
 > What was the last thing we did?
-  assistant: Based on the compacted context: we finished wiring the JWT validation
+  assistant: Earlier in this chat we finished wiring the JWT validation
   middleware and left off on ...
 ```
 
