@@ -24,7 +24,7 @@ fuseraft
 
 - **Your model, your key.** Anthropic, OpenAI, xAI, Google, Mistral, DeepSeek, Azure, Ollama, or any OpenAI-compatible endpoint. Switch mid-chat with `/model`. Keys live in your OS keychain, not a dotfile.
 - **Asks before it acts.** Shell commands, file writes and git changes wait for your approval, with a diff for every edit, and the agent can't leave the directory you started in.
-- **Teams that prove their work.** Define a team of agents in YAML. Before any handoff, deterministic validators check the evidence: files on disk, test exit codes, tool-call records. No model grades another model's homework.
+- **Teams that prove their work.** Define multi-agent teams in YAML, no code required. Before any handoff, deterministic validators check the evidence: files on disk, test exit codes, tool-call records. No model grades another model's homework.
 - **One binary, no runtime.** Self-contained builds for Linux, macOS (Intel and Apple silicon) and Windows. `fuseraft update` keeps it current.
 - **Wherever you work.** In the terminal, in [VS Code](https://marketplace.visualstudio.com/items?itemName=fuseraft.fuseraft) ([Open VSX](https://open-vsx.org/extension/fuseraft/fuseraft) too), in the browser with [fuseraft-web](https://fuseraft.ai/fuseraft-web/), or as a daemon other agents send work to over MCP.
 
