@@ -754,6 +754,32 @@ public sealed class ReplLimitsTurnTests : IDisposable
     }
 
     [Fact]
+    public async Task SessionInputTokens_IncludeAnthropicCacheReads()
+    {
+        // Anthropic's input_tokens excludes cache reads and writes; the SDK always sets the cache-creation key.
+        static async IAsyncEnumerable<ChatResponseUpdate> AnthropicUsage()
+        {
+            await Task.Yield();
+            yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [new TextContent("Done.")] };
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents = [new UsageContent(new UsageDetails
+                {
+                    InputTokenCount = 3, OutputTokenCount = 5,
+                    AdditionalCounts = new() { ["CacheReadInputTokens"] = 900, ["CacheCreationInputTokens"] = 100 },
+                })],
+            };
+        }
+        var (ctx, _) = NewContext(new ScriptedClient(_ => AnthropicUsage()), repl: null);
+
+        await RunAsync(ctx);
+
+        Assert.Equal(1003, ctx.CumulativeInputTokens);
+        Assert.Equal(900, ctx.CumulativeCacheReadTokens);
+    }
+
+    [Fact]
     public async Task CancelledTurn_AfterARoundFinished_KeepsItsWork()
     {
         var client = new ScriptedClient(_ => RoundThenDrop(new OperationCanceledException()));
