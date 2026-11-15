@@ -260,9 +260,10 @@ internal sealed class ReplSessionContext
     public readonly List<int> TurnTokenDeltas = [];
     public int              PrevTurnTokenEstimate;
 
-    // Actual provider-reported token usage, summed across every LLM round trip for the life
-    // of this process (including tool-call continuations within a turn). Reflects real billed
-    // usage, so unlike the estimates above it is never reset by /clear, /rewind, or /compact.
+    // Actual provider-reported token usage, summed across every LLM round trip since this chat
+    // started here (including tool-call continuations within a turn). Reflects real billed
+    // usage, so unlike the estimates above it is never reset by /rewind or /compact; /clear
+    // starts a new chat, so it starts these again too.
     public long CumulativeInputTokens;
     public long CumulativeOutputTokens;
 

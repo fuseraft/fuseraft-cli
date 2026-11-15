@@ -141,6 +141,57 @@ public sealed class ReplTitleCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Clear_StartsANewSession_AndKeepsTheOldOneSaved()
+    {
+        var ctx = NewContext();
+        ctx.Title = "Old conversation";
+        ctx.History.Add(new ChatMessage(ChatRole.User, "first question"));
+        ctx.History.Add(new ChatMessage(ChatRole.Assistant, "first answer"));
+        ctx.TurnIndex = 1;
+        ctx.CumulativeInputTokens = 6400;
+        ctx.CumulativeCacheReadTokens = 128;
+
+        await ReplCommands.HandleAsync(ctx, "/clear", "", CancellationToken.None);
+
+        Assert.NotEqual("titled-session", ctx.SessionId);
+        Assert.Equal(0, ctx.TurnIndex);
+        Assert.Equal(0, ctx.CumulativeInputTokens);
+        Assert.Equal(0, ctx.CumulativeCacheReadTokens);
+        Assert.DoesNotContain(ctx.History, m => m.Role != ChatRole.System);
+        var old = await ReplSessionSnapshot.LoadAsync("titled-session");
+        Assert.Equal("Old conversation", old!.Title);
+        Assert.Contains(old.History, m => m.Contents.Any(c => c.Text == "first question"));
+        Assert.Null(await ReplSessionSnapshot.LoadAsync(ctx.SessionId));
+    }
+
+    [Fact]
+    public async Task Clear_OnAnEmptyChat_SavesNothing()
+    {
+        var ctx = NewContext();
+
+        await ReplCommands.HandleAsync(ctx, "/clear", "", CancellationToken.None);
+
+        Assert.Null(await ReplSessionSnapshot.LoadAsync("titled-session"));
+    }
+
+    [Fact]
+    public async Task Clear_InJsonMode_TellsThePanelTheNewSession()
+    {
+        var ctx = NewContext();
+        ctx.JsonMode = true;
+        ctx.History.Add(new ChatMessage(ChatRole.User, "first question"));
+
+        var events = await CaptureBridgeAsync(() => ReplCommands.HandleAsync(ctx, "/clear", "", CancellationToken.None));
+
+        var cleared = Assert.Single(events, e => e.GetProperty("type").GetString() == "cleared");
+        Assert.Equal(ctx.SessionId, cleared.GetProperty("sessionId").GetString());
+        Assert.Equal("titled-session", cleared.GetProperty("previousSessionId").GetString());
+        var title = Assert.Single(events, e => e.GetProperty("type").GetString() == "title");
+        Assert.Equal(ctx.SessionId, title.GetProperty("sessionId").GetString());
+        Assert.Equal(JsonValueKind.Null, title.GetProperty("title").ValueKind);
+    }
+
+    [Fact]
     public void Snapshot_RoundTripsTitle()
     {
         var snap = ReplSessionSnapshot.Capture(

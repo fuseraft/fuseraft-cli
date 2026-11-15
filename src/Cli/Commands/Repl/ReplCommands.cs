@@ -108,7 +108,7 @@ internal static partial class ReplCommands
             new("/copy [code]", "Copy the last reply, or a code block from it, to the clipboard"),
             new("/theme [name]", "List color themes, switch to one for this session, or /theme save <name> to save the current colors as a theme file (full-screen REPL)"),
             new("/dock [top|bottom]", "Show where the prompt is, or move it to the top or bottom of the screen for this session (full-screen REPL)"),
-            new("/clear", "Clear conversation history (keeps system prompt)"),
+            new("/clear", "Start a new chat (the current one stays saved)"),
             new("/history", "Show condensed conversation history"),
             new("/replay [n|all]", "Re-display the last n turns in full (default 3) — the same view shown automatically when a session is resumed"),
             new("/assist", "Diagnose the conversation and inject a corrective message"),
