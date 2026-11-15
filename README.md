@@ -3,16 +3,32 @@
 [![CI](https://github.com/fuseraft/fuseraft-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/fuseraft/fuseraft-cli/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/fuseraft/fuseraft-cli)](https://github.com/fuseraft/fuseraft-cli/releases)
 [![License: MIT](https://img.shields.io/github/license/fuseraft/fuseraft-cli)](LICENSE.md)
+[![GitHub stars](https://img.shields.io/github/stars/fuseraft/fuseraft-cli?style=social)](https://github.com/fuseraft/fuseraft-cli/stargazers)
 
 <img src="docs/.assets/fuseraft-banner.png" alt="fuseraft — model-agnostic coding agent">
 
-fuseraft is a coding agent for your terminal that works with any model. Run `fuseraft` and chat with a model that reads and edits your files, runs commands, searches your code and uses git, asking before it changes anything. Bring your own key for Anthropic, OpenAI, xAI, Google, Mistral, DeepSeek, Azure, Ollama, or any OpenAI-compatible endpoint.
+**A coding agent for your terminal that works with any model, and asks before it changes anything.**
 
-When one agent isn't enough, fuseraft runs a team of them from a YAML file, and checks each agent's work (files on disk, test exit codes, tool-call records) before handing off to the next. Built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
+Run `fuseraft` and chat with a model that reads and edits your files, runs commands, searches your code and uses git. Bring your own key, or run a local model. When one agent isn't enough, run a team of them that has to prove its work before handing off.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.sh | bash
+fuseraft
+```
 
 **[Documentation](https://fuseraft.ai/fuseraft-cli/)** · [Getting started](https://fuseraft.ai/fuseraft-cli/getting-started/) · [Releases](https://github.com/fuseraft/fuseraft-cli/releases)
 
 <img src="docs/.assets/fuseraft-repl.png" alt="A fuseraft REPL session asking to approve a file edit, with the diff shown">
+
+## Why fuseraft
+
+- **Your model, your key.** Anthropic, OpenAI, xAI, Google, Mistral, DeepSeek, Azure, Ollama, or any OpenAI-compatible endpoint. Switch mid-chat with `/model`. Keys live in your OS keychain, not a dotfile.
+- **Asks before it acts.** Shell commands, file writes and git changes wait for your approval, with a diff for every edit, and the agent can't leave the directory you started in.
+- **Teams that prove their work.** Define a team of agents in YAML. Before any handoff, deterministic validators check the evidence: files on disk, test exit codes, tool-call records. No model grades another model's homework.
+- **One binary, no runtime.** Self-contained builds for Linux, macOS (Intel and Apple silicon) and Windows. `fuseraft update` keeps it current.
+- **Wherever you work.** In the terminal, in [VS Code](https://marketplace.visualstudio.com/items?itemName=fuseraft.fuseraft) ([Open VSX](https://open-vsx.org/extension/fuseraft/fuseraft) too), in the browser with [fuseraft-web](https://fuseraft.ai/fuseraft-web/), or as a daemon other agents send work to over MCP.
+
+Open source under MIT, built on [Microsoft Agent Framework](https://github.com/microsoft/agent-framework).
 
 ## Install
 
@@ -100,7 +116,9 @@ Requires the [.NET 10 SDK](https://dot.net).
 
 ## Contributing
 
-Bug fixes, plugins, config examples and docs are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Bug fixes, plugins, config examples and docs are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), or pick up a [good first issue](https://github.com/fuseraft/fuseraft-cli/labels/good%20first%20issue).
+
+If fuseraft is useful to you, a ⭐ on this repo is the easiest way to help other people find it.
 
 ## License
 
