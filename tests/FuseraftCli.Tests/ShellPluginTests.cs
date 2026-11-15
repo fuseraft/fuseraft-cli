@@ -5,6 +5,29 @@ namespace FuseraftCli.Tests;
 
 public sealed class ShellPluginTests
 {
+    // Running the same command back-to-back used to return the first run's output, labelled cached. A rerun can
+    // legitimately differ (a flaky test, a file changed by the user or another tool), and the label taught models to
+    // distrust the shell; the repeated-call guard is what stops a real loop.
+    [Fact]
+    public async Task RunAsync_SameCommandBackToBack_RunsItAgain()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "fuseraft_rerun_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            using var plugin = new ShellPlugin(sandboxRoot: dir);
+            const string command = "echo x >> runs.txt && wc -l < runs.txt";
+
+            var first  = await plugin.RunAsync(command, workingDirectory: dir);
+            var second = await plugin.RunAsync(command, workingDirectory: dir);
+
+            Assert.Contains("1", first);
+            Assert.Contains("2", second);
+            Assert.DoesNotContain("cached", second);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
     // RunAsync — quiet parameter (folded in from the removed shell_run_quiet tool)
 
     [Fact]
