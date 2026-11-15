@@ -220,8 +220,9 @@ internal static class AgentContextCompactionFilters
     /// ("succeeded …" / "failed [EXIT N] …", see <see cref="ShellOutcomeSummary"/>). The command call itself is left intact so the
     /// sequence of attempts remains visible in context. The latest call keeps its full output.
     /// </summary>
+    /// <param name="minBatchChars">As for <see cref="DropSupersededObservationalPairs"/>: 0 rewrites as soon as a run is superseded.</param>
     internal static IEnumerable<ChatMessage> CompressSupersededShellPairs(
-        IEnumerable<ChatMessage> messages)
+        IEnumerable<ChatMessage> messages, int minBatchChars = 0)
     {
         var list = messages as IList<ChatMessage> ?? messages.ToList();
 
@@ -254,6 +255,11 @@ internal static class AgentContextCompactionFilters
                 toCompress.Add(callId);
 
         if (toCompress.Count == 0) return list;
+
+        // Unbatched, every back-to-back rerun rewrote a result the provider had already seen: a cache miss each time,
+        // and Anthropic rejects the request outright when a signed thinking block follows the rewritten result.
+        if (minBatchChars > 0 && SupersededResultChars(list, toCompress) < minBatchChars)
+            return list;
 
         // Snapshot the result text for every shell call: a superseded one's outcome comes from
         // its own, and its diagnostics are compared against the latest run's.
@@ -830,7 +836,7 @@ internal static class AgentContextCompactionFilters
     {
         messages = DropSupersededWritePairs(messages, DefaultMinSupersededDropChars);
         messages = DropSupersededObservationalPairs(messages, DefaultMinSupersededDropChars);
-        messages = CompressSupersededShellPairs(messages);
+        messages = CompressSupersededShellPairs(messages, DefaultMinSupersededDropChars);
 
         // Nothing below runs until the turn nears its budget. Shortening every older call's arguments from the start
         // filled the history with writes whose content was only an "[ELIDED …]" note, and grok-4.7 wrote that note as

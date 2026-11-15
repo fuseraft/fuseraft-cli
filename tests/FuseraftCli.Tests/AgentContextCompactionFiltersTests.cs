@@ -42,6 +42,29 @@ public sealed class AgentContextCompactionFiltersTests
             .SelectMany(m => m.Contents.OfType<FunctionResultContent>())
             .Any(r => r.CallId == callId && (string?)r.Result == expected);
 
+    // A rerun used to rewrite the earlier result at once: a prompt-cache miss each time, and Anthropic rejected the
+    // request when a signed thinking block followed the rewritten result.
+    [Theory]
+    [InlineData(100, false)]
+    [InlineData(70_000, true)]
+    public async Task InTurnFilters_CompressARerunShellResult_OnlyOnceEnoughHasPiledUp(int outputChars, bool compressed)
+    {
+        static ChatMessage Shell(string id) => new(ChatRole.Assistant,
+            [new FunctionCallContent(id, "shell_run", new Dictionary<string, object?> { ["command"] = "make test" })]);
+        var output = "[EXIT 1]\n" + new string('x', outputChars);
+        var messages = new List<ChatMessage>
+        {
+            Shell("s0"), ToolResult("s0", output),
+            Shell("s1"), ToolResult("s1", output),
+        };
+
+        var result = (await AgentContextCompactionFilters.ApplyInTurnFilters(
+            messages, maxInTurnToolPairs: 0, maxInTurnChars: 0)).ToList();
+
+        Assert.Equal(!compressed, ContainsLiteralResult(result, "s0", output));
+        Assert.True(ContainsLiteralResult(result, "s1", output));
+    }
+
     // ── ApplyInTurnFilters: triggerChars gates KeepLastToolPairs ───────────────
 
     [Fact]
