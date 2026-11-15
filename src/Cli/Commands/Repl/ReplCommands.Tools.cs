@@ -2,7 +2,9 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Infrastructure;
+using fuseraft.Core.Models.Config;
 using fuseraft.Infrastructure.Plugins;
+using fuseraft.Infrastructure.Storage;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -41,7 +43,9 @@ internal static partial class ReplCommands
                     foreach (var t in funcs)
                     {
                         var blocked = !ctx.PassesCapabilityRestriction(t.Name) || !ctx.PassesSafeMode(t.Name) || !ctx.PassesSafeMode(catName, t);
-                        AnsiConsole.MarkupLine(blocked
+                        AnsiConsole.MarkupLine(ctx.DisabledTools.Contains(t.Name)
+                            ? $"  [dim]    · {Markup.Escape(t.Name)} (disabled)[/]"
+                            : blocked
                             ? $"  [dim]    ·[/] {Markup.Escape(t.Name)} [dim](restricted)[/]"
                             : $"  [dim]    ·[/] {Markup.Escape(t.Name)}");
                     }
@@ -62,28 +66,15 @@ internal static partial class ReplCommands
 
         if ((verb == "disable" || verb == "enable") && !string.IsNullOrEmpty(cat))
         {
+            var on    = verb == "enable";
             var match = ctx.ToolsByCategory.Keys.FirstOrDefault(
                 k => k.Equals(cat, StringComparison.OrdinalIgnoreCase));
-            if (match is null)
+            var owner = match is null
+                ? ctx.ToolsByCategory.FirstOrDefault(kv => kv.Value.Any(f => f.Name.Equals(cat, StringComparison.OrdinalIgnoreCase)))
+                : default;
+            if (match is not null)
             {
-                AnsiConsole.MarkupLine($"[yellow]Unknown category:[/] {Markup.Escape(cat)}");
-                AnsiConsole.MarkupLine($"[dim]Categories: {string.Join(", ", ctx.ToolsByCategory.Keys)}[/]");
-            }
-            else if (verb == "disable")
-            {
-                ctx.DisabledCategories.Add(match);
-                // Rebuild ChatOptions only — FunctionInvokingChatClient reads the tool list
-                // from ChatOptions at call time, so Client/StepClient don't need rebuilding.
-                ctx.ChatOptions = ctx.BuildChatOptions();
-                AnsiConsole.MarkupLine($"[dim]{Markup.Escape(match)} tools disabled.[/]");
-                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools disable", category = match });
-            }
-            else
-            {
-                ctx.DisabledCategories.Remove(match);
-                ctx.ChatOptions = ctx.BuildChatOptions();
-                AnsiConsole.MarkupLine($"[dim]{Markup.Escape(match)} tools enabled.[/]");
-                if (ctx.SafeMode && SafeModeCategories.Contains(match, StringComparer.OrdinalIgnoreCase))
+                if (on && ctx.SafeMode && SafeModeCategories.Contains(match, StringComparer.OrdinalIgnoreCase))
                 {
                     // Manually re-enabling a category safe mode is managing breaks the
                     // "safe mode on == Shell/Git/Http blocked" guarantee — drop the flag
@@ -95,8 +86,49 @@ internal static partial class ReplCommands
                     ctx.PreSafeDisabled = null;
                     AnsiConsole.MarkupLine("[yellow]Safe mode disengaged[/] [dim](re-enabled a category it was managing).[/]");
                 }
-                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools enable", category = match });
+                // Rebuild ChatOptions only — FunctionInvokingChatClient reads the tool list
+                // from ChatOptions at call time, so Client/StepClient don't need rebuilding.
+                ReplToolState.SetCategory(ctx, match, on);
+                ctx.ChatOptions = ctx.BuildChatOptions();
+                AnsiConsole.MarkupLine($"[dim]{Markup.Escape(match)} tools {(on ? "enabled" : "disabled")}.[/]");
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = $"/tools {verb}", category = match });
             }
+            else if (owner.Key is not null)
+            {
+                var tool = owner.Value.First(f => f.Name.Equals(cat, StringComparison.OrdinalIgnoreCase)).Name;
+                if (on) ctx.DisabledTools.Remove(tool); else ctx.DisabledTools.Add(tool);
+                ctx.ChatOptions = ctx.BuildChatOptions();
+                AnsiConsole.MarkupLine($"[dim]{Markup.Escape(tool)} {(on ? "enabled" : "disabled")}.[/]");
+                if (on && ReplToolState.UserDisabled(ctx).Contains(owner.Key))
+                    AnsiConsole.MarkupLine($"[dim]{Markup.Escape(owner.Key)} is off, so it stays unavailable until[/] [bold]/tools enable {Markup.Escape(owner.Key)}[/][dim].[/]");
+                await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = $"/tools {verb}", tool });
+            }
+            else
+            {
+                AnsiConsole.MarkupLine($"[yellow]No tool or category named[/] {Markup.Escape(cat)}");
+                AnsiConsole.MarkupLine($"[dim]Categories: {string.Join(", ", ctx.ToolsByCategory.Keys)}. /tools lists every tool.[/]");
+            }
+        }
+        else if (verb == "save" && sub.Length == 1)
+        {
+            var config = UserConfigStore.Load().Config ?? new UserConfig();
+            var (plugins, disabled) = ReplToolState.AsDefaults(ctx, config.Repl);
+            config.Repl.Plugins       = plugins;
+            config.Repl.DisabledTools = disabled;
+            UserConfigStore.Save(config);
+            if (ctx.UserCfg is { } live)
+            {
+                live.Repl.Plugins       = [.. plugins];
+                live.Repl.DisabledTools = [.. disabled];
+            }
+            AnsiConsole.MarkupLine("[dim]Saved. New chats start with these tools.[/]");
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools save", plugins, disabled });
+        }
+        else if (verb == "reset" && sub.Length == 1)
+        {
+            ReplToolState.ApplyDefaults(ctx, UserConfigStore.Load().Config?.Repl);
+            AnsiConsole.MarkupLine("[dim]Tools set back to the saved defaults.[/]");
+            await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/tools reset" });
         }
         else if (verb == "restrict")
         {
@@ -120,11 +152,14 @@ internal static partial class ReplCommands
         {
             AnsiConsole.MarkupLine($"[yellow]Unknown /tools subcommand:[/] {Markup.Escape(arg)}");
             AnsiConsole.MarkupLine("[dim]Usage: /tools                          — list tools by category[/]");
-            AnsiConsole.MarkupLine("[dim]       /tools disable <category>       — disable a tool category[/]");
-            AnsiConsole.MarkupLine("[dim]       /tools enable <category>        — re-enable a disabled category[/]");
+            AnsiConsole.MarkupLine("[dim]       /tools disable <category|tool>  — turn a category or one tool off[/]");
+            AnsiConsole.MarkupLine("[dim]       /tools enable <category|tool>   — turn it back on[/]");
+            AnsiConsole.MarkupLine("[dim]       /tools save                     — start new chats with the tools on now[/]");
+            AnsiConsole.MarkupLine("[dim]       /tools reset                    — go back to the saved defaults[/]");
             AnsiConsole.MarkupLine("[dim]       /tools restrict <plugin> <tag…> — allow only tools tagged <tag> for that plugin[/]");
             AnsiConsole.MarkupLine("[dim]       /tools unrestrict <plugin>      — remove a plugin's restriction[/]");
         }
+        ReplToolState.EmitIfBridged(ctx);
         return CommandResult.Continue;
     }
 
@@ -243,6 +278,7 @@ internal static partial class ReplCommands
                     "[dim]Safe mode[/] [green]on[/][dim]: Shell, Git, Http tools blocked " +
                     "(by owning plugin, including any in the Extended bucket), and MCP tools their server doesn't mark read-only.[/]");
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/safe-mode on" });
+                ReplToolState.EmitIfBridged(ctx);
             }
         }
         else if (arg.Equals("off", StringComparison.OrdinalIgnoreCase))
@@ -261,6 +297,7 @@ internal static partial class ReplCommands
                 ctx.ChatOptions     = ctx.BuildChatOptions();
                 AnsiConsole.MarkupLine("[dim]Safe mode[/] [dim]off[/][dim]: prior tool categories restored.[/]");
                 await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/safe-mode off" });
+                ReplToolState.EmitIfBridged(ctx);
             }
         }
         else

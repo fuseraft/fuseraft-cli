@@ -161,4 +161,10 @@ public sealed class ReplStdinPumpTests
         Assert.True(turn.IsCancellationRequested);
     }
 
+    [Theory]
+    [InlineData("""{"type":"user_input","text":"/tools disable Shell","quiet":true}""", true)]
+    [InlineData("""{"type":"user_input","text":"/tools disable Shell"}""", false)]
+    [InlineData("""{"type":"user_input","text":"/tools","quiet":"yes"}""", false)]
+    public void ParseMessage_ReadsQuiet(string line, bool quiet) =>
+        Assert.Equal(quiet, ReplStdinPump.ParseMessage(line).Quiet);
 }

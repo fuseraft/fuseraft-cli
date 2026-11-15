@@ -430,6 +430,11 @@ app.Configure(cfg =>
             .WithExample(["settings", "show"])
             .WithExample(["settings", "show", "--json"]);
 
+        branch.AddCommand<SettingsToolsCommand>("tools")
+            .WithDescription("List the chat tools new chats start with on or off (repl.plugins, repl.disabledTools).")
+            .WithExample(["settings", "tools"])
+            .WithExample(["settings", "tools", "--json"]);
+
         branch.AddCommand<SettingsSetCommand>("set")
             .WithDescription("Set one global config field by dotted key. Run with no arguments to list valid keys.")
             .WithExample(["settings", "set"])

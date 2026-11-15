@@ -32,7 +32,7 @@ A chat that's open when VS Code closes or reloads is resumed in its tab when it 
 - **Changed files** show as `✎ path +added -removed`. Click one to open it.
 - **Details:** click a tool line for its arguments and output, or press **Ctrl+O** to page through recent tool output, thinking, and shell output in full.
 
-The status line under the prompt shows the model, the turn, how full the context is (yellow as auto-compaction nears), the session's tokens and how many came from the provider's cache, active modes such as `hitl`, and a timer.
+The status line under the prompt shows the model, the turn, how full the context is (yellow as auto-compaction nears), the session's tokens and how many came from the provider's cache, active modes such as `hitl`, how many tools the model has, and a timer.
 
 Switch models from the panel's header at any time without losing the conversation.
 
@@ -73,6 +73,12 @@ The REPL's `/commands` work here too, except the few that need a terminal, such 
 ## Staying in control
 
 **Approvals.** With HITL on (the default), shell commands, file writes, and other changes ask first, in a bar above the prompt. A file write opens as a real diff in an editor tab. Answer with **Allow** or **Deny**, or press **y** or **n**; **Esc** denies.
+
+**Tools.** Click the tools count in the status line to choose what the model can use in this chat. Each category (Shell, Git, an MCP server, …) has a switch, and expanding it gives each tool its own, so you can keep Git but turn off `git_commit`. Optional tools such as Http turn on here too. A tool that's off isn't offered to the model at all. A change made while a reply is running applies once it finishes.
+
+![The tools menu over a chat: Git expanded, with git_commit switched off and 35 of 76 tools on](src/assets/vscode-tools.png)
+
+**Save as default** makes new chats start with the tools on now, and **Reset** goes back to those defaults. The **Tools** section of **fuseraft: Settings** has the same switches for new chats, and `/tools` does the same from the prompt. See [CLI Reference — `fuseraft repl`](cli-reference.md#fuseraft-repl).
 
 **Questions.** When the agent asks you something, the choices appear above the prompt. Pick one, type your own answer, or **Skip** to let the agent decide.
 

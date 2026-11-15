@@ -382,7 +382,9 @@ common, low-risk operations that cover a typical session (read, edit, search, st
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
-**Optional plugins** — not loaded by default; pass `--plugins <name>,<name>` (comma-separated) to enable them. Kept opt-in because every registered tool adds its schema to every request — a smaller default tool surface means smaller, faster requests and less chance of tripping a provider's tool-schema limits. Persist a set of plugins you always want with `fuseraft settings set repl.plugins <name>,<name>` — they're unioned with whatever `--plugins` passes for that invocation.
+**Optional plugins** — not loaded by default; pass `--plugins <name>,<name>` (comma-separated) to enable them. Kept opt-in because every registered tool adds its schema to every request — a smaller default tool surface means smaller, faster requests and less chance of tripping a provider's tool-schema limits. Persist a set of plugins you always want with `fuseraft settings set repl.plugins <name>,<name>` — they're unioned with whatever `--plugins` passes for that invocation. Every chat still builds them, switched off, so `/tools enable Http` (or the tools menu in VS Code) can turn one on partway through a chat.
+
+**Choosing tools.** `/tools disable` and `/tools enable` change the current chat; `/tools save` keeps that set for new chats, in `repl.plugins` and `repl.disabledTools` (whole categories such as `Shell` or `mcp:github`, or single tools such as `git_push`). `fuseraft settings tools` lists what new chats start with. In VS Code, the tools count on the chat's status line opens a menu with a switch for each category and tool, and the settings panel has the same switches for new chats.
 
 | Plugin | Tools |
 |--------|-------|
@@ -429,23 +431,25 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 |---------|-------------|
 | `/help` | Show all slash commands |
 | `/sessions` | List resumable REPL sessions with their IDs, model, turn count, age, and title. Resume with `fuseraft repl --resume <id>`. |
-| `/title [name]` | Name the chat. The title is saved with the session and shown by `/sessions` and the VS Code Chats list, which otherwise shows the chat's first message. `/title` alone shows the current title; `/title --clear` removes it. `/clear` removes it too. Without one, a chat is named automatically from its first prompt and reply — one short extra model call, made in the background on `memory.model` if set, and never repeated — and `/title --clear` falls back to that name. `fuseraft settings set repl.autoTitle false` turns this off. Unlike other commands, `/title` doesn't wait for a running reply to finish — it takes effect at once. |
+| `/title [name]` | Name the chat. The title is saved with the session and shown by `/sessions` and the VS Code Chats list, which otherwise shows the chat's first message. `/title` alone shows the current title; `/title --clear` removes it. `/clear` starts a new chat, which has none. Without one, a chat is named automatically from its first prompt and reply — one short extra model call, made in the background on `memory.model` if set, and never repeated — and `/title --clear` falls back to that name. `fuseraft settings set repl.autoTitle false` turns this off. Unlike other commands, `/title` doesn't wait for a running reply to finish — it takes effect at once. |
 | `/fork` | Snapshot the current session to a new ID. The snapshot is saved immediately; the current session continues unchanged. Use `fuseraft repl --resume <id>` to open the fork later. |
 | `/fork switch` | Fork and immediately become the fork. The original session is already checkpointed on disk; the live session continues under the new ID. |
 | `/switch <id>` | Save the current session and load another saved session in its place. History, turn counter, model (if different), and plan state are all restored, and the session's most recent turns are re-displayed (see `repl.resumeReplayTurns`). A session that ran in another directory isn't loaded; `/switch` prints the `cd … && fuseraft --resume <id>` that resumes it there. Use `/sessions` to find IDs. |
 | `/conversation` | List all turns in memory with 1-based turn numbers and a one-line preview of each user message and assistant response. Use this to find the right turn number before running `/rewind`. |
 | `/rewind <n>` | Keep turns 1…n and discard all later turns. Turn count is the number of User messages currently in memory. Clamps safely — passing a number larger than the current turn count is a no-op. |
 | `/rewind -<n>` | Step back n turns from the current position (relative rewind). `/rewind -1` drops the last turn; `/rewind -99` clamps to 0 and clears all turns. |
-| `/clear` | Clear conversation history (system prompt is kept) and the model's todo list. Also clears the terminal and redraws the startup banner, unless `--no-banner` was passed at launch (in which case it just prints a confirmation line). |
+| `/clear` | Start a new chat, as New Chat does in VS Code. The current chat is saved first and stays in `/sessions` and the VS Code Chats list — `/switch <id>` (or Continue on the new chat's start screen in VS Code) goes back to it. The new chat has a new session ID, an empty history (the system prompt is kept), no title, an empty todo list and plan, and fresh token counts. Also clears the terminal and redraws the startup banner, unless `--no-banner` was passed at launch (in which case it just prints a confirmation line). |
 | `/compact` | Ask the model to summarise everything older than a recent verbatim tail into a handoff document, then replace history with `[system, summary, ...recent turns]`. The system prompt, tools/skills catalog, and the most recent turns (~20% of the context budget by default — `repl.compactPreserveTailRatio` — kept as whole turn-groups) are preserved as-is; only the older portion is folded into the summary. Declines with a message rather than mutating history if there's nothing old enough to summarise, or if the result wouldn't actually be smaller. Facts the assistant stated without a backing tool call are tombstoned as `[UNVERIFIED ASSUMPTION: ...]` rather than carried forward as established facts. Use this when context is filling up but you want to continue in the same session. The same logic fires automatically at 75% of the context budget (`repl.autoCompactThreshold`) unless disabled — see "Compacting a session" below. |
 | `/compact <focus>` | Same as `/compact`, but passes a focus hint to the model so the summary is tailored toward the next task (e.g. `/compact fix the auth bug next`) |
 | `/history` | Show a condensed view of the conversation (role + preview of each message) |
 | `/replay [n\|all]` | Re-display the last `n` turns in full — your message, a one-line summary of the tools used, and the agent's rendered reply. Defaults to `repl.resumeReplayTurns` (3 if unset or 0); `all` shows every turn still in memory. This is the same view shown automatically when a session is resumed. Internal messages (self-correction nudges, plan-step summaries, `/run` results, the `/compact` summary) are left out. |
 | `/system` | Print the current system prompt |
 | `/system <prompt>` | Replace the system prompt for the rest of the session |
-| `/tools` | List active tools grouped by category, with enabled/disabled status. Restricted tools are marked `(restricted)`; any active capability restrictions are listed underneath. |
-| `/tools disable <category>` | Disable a tool category for the rest of the session (`FileSystem`, `Shell`, `Search`, `Git`, `Http`, `Skills`) |
-| `/tools enable <category>` | Re-enable a previously disabled tool category |
+| `/tools` | List the chat's tools grouped by category, with enabled/disabled status. Tools turned off one at a time are marked `(disabled)`, restricted ones `(restricted)`; any active capability restrictions are listed underneath. |
+| `/tools disable <category\|tool>` | Turn a whole category (`Shell`, `Git`, `mcp:github`, …) or one tool (`git_push`) off for this chat |
+| `/tools enable <category\|tool>` | Turn it back on. Optional plugins (`Http`, `Extended`, `Scratchpad`, …) can be turned on mid-chat this way too. A tool in a category that's off stays unavailable until the category is on. |
+| `/tools save` | Make new chats start with the tools this chat has on now (writes `repl.plugins` and `repl.disabledTools`) |
+| `/tools reset` | Put this chat's tools back to the saved defaults |
 | `/tools restrict <plugin> <tag…>` | Allow only tools tagged with one of `<tag…>` for that plugin (e.g. `/tools restrict Git read`), using the same capability vocabulary as orchestration's [`Capabilities`](configuration.md#capabilities) |
 | `/tools unrestrict <plugin>` | Remove a plugin's capability restriction |
 | `/undo` | Revert files written, patched, copied, moved, or deleted in the most recent turn. Repeatable — walks back one turn at a time. Only affects the filesystem; use `/rewind` to also roll back conversation history. |
@@ -479,7 +483,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/save` | Save a Markdown transcript to `repl-<sessionId>.md` in the current directory |
 | `/save <file>` | Save the transcript to a specific file |
 | `/snapshot` | Write a full debug snapshot of the current session state — metadata, active modes, context stats, tool inventory, plan state, and full message history — to a timestamped JSON file in `/tmp/fuseraft/`. Prints the file path on completion. |
-| `/context` | Show context window usage: token count vs. budget, explicit budget label, completed turn count, per-role message counts, per-category breakdown, delta since last check, and projected turns remaining after 2+ turns. The headline token count uses the real size the provider reported for the most recently completed turn's opening request when available, falling back to a char-based estimate before the first turn or when the provider never reports usage (e.g. Ollama); the per-category breakdown always stays estimated. Also shows cumulative session usage — actual input/output tokens reported by the provider across every LLM call so far, summed across tool-call round trips (not reset by `/clear`, `/rewind`, or `/compact`), plus a cumulative cache-read count when the provider reports prompt-cache hits (native Anthropic Messages API, and OpenAI-compatible providers that report `cached_tokens`) |
+| `/context` | Show context window usage: token count vs. budget, explicit budget label, completed turn count, per-role message counts, per-category breakdown, delta since last check, and projected turns remaining after 2+ turns. The headline token count uses the real size the provider reported for the most recently completed turn's opening request when available, falling back to a char-based estimate before the first turn or when the provider never reports usage (e.g. Ollama); the per-category breakdown always stays estimated. Also shows cumulative session usage — actual input/output tokens reported by the provider across every LLM call so far, summed across tool-call round trips since the chat started (not reset by `/rewind` or `/compact`; `/clear` starts a new chat, so it starts again), plus a cumulative cache-read count when the provider reports prompt-cache hits (native Anthropic Messages API, and OpenAI-compatible providers that report `cached_tokens`) |
 | `/events` | Show event stats for the current session: turns, total tool calls, per-turn tool breakdown, top tools by frequency, and total plus per-turn actual input/output tokens (real provider-reported usage, shown only for turns where the provider reported it) |
 | `/events stats` | Same as `/events` |
 | `/explore <query>` | Run a subagent exploration loop over the codebase and return a prose summary. The subagent uses read-only tools and runs in an isolated context with no shared history from the main session. |
@@ -796,7 +800,7 @@ When a step fails the REPL preserves the halted step and all remaining steps. Yo
   …
 ```
 
-If the retry fails again the plan halts a second time and both `/recover` and `/resume` remain available. `/clear` discards halted state along with the rest of the session.
+If the retry fails again the plan halts a second time and both `/recover` and `/resume` remain available. `/clear` starts a new chat without it; the halted chat stays saved.
 
 **Branching and rewinding**
 
@@ -883,7 +887,7 @@ If `TrimHistory` has evicted early turns to fit the context window, a note is sh
 | `/rewind 2` | Keep turns 1–2, discard turns 3 and beyond |
 | `/rewind -1` | Drop the most recent turn |
 | `/rewind -3` | Drop the last 3 turns |
-| `/rewind 0` | Drop all turns (equivalent to `/clear`) |
+| `/rewind 0` | Drop all turns, keeping this chat (`/clear` starts a new one instead) |
 | `/rewind -99` | Clamped to 0 — always safe |
 | `/rewind 99` | Clamped to current end — no-op with message |
 
@@ -1093,10 +1097,10 @@ Pass an optional focus hint to steer the summary toward the next task:
 ```
 > /compact fix the auth middleware next
   compacting…
-  Session compacted — history replaced with handoff summary.
+  Earlier messages summarized to save context.
 
 > What was the last thing we did?
-  assistant: Based on the compacted context: we finished wiring the JWT validation
+  assistant: Earlier in this chat we finished wiring the JWT validation
   middleware and left off on ...
 ```
 
@@ -2810,6 +2814,7 @@ View or edit the global `~/.fuseraft/config` file — provider, sampling, REPL, 
 
 ```
 fuseraft settings show [--json]
+fuseraft settings tools [--json]
 fuseraft settings set [key] [value] [--json]
 ```
 
@@ -2822,6 +2827,15 @@ fuseraft settings show
 ```
 
 With `--json`, prints every settable key instead, with its value, default, type and allowed range, as one [Setting](protocol.md#setting) list. This is what the VS Code extension's settings panel reads.
+
+### `fuseraft settings tools`
+
+Lists the tools a new chat starts with, by category, marking the ones that start off: optional plugins not named in `repl.plugins`, and everything in `repl.disabledTools`. Skills and MCP servers are listed as categories only; their tools are known once a chat loads them. With `--json`, prints a [ToolCategory](protocol.md#toolcategory) list, which the VS Code settings panel's Tools section reads.
+
+```bash
+fuseraft settings tools
+fuseraft settings set repl.disabledTools Shell,git_push
+```
 
 ### `fuseraft settings set`
 
@@ -2872,6 +2886,7 @@ Numbers are checked against the range in the table below, and `repl.dock` agains
 | `repl.maxTodoNudges` | Follow-up turns sent when the model stops with todo items it wrote during the current request still open, 0–10 (default `2`; `0` turns them off), or `""` to reset |
 | `repl.maxTurnInputTokens` | Uncached input tokens one turn may spend across all of its model calls before it stops (prompt-cache reads don't count), 100,000–100,000,000 (default `1000000`), or `""` to reset |
 | `repl.plugins` | Comma-separated plugin list, e.g. `Scratchpad,Http` |
+| `repl.disabledTools` | Comma-separated tools every chat starts with off: categories (`Shell`, `mcp:github`) or single tools (`git_push`). `fuseraft settings tools` lists them; `/tools save` writes it from a chat. |
 | `telemetry.otlpEndpoint` | OTLP endpoint URL, or `""` to disable |
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
 | `skillCuration.enabled` | `true`/`false` |

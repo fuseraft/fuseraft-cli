@@ -171,7 +171,8 @@ public sealed class ReplStdinPump
     }
 
     /// <summary>One webview message: its text plus any images that came with it (already validated).</summary>
-    internal sealed record BridgeInput(string? Text, IReadOnlyList<DataContent> Images, IReadOnlyList<string> Errors);
+    /// <remarks><c>Quiet</c>: a /command a panel control sent (its tools menu, say), whose result the control shows itself.</remarks>
+    internal sealed record BridgeInput(string? Text, IReadOnlyList<DataContent> Images, IReadOnlyList<string> Errors, bool Quiet = false);
 
     /// <summary>Like <see cref="ReadInputAsync"/> but keeps attached images; null once stdin is closed.</summary>
     internal async Task<BridgeInput?> ReadMessageAsync() =>
@@ -200,10 +201,13 @@ public sealed class ReplStdinPump
         var text   = ExtractText(line);
         var images = new List<DataContent>();
         var errors = new List<string>();
+        var quiet  = false;
 
         try
         {
             using var doc = JsonDocument.Parse(line);
+            quiet = doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("quiet", out var q) && q.ValueKind == JsonValueKind.True;
             if (doc.RootElement.ValueKind == JsonValueKind.Object &&
                 doc.RootElement.TryGetProperty("images", out var arr) && arr.ValueKind == JsonValueKind.Array)
             {
@@ -248,7 +252,7 @@ public sealed class ReplStdinPump
         }
         catch (JsonException) { /* not JSON: the whole line is the text, no images */ }
 
-        return new BridgeInput(text, images, errors);
+        return new BridgeInput(text, images, errors, quiet);
     }
 
     /// <summary>Returns the next non-interrupt line's "text" field, or null once stdin is closed.</summary>

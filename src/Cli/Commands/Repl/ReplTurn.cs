@@ -530,6 +530,7 @@ internal static class ReplTurn
 
             string? raw;
             IReadOnlyList<DataContent> bridgeImages = [];
+            var quietCommand = false;
             ctx.AwaitingInput = true;
             try
             {
@@ -560,6 +561,7 @@ internal static class ReplTurn
                         ReplJsonBridge.Emit(StatusEvent(BuildStatus(ctx, modeTags)));
                         var msg = await ctx.StdinPump!.ReadMessageAsync();
                         raw = msg?.Text;
+                        quietCommand = msg?.Quiet == true;
                         if (msg is not null)
                         {
                             ReplImages.ReportErrors(ctx, msg.Errors);
@@ -612,7 +614,7 @@ internal static class ReplTurn
                         Console.SetOut(savedOut);
                         AnsiConsole.Console = savedAnsiConsole;
                         var captured = ReplConsole.StripAnsi(capture.ToString()).Trim();
-                        if (!string.IsNullOrWhiteSpace(captured))
+                        if (!string.IsNullOrWhiteSpace(captured) && !quietCommand)
                             ReplJsonBridge.Emit(new { type = "token", text = captured });
                     }
                 }

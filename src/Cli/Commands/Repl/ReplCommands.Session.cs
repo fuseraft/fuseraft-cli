@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Extensions.AI;
 using Spectre.Console;
 using fuseraft.Cli.Display;
+using fuseraft.Core;
 using fuseraft.Core.Images;
 using fuseraft.Core.Models;
 
@@ -13,9 +14,20 @@ internal static partial class ReplCommands
     // /clear
     // -------------------------------------------------------------------------
 
+    // Starts a new chat, as New Chat does: the current one stays saved under its own ID, so /switch or the Chats list
+    // can go back to it.
     private static async Task<CommandResult> CmdClearAsync(ReplSessionContext ctx)
     {
         await ReplTurn.SaveMemoriesBeforeDiscardAsync(ctx);
+
+        var prevId   = ctx.SessionId;
+        var hadChat  = ctx.History.Any(m => m.Role != ChatRole.System);
+        if (hadChat) await ReplTurn.SaveSnapshotAsync(ctx);
+
+        ctx.SessionId = StringHelpers.NewSessionId();
+        ctx.StartedAt = DateTime.UtcNow;
+        ctx.Emitter.SetSessionId(ctx.SessionId);
+        ctx.TitleUnsaved = false;
 
         var sys = ctx.History.FirstOrDefault(m => m.Role == ChatRole.System);
         ctx.History.Clear();
@@ -25,6 +37,9 @@ internal static partial class ReplCommands
         ctx.LastExtractedTurnIndex = -1;
         ctx.PrevTurnTokenEstimate  = 0;
         ctx.TurnTokenDeltas.Clear();
+        ctx.CumulativeInputTokens     = 0;
+        ctx.CumulativeOutputTokens    = 0;
+        ctx.CumulativeCacheReadTokens = 0;
         ctx.ContextWarningShown    = false;
         ctx.ResetPlanState();
         ctx.LastGoal = null;
@@ -35,7 +50,16 @@ internal static partial class ReplCommands
         ctx.AutoTitleGeneration++;
         ctx.Todo?.Clear();
 
-        if (!ctx.JsonMode && !ctx.NoBanner)
+        if (ctx.JsonMode)
+        {
+            // Panels that predate the cleared event show this note; newer ones wipe it with the rest of the transcript.
+            ReplJsonBridge.Emit(new { type = "text", text = hadChat
+                ? $"Started a new chat. The previous one is saved in Chats (`/switch {prevId}`)."
+                : "Started a new chat." });
+            ReplJsonBridge.Emit(new { type = "cleared", sessionId = ctx.SessionId, previousSessionId = hadChat ? prevId : null });
+            ReplJsonBridge.Emit(new { type = "title", sessionId = ctx.SessionId, title = (string?)null, autoTitle = (string?)null });
+        }
+        else if (!ctx.NoBanner)
         {
             AnsiConsole.Clear();
             var pluginNames = new List<string>(ctx.ToolsByCategory.Keys);
@@ -49,10 +73,13 @@ internal static partial class ReplCommands
         }
         else
         {
-            AnsiConsole.MarkupLine("[dim]History cleared.[/]");
+            AnsiConsole.MarkupLine("[dim]Started a new chat.[/]");
         }
 
-        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/clear" });
+        if (!ctx.JsonMode && hadChat)
+            AnsiConsole.MarkupLine($"[dim]The previous chat is saved — [/][bold]/switch {Markup.Escape(prevId)}[/][dim] to go back to it.[/]");
+
+        await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/clear", prev_id = prevId });
         return CommandResult.Continue;
     }
 

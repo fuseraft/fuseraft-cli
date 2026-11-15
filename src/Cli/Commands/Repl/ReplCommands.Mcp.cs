@@ -241,6 +241,7 @@ internal static partial class ReplCommands
         ctx.Client     = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools, limits: ctx.Limits);
         ctx.StepClient = ReplFactory.BuildClient(ctx.ModelConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, ReplTurn.StepIterationLimit, activeTools);
         ctx.ChatOptions = ctx.BuildChatOptions();
+        ReplToolState.EmitIfBridged(ctx);
     }
 
     // Says which ${ENV_VAR} tokens a server is about to start with as empty, before it's connected, so a server that
@@ -293,6 +294,7 @@ internal static partial class ReplCommands
         var category = $"{McpCategoryPrefix}{config.Name}";
         if (ctx.ToolsByCategory.Remove(category))
             ctx.ChatOptions = ctx.BuildChatOptions();
+            ReplToolState.EmitIfBridged(ctx);
         try { if (ctx.McpManager is not null) await ctx.McpManager.RemoveAsync(config.Name); }
         catch { /* best-effort — the session being replaced has usually already ended */ }
 
@@ -410,6 +412,7 @@ internal static partial class ReplCommands
         {
             ctx.DisabledCategories.Remove(category);
             ctx.ChatOptions = ctx.BuildChatOptions();
+            ReplToolState.EmitIfBridged(ctx);
             try { if (ctx.McpManager is not null) await ctx.McpManager.RemoveAsync(config.Name); }
             catch { /* best-effort — the cached token is already cleared, which is the point */ }
         }
@@ -494,6 +497,7 @@ internal static partial class ReplCommands
         {
             ctx.DisabledCategories.Remove(category);
             ctx.ChatOptions = ctx.BuildChatOptions();
+            ReplToolState.EmitIfBridged(ctx);
         }
 
         if (removed.Count > 0)

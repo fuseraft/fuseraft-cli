@@ -57,6 +57,10 @@ public sealed class ReplDefaultsConfig
     [JsonPropertyName("plugins")]
     public List<string> Plugins { get; set; } = [];
 
+    /// <summary>Tool categories (e.g. <c>Shell</c>, <c>mcp:github</c>) or single tools (e.g. <c>git_push</c>) every chat starts with off.</summary>
+    [JsonPropertyName("disabledTools")]
+    public List<string> DisabledTools { get; set; } = [];
+
     /// <summary>
     /// Auto-compact history when context crosses 75% of budget, instead of only warning.
     /// Default on; set false to restore the old warn-only behavior.

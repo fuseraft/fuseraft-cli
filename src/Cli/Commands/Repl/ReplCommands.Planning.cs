@@ -15,6 +15,18 @@ internal static partial class ReplCommands
     // What sessions saved before that wording carry.
     internal const string LegacyCompactedContextPrefix = "[Compacted context from previous session]";
 
+    /// <summary>True for the user-role message /compact leaves in place of the summarised history, either wording.</summary>
+    internal static bool IsCompactedSummary(string? text) =>
+        text is not null &&
+        (text.StartsWith(CompactedContextPrefix, StringComparison.Ordinal) ||
+         text.StartsWith(LegacyCompactedContextPrefix, StringComparison.Ordinal));
+
+    /// <summary>The summary's own text, without the compaction prefix.</summary>
+    internal static string StripCompactedPrefix(string text) =>
+        text.StartsWith(CompactedContextPrefix, StringComparison.Ordinal)       ? text[CompactedContextPrefix.Length..].Trim()
+        : text.StartsWith(LegacyCompactedContextPrefix, StringComparison.Ordinal) ? text[LegacyCompactedContextPrefix.Length..].Trim()
+        : text;
+
     // -------------------------------------------------------------------------
     // /plan
     // -------------------------------------------------------------------------
@@ -185,7 +197,7 @@ internal static partial class ReplCommands
         if (ctx.JsonMode)
             ReplJsonBridge.Emit(new { type = "compacted" });
         else
-            AnsiConsole.MarkupLine("[dim]Session compacted — history replaced with handoff summary.[/]");
+            AnsiConsole.MarkupLine("[dim]Earlier messages summarized to save context.[/]");
         await ctx.Emitter.EmitAsync(EventTypes.Command, payload: new { command = "/compact", arg });
         return CommandResult.Continue;
     }

@@ -131,6 +131,20 @@ public sealed class ReplAutoTitleTests : IDisposable
         Assert.Equal(("list the files", "There is one file, a.txt."), ReplAutoTitle.FirstExchange(history));
     }
 
+    [Fact]
+    public void FirstExchange_SkipsTheCompactionSummary()
+    {
+        List<ChatMessage> history =
+        [
+            new(ChatRole.User, $"{ReplCommands.LegacyCompactedContextPrefix}\n\n# Handoff: costpoint"),
+            new(ChatRole.Assistant, "Picking up where we left off."),
+            new(ChatRole.User, "now fix the null USER_ID"),
+            new(ChatRole.Assistant, "Found it in the trigger."),
+        ];
+
+        Assert.Equal(("now fix the null USER_ID", "Found it in the trigger."), ReplAutoTitle.FirstExchange(history));
+    }
+
     private sealed class FakeClient(string reply) : IChatClient
     {
         public TaskCompletionSource? Gate { get; init; }

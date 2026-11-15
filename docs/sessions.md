@@ -75,7 +75,7 @@ Use `/conversation` to list all turns in memory with their 1-based indices, then
 /conversation           # see turn numbers and previews
 /rewind 3               # keep turns 1–3, discard the rest
 /rewind -1              # drop the last turn
-/rewind 0               # clear all turns (like /clear)
+/rewind 0               # drop all turns, keeping this chat (/clear starts a new one)
 ```
 
 Rewind updates the turn counter, resets plan state, and adjusts token tracking. Out-of-range values are clamped silently — `/rewind -99` is always safe.

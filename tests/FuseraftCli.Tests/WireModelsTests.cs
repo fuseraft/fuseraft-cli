@@ -1,4 +1,5 @@
 using System.Text.Json;
+using fuseraft.Cli.Commands.Repl;
 using fuseraft.Cli.Protocol;
 using fuseraft.Core.Models.Config;
 using fuseraft.Core.Models.Knowledge;
@@ -68,6 +69,32 @@ public sealed class WireModelsTests
         Assert.Equal("fix the bug", wire.FirstUserMessage);
     }
 
+    [Theory]
+    [InlineData(ReplCommands.CompactedContextPrefix)]
+    [InlineData(ReplCommands.LegacyCompactedContextPrefix)]
+    public void WireReplSession_FirstUserMessage_SkipsCompactionSummary(string prefix)
+    {
+        var wire = WireReplSession.From(Snapshot(history:
+        [
+            Msg("user", new ReplSerializedContent { Text = $"{prefix}\n\n# Handoff: costpoint" }),
+            Msg("assistant", new ReplSerializedContent { Text = "ok" }),
+            Msg("user", new ReplSerializedContent { Text = "fix the bug" }),
+        ]));
+
+        Assert.Equal("fix the bug", wire.FirstUserMessage);
+    }
+
+    [Theory]
+    [InlineData(ReplCommands.CompactedContextPrefix)]
+    [InlineData(ReplCommands.LegacyCompactedContextPrefix)]
+    public void WireReplSession_FirstUserMessage_OnlySummary_DropsPrefix(string prefix)
+    {
+        var wire = WireReplSession.From(Snapshot(history:
+            [Msg("user", new ReplSerializedContent { Text = $"{prefix}\n\n# Handoff: costpoint" })]));
+
+        Assert.Equal("# Handoff: costpoint", wire.FirstUserMessage);
+    }
+
     [Fact]
     public void WireReplSession_FirstUserMessage_IsCapped()
     {
@@ -84,6 +111,15 @@ public sealed class WireModelsTests
         Assert.Null(wire.Title);
         Assert.Null(wire.AutoTitle);
         Assert.Equal(string.Empty, wire.FirstUserMessage);
+    }
+
+    [Fact]
+    public void WireToolCategory_Fields()
+    {
+        var wire = new WireToolCategory("Git", "Status and commits", false, true, [new WireTool("git_push", "Push.", false)]);
+
+        Assert.Equal(["name", "description", "optional", "enabled", "tools"], Keys(wire));
+        Assert.Equal(["name", "description", "enabled"], Keys(wire.Tools![0]));
     }
 
     [Fact]

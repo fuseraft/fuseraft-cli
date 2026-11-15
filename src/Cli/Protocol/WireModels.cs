@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using fuseraft.Cli.Commands;
+using fuseraft.Cli.Commands.Repl;
 using fuseraft.Core.Models.Agents;
 using fuseraft.Core.Models.Config;
 using fuseraft.Core.Models.Knowledge;
@@ -103,10 +104,17 @@ public sealed record WireReplSession(
         string.IsNullOrWhiteSpace(s.AutoTitle) ? null : s.AutoTitle,
         s.StartedAt, s.LastUpdatedAt, s.TurnIndex, FirstUserText(s));
 
+    // A /compact summary is the first user message of a compacted chat; label it by what the user asked, not the summary.
     private static string FirstUserText(ReplSessionSnapshot s)
     {
-        var text = s.History.FirstOrDefault(m => m.Role == ChatRole.User.Value)?
-            .Contents.FirstOrDefault(c => c.Type == "text")?.Text ?? string.Empty;
+        var texts = s.History
+            .Where(m => m.Role == ChatRole.User.Value)
+            .Select(m => m.Contents.FirstOrDefault(c => c.Type == "text")?.Text)
+            .Where(t => t is not null)
+            .Select(t => t!)
+            .ToList();
+        var text = texts.FirstOrDefault(t => !ReplCommands.IsCompactedSummary(t))
+            ?? (texts.FirstOrDefault() is { } summary ? ReplCommands.StripCompactedPrefix(summary) : string.Empty);
         return text.Length <= MaxPreviewChars ? text : text[..MaxPreviewChars];
     }
 }
@@ -163,3 +171,13 @@ public sealed record WireSetting(
         s.Key, s.Kind.ToString().ToLowerInvariant(), s.Description, s.Read(config), s.Default,
         s.Min, s.Max, s.Choices, s.Clearable);
 }
+
+/// <summary>
+/// A chat tool category from <c>fuseraft settings tools --json</c>: whether new chats start with it on, and its tools.
+/// <c>Tools</c> is null for the categories only a running chat can list (Skills, MCP servers).
+/// </summary>
+public sealed record WireToolCategory(
+    string Name, string Description, bool Optional, bool Enabled, IReadOnlyList<WireTool>? Tools);
+
+/// <summary>One tool in a <see cref="WireToolCategory"/>, and whether new chats start with it on.</summary>
+public sealed record WireTool(string Name, string Description, bool Enabled);

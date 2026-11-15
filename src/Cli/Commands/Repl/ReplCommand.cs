@@ -112,52 +112,15 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         ("DEEPSEEK_API_KEY",   "deepseek-chat"),
     ];
 
-    // Curated default tool surface: the common, low-risk subset of FileSystem/Shell/Git
-    // that covers a typical session (read, edit, search, status, commit). Everything else
-    // in those three plugins — destructive ops, remote ops, and background jobs — is still
-    // useful but rarer, so it moves behind the opt-in "Extended" plugin (--plugins Extended)
-    // rather than shipping in every request's tool schema by default. This does not affect
-    // /explore or /locate (SubagentPlugin's explorerTools), which are built from the full,
-    // unfiltered lists below regardless of whether Extended is enabled.
-    private static readonly HashSet<string> CoreFileSystemTools = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "read_file", "write_file", "patch_file", "get_file_summary",
-        "list_files", "grep_file", "get_file_info", "create_directory",
-    };
-
-    private static readonly HashSet<string> CoreShellTools = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "shell_run", "shell_run_script", "shell_get_env", "shell_set_env",
-        "shell_which", "shell_get_working_directory",
-    };
+    private static HashSet<string> CoreFileSystemTools    => ReplToolCatalog.CoreFileSystemTools;
+    private static HashSet<string> CoreShellTools         => ReplToolCatalog.CoreShellTools;
+    private static HashSet<string> CoreGitTools           => ReplToolCatalog.CoreGitTools;
+    private static HashSet<string> CoreSessionTools       => ReplToolCatalog.CoreSessionTools;
+    private static HashSet<string> SessionDiagnosticTools => ReplToolCatalog.SessionDiagnosticTools;
 
     private static readonly HashSet<string> ShellCommandTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "shell_run", "shell_run_script",
-    };
-
-    private static readonly HashSet<string> CoreGitTools = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "git_status", "git_diff", "git_log", "git_show", "git_branch_list",
-        "git_add", "git_commit", "git_stash_list",
-    };
-
-    // ReplSessionPlugin split in two: get_context_status stays in the default tool set so the model can check its
-    // headroom. compact_context doesn't: fuseraft compacts between turns on its own (retried each turn while over the
-    // threshold), a compaction mid-turn can't shrink the request in flight, and models called it unprompted after
-    // answering, which cost a round and repeated the answer.
-    // current/list/read_event_log/read_log let the model enumerate and read a *different*
-    // session's full event log by ID/prefix match — real cross-session data exposure with no
-    // turn-to-turn value for the primary agent, so they're withheld from the default set and
-    // handed only to /assist's diagnose loop instead (see SubagentPlugin's diagnosticTools).
-    private static readonly HashSet<string> CoreSessionTools = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "repl_session_get_context_status",
-    };
-
-    private static readonly HashSet<string> SessionDiagnosticTools = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "repl_session_current", "repl_session_list", "repl_session_read_event_log", "repl_session_read_log",
     };
 
     public override Task<int> ExecuteAsync(
@@ -625,42 +588,26 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             fsPluginForCategory?.EnableUndoSnapshots(
                 FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionUndoSnapshots, sessionId, slug));
 
-            if (enabled.Contains("Http"))
-                toolsByCategory["Http"] = PluginRegistry.GetFunctionsFromObject(new HttpPlugin(approveToolAction("Http"))).ToList();
+            // Optional plugins are built whether or not they're on, so the tools menu (or /tools enable) can turn one on
+            // mid-chat; ReplToolState.Defaults leaves off the ones neither repl.plugins nor --plugins names. Their
+            // constructors only record paths, and the system prompt's folder map names only those on from the start.
+            toolsByCategory["Http"] = PluginRegistry.GetFunctionsFromObject(new HttpPlugin(approveToolAction("Http"))).ToList();
 
-            if (enabled.Contains("Extended") && fsFunctions is not null && shellFunctions is not null && gitFunctions is not null)
+            if (fsFunctions is not null && shellFunctions is not null && gitFunctions is not null)
                 toolsByCategory["Extended"] = fsFunctions.Where(f => !CoreFileSystemTools.Contains(f.Name))
                     .Concat(shellFunctions.Where(f => !CoreShellTools.Contains(f.Name)))
                     .Concat(gitFunctions.Where(f => !CoreGitTools.Contains(f.Name)))
                     .ToList();
 
-            if (enabled.Contains("Changes"))
+            void AddArtifactPlugin(string category, IHasArtifact plugin)
             {
-                var p = new ChangesPlugin(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, slug));
-                toolsByCategory["Changes"] = PluginRegistry.GetFunctionsFromObject(p).ToList();
-                activePlugins.Add(p);
+                toolsByCategory[category] = PluginRegistry.GetFunctionsFromObject(plugin).ToList();
+                if (enabled.Contains(category)) activePlugins.Add(plugin);
             }
-
-            if (enabled.Contains("Chatroom"))
-            {
-                var p = new ChatroomPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalChatroom, sessionId, slug));
-                toolsByCategory["Chatroom"] = PluginRegistry.GetFunctionsFromObject(p).ToList();
-                activePlugins.Add(p);
-            }
-
-            if (enabled.Contains("SessionContext"))
-            {
-                var p = new SessionContextPlugin(FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, sessionId, slug));
-                toolsByCategory["SessionContext"] = PluginRegistry.GetFunctionsFromObject(p).ToList();
-                activePlugins.Add(p);
-            }
-
-            if (enabled.Contains("Scratchpad"))
-            {
-                var p = new ScratchpadPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionScratchpad, sessionId, slug));
-                toolsByCategory["Scratchpad"] = PluginRegistry.GetFunctionsFromObject(p).ToList();
-                activePlugins.Add(p);
-            }
+            AddArtifactPlugin("Changes", new ChangesPlugin(FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalChanges, slug)));
+            AddArtifactPlugin("Chatroom", new ChatroomPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalChatroom, sessionId, slug)));
+            AddArtifactPlugin("SessionContext", new SessionContextPlugin(FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionContext, sessionId, slug)));
+            AddArtifactPlugin("Scratchpad", new ScratchpadPlugin("repl", FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalSessionScratchpad, sessionId, slug)));
 
             var managedMcp = ManagedMcpServers.Load(out var managedMcpError);
             if (managedMcpError is not null)
@@ -751,9 +698,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
                 .Select(f => ReplSessionContext.WrapTool(f, emitter, toolArtifactStore))
                 .ToList();
 
-        // Recompute now that Subagent (and any optional --plugins categories) are registered,
-        // so the session-start event, system prompt, and startup banner report the true count.
-        initialTools = toolsByCategory.Values.SelectMany(v => v).ToList();
+        // Recompute now that Subagent and the optional plugins are registered, counting only what the saved
+        // defaults leave on, so the session-start event, system prompt, and startup banner report the true count.
+        var (startOffCategories, startOffTools) = ReplToolState.Defaults(userCfg?.Repl, settings.EnabledPlugins, toolsByCategory);
+        initialTools = toolsByCategory.Where(kv => !startOffCategories.Contains(kv.Key))
+            .SelectMany(kv => kv.Value).Where(f => !startOffTools.Contains(f.Name)).ToList();
 
         await emitter.EmitAsync(EventTypes.SessionStart, payload: new
         {
@@ -785,7 +734,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         if (!jsonMode && !noBanner)
         {
             // Build plugin name list: tool categories + "Memory" if memories are loaded.
-            var pluginNames = new List<string>(toolsByCategory.Keys);
+            var pluginNames = toolsByCategory.Keys.Where(k => !startOffCategories.Contains(k)).ToList();
             if (memoryBlock is not null) pluginNames.Add("Memory");
 
             MessageRenderer.RenderReplHeader(
@@ -819,7 +768,11 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             Yolo           = yolo,
             ToolArtifactStore = toolArtifactStore,
             Connection     = connection,
+            FlagPlugins    = settings.EnabledPlugins,
         };
+        ctx.DisabledCategories.UnionWith(startOffCategories);
+        ctx.DisabledTools.UnionWith(startOffTools);
+        ctx.ChatOptions = ctx.BuildChatOptions();
         ctxForStdin = ctx;
         if (tui is not null)
         {
@@ -939,7 +892,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         }
 
         if (jsonMode)
+        {
             ReplJsonBridge.Emit(ReadyEvent(sessionId, modelId, ctx.Title, ctx.AutoTitle));
+            ReplJsonBridge.Emit(ReplToolState.Event(ctx, userCfg?.Repl));
+        }
 
         // Write a seed snapshot immediately so this session appears in the sessions list
         // even if the process dies before the first turn completes.
@@ -1100,7 +1056,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
 
             // Derive a task description from the first user message in the session.
             var taskDescription = ctx.History
-                .FirstOrDefault(m => m.Role == ChatRole.User)?.Text?.Trim()
+                .FirstOrDefault(m => m.Role == ChatRole.User && !ReplCommands.IsCompactedSummary(m.Text))?.Text?.Trim()
                 ?? "REPL session";
 
             var checkpoint = new SessionCheckpoint
