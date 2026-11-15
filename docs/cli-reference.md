@@ -382,7 +382,9 @@ common, low-risk operations that cover a typical session (read, edit, search, st
 | Session | `repl_session_current`, `repl_session_list`, `repl_session_read_event_log`, `repl_session_read_log`, `compact_context`, `get_context_status` |
 | Skills | `load_skill`, `run_skill_script` (only when skills are installed — see [Skills](skills.md)) |
 
-**Optional plugins** — not loaded by default; pass `--plugins <name>,<name>` (comma-separated) to enable them. Kept opt-in because every registered tool adds its schema to every request — a smaller default tool surface means smaller, faster requests and less chance of tripping a provider's tool-schema limits. Persist a set of plugins you always want with `fuseraft settings set repl.plugins <name>,<name>` — they're unioned with whatever `--plugins` passes for that invocation.
+**Optional plugins** — not loaded by default; pass `--plugins <name>,<name>` (comma-separated) to enable them. Kept opt-in because every registered tool adds its schema to every request — a smaller default tool surface means smaller, faster requests and less chance of tripping a provider's tool-schema limits. Persist a set of plugins you always want with `fuseraft settings set repl.plugins <name>,<name>` — they're unioned with whatever `--plugins` passes for that invocation. Every chat still builds them, switched off, so `/tools enable Http` (or the tools menu in VS Code) can turn one on partway through a chat.
+
+**Choosing tools.** `/tools disable` and `/tools enable` change the current chat; `/tools save` keeps that set for new chats, in `repl.plugins` and `repl.disabledTools` (whole categories such as `Shell` or `mcp:github`, or single tools such as `git_push`). `fuseraft settings tools` lists what new chats start with. In VS Code, the tools count on the chat's status line opens a menu with a switch for each category and tool, and the settings panel has the same switches for new chats.
 
 | Plugin | Tools |
 |--------|-------|
@@ -443,9 +445,11 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/replay [n\|all]` | Re-display the last `n` turns in full — your message, a one-line summary of the tools used, and the agent's rendered reply. Defaults to `repl.resumeReplayTurns` (3 if unset or 0); `all` shows every turn still in memory. This is the same view shown automatically when a session is resumed. Internal messages (self-correction nudges, plan-step summaries, `/run` results, the `/compact` summary) are left out. |
 | `/system` | Print the current system prompt |
 | `/system <prompt>` | Replace the system prompt for the rest of the session |
-| `/tools` | List active tools grouped by category, with enabled/disabled status. Restricted tools are marked `(restricted)`; any active capability restrictions are listed underneath. |
-| `/tools disable <category>` | Disable a tool category for the rest of the session (`FileSystem`, `Shell`, `Search`, `Git`, `Http`, `Skills`) |
-| `/tools enable <category>` | Re-enable a previously disabled tool category |
+| `/tools` | List the chat's tools grouped by category, with enabled/disabled status. Tools turned off one at a time are marked `(disabled)`, restricted ones `(restricted)`; any active capability restrictions are listed underneath. |
+| `/tools disable <category\|tool>` | Turn a whole category (`Shell`, `Git`, `mcp:github`, …) or one tool (`git_push`) off for this chat |
+| `/tools enable <category\|tool>` | Turn it back on. Optional plugins (`Http`, `Extended`, `Scratchpad`, …) can be turned on mid-chat this way too. A tool in a category that's off stays unavailable until the category is on. |
+| `/tools save` | Make new chats start with the tools this chat has on now (writes `repl.plugins` and `repl.disabledTools`) |
+| `/tools reset` | Put this chat's tools back to the saved defaults |
 | `/tools restrict <plugin> <tag…>` | Allow only tools tagged with one of `<tag…>` for that plugin (e.g. `/tools restrict Git read`), using the same capability vocabulary as orchestration's [`Capabilities`](configuration.md#capabilities) |
 | `/tools unrestrict <plugin>` | Remove a plugin's capability restriction |
 | `/undo` | Revert files written, patched, copied, moved, or deleted in the most recent turn. Repeatable — walks back one turn at a time. Only affects the filesystem; use `/rewind` to also roll back conversation history. |
@@ -2810,6 +2814,7 @@ View or edit the global `~/.fuseraft/config` file — provider, sampling, REPL, 
 
 ```
 fuseraft settings show [--json]
+fuseraft settings tools [--json]
 fuseraft settings set [key] [value] [--json]
 ```
 
@@ -2822,6 +2827,15 @@ fuseraft settings show
 ```
 
 With `--json`, prints every settable key instead, with its value, default, type and allowed range, as one [Setting](protocol.md#setting) list. This is what the VS Code extension's settings panel reads.
+
+### `fuseraft settings tools`
+
+Lists the tools a new chat starts with, by category, marking the ones that start off: optional plugins not named in `repl.plugins`, and everything in `repl.disabledTools`. Skills and MCP servers are listed as categories only; their tools are known once a chat loads them. With `--json`, prints a [ToolCategory](protocol.md#toolcategory) list, which the VS Code settings panel's Tools section reads.
+
+```bash
+fuseraft settings tools
+fuseraft settings set repl.disabledTools Shell,git_push
+```
 
 ### `fuseraft settings set`
 
@@ -2872,6 +2886,7 @@ Numbers are checked against the range in the table below, and `repl.dock` agains
 | `repl.maxTodoNudges` | Follow-up turns sent when the model stops with todo items it wrote during the current request still open, 0–10 (default `2`; `0` turns them off), or `""` to reset |
 | `repl.maxTurnInputTokens` | Uncached input tokens one turn may spend across all of its model calls before it stops (prompt-cache reads don't count), 100,000–100,000,000 (default `1000000`), or `""` to reset |
 | `repl.plugins` | Comma-separated plugin list, e.g. `Scratchpad,Http` |
+| `repl.disabledTools` | Comma-separated tools every chat starts with off: categories (`Shell`, `mcp:github`) or single tools (`git_push`). `fuseraft settings tools` lists them; `/tools save` writes it from a chat. |
 | `telemetry.otlpEndpoint` | OTLP endpoint URL, or `""` to disable |
 | `telemetry.serviceName` | Requires `telemetry.otlpEndpoint` to already be set |
 | `skillCuration.enabled` | `true`/`false` |

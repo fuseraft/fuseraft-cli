@@ -411,11 +411,22 @@ public sealed class PluginRegistry : IDisposable
             })];
         }
 
-        var className = plugin.GetType().Name;
+        return ToolMethods(plugin.GetType())
+            .Select(t => AIFunctionFactory.Create(t.Method, plugin, new AIFunctionFactoryOptions { Name = t.Name }))
+            .ToList();
+    }
+
+    /// <summary>The tools a plugin type exposes, named as <see cref="GetFunctionsFromObject"/> names them, without an instance.</summary>
+    public static IReadOnlyList<(string Name, string Description)> DescribeTools(Type pluginType) =>
+        [.. ToolMethods(pluginType).Select(t => (t.Name, t.Method.GetCustomAttribute<DescriptionAttribute>()!.Description))];
+
+    private static IEnumerable<(MethodInfo Method, string Name)> ToolMethods(Type pluginType)
+    {
+        var className = pluginType.Name;
         var rawPrefix = className.EndsWith("Plugin", StringComparison.Ordinal) ? className[..^6] : className;
         var prefix    = NoPrefixPlugins.Contains(rawPrefix) ? null : ToSnakeCase(rawPrefix);
 
-        return plugin.GetType()
+        return pluginType
             .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(m => !m.IsSpecialName && m.GetCustomAttribute<DescriptionAttribute>() is not null)
             .Select(m =>
@@ -429,10 +440,8 @@ public sealed class PluginRegistry : IDisposable
                     else if (methodPart.EndsWith("_" + prefix, StringComparison.Ordinal))
                         methodPart = methodPart[..^(prefix.Length + 1)];
                 }
-                var toolName = prefix is null ? methodPart : $"{prefix}_{methodPart}";
-                return AIFunctionFactory.Create(m, plugin, new AIFunctionFactoryOptions { Name = toolName });
-            })
-            .ToList();
+                return (m, prefix is null ? methodPart : $"{prefix}_{methodPart}");
+            });
     }
 
     private static string ToSnakeCase(string s) =>

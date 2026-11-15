@@ -77,6 +77,9 @@ public static class SettingsCatalog
             c => Int(c.Repl.MaxTurnInputTokens), Int(ReplLimits.DefaultMaxTurnInputTokens), ReplLimits.TurnInputTokensMin, ReplLimits.TurnInputTokensMax),
         new("repl.plugins", SettingKind.List, "Extra plugins every chat starts with, comma-separated, e.g. Scratchpad,Http.",
             c => c.Repl.Plugins.Count > 0 ? string.Join(",", c.Repl.Plugins) : null),
+        new("repl.disabledTools", SettingKind.List,
+            "Tools every chat starts with off, comma-separated: whole categories (Shell, mcp:github) or single tools (git_push). fuseraft settings tools lists them.",
+            c => c.Repl.DisabledTools.Count > 0 ? string.Join(",", c.Repl.DisabledTools) : null),
 
         new("telemetry.otlpEndpoint", SettingKind.Text, "OTLP endpoint to send traces to. Empty turns telemetry off.", c => c.Telemetry?.OtlpEndpoint),
         new("telemetry.serviceName",  SettingKind.Text, "Service name on exported traces. Needs telemetry.otlpEndpoint.", c => c.Telemetry?.ServiceName),

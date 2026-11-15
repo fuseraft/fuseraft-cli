@@ -47,6 +47,7 @@ A command that returns one thing uses `"item":{ ... }` in place of `items`. An e
 | `fuseraft plugins --json` | [Plugin](#plugin) | `--plugin <name>` filters; no match is an error envelope. |
 | `fuseraft models --json` | [Model](#model) | Queries the configured provider. Never starts the setup wizard; unconfigured is an error envelope. |
 | `fuseraft settings show --json` | [Setting](#setting) | Every key `fuseraft settings set` takes, in display order. With no config yet, every `value` is `null`. |
+| `fuseraft settings tools --json` | [ToolCategory](#toolcategory) | The chat tools new chats start with on or off, by category. |
 | `fuseraft settings set <key> <value> --json` | [Setting](#setting) (as `item`) | The setting after the change. An unknown key or a rejected value is an error envelope, and nothing is saved. |
 | `fuseraft config --list --json` | [ConfigSummary](#configsummary) | `--dir` picks the directory (default `.fuseraft/config`). Files in an `agents/` folder are skipped. |
 | `fuseraft validate <path> --json` | [Validation](#validation) (as `item`) | Exits `1` when the config has errors, but still prints the item, not an error envelope. Can't be combined with `--diagram` or `--show-paths`. |
@@ -209,6 +210,16 @@ A REPL chat.
 | `choices` | array, nullable | Allowed values for a `choice` setting. |
 | `clearable` | bool | Whether `""` resets it. A `bool` setting is always `false` here: it can only be set to `true` or `false`. |
 
+### ToolCategory
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | `FileSystem`, `Shell`, …, or `mcp:<server>`. Pass it to `/tools enable` or `/tools disable`. |
+| `description` | string | One line on what the category is for. |
+| `optional` | bool | An optional plugin: off unless `repl.plugins` (or `--plugins`) names it. |
+| `enabled` | bool | Whether new chats start with it on. |
+| `tools` | array, nullable | `{name, description, enabled}` for each tool. `null` for Skills and MCP servers, whose tools are known once a chat loads them. |
+
 ## Live sessions
 
 A live session is a stream of JSONL: one JSON object per line, each with a `type`. There are two transports. Both use the same event shapes and the same input lines.
@@ -234,7 +245,7 @@ Ignore any stdout line that doesn't parse as JSON. Slash-command output can occa
 
 | Line | Fields | |
 |------|--------|---|
-| `user_input` | `text`, `images?[]` (`{name, data}` with `data` a base64 data URL) | A message, or a slash command. On the serve socket, each message is dispatched as a new task; a plain text line works too, and images aren't supported there. |
+| `user_input` | `text`, `images?[]` (`{name, data}` with `data` a base64 data URL), `quiet?` | A message, or a slash command. On the serve socket, each message is dispatched as a new task; a plain text line works too, and images aren't supported there. `quiet: true` on a slash command (stdio) leaves its printed output out of the stream, for a control that shows the result itself, as the VS Code tools menu does from the `tools` event. |
 | `approval_response` | `approved` (bool) | Answers the pending `approval_request`. Anything malformed counts as **denied**, and so does an `interrupt` while it's pending. |
 | `question_response` | `answer` (string, or `null` to skip) | Answers the pending `question`. An `interrupt` while it's pending dismisses it. |
 | `interrupt` | — | Cancels the running turn. Use it on Windows; elsewhere, sending `SIGINT` to the process does the same. |
@@ -264,6 +275,7 @@ There are no request IDs. A response is simply the next matching line on stdin, 
 | `replay` | `total`, `compacted`, `turns[]` (`{user, assistant, toolCalls[]}`) | Earlier turns, re-sent after a resume. |
 | `title` | `sessionId`, `title`, `autoTitle` | The chat's name changed, or the chat switched to another session (`/switch`, `/fork switch`, `/clear`): `sessionId` is the one it now runs as. |
 | `cleared` | `sessionId`, `previousSessionId` | `/clear` started a new chat in this process: clear the transcript. `sessionId` is the new chat; `previousSessionId` is the one left behind, saved, or `null` when it was empty. A `title` event follows. |
+| `tools` | `safeMode`, `active`, `matchesDefaults`, `categories[]` | The chat's tools, sent after `ready` and after anything changes them (`/tools`, `/safe-mode`, `/mcp`). Each category is `{name, description, optional, enabled, blocked, tools[]}` and each tool `{name, description, enabled, blocked}`; `blocked` is `"safe mode"`, `"restricted"` or `null`. `active` counts the tools the model is offered; `matchesDefaults` is false when the chat's switches differ from what new chats start with (`/tools save` makes them the defaults, `/tools reset` goes back). |
 | `applied` | `command`, `message` | A mid-turn command took effect. |
 | `copy` | `text` | Text the user asked to copy to the clipboard. |
 | `text` / `info` / `warning` / `error` | `text` | Messages for the user. `text` is pre-rendered Markdown. |

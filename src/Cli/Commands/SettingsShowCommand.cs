@@ -115,6 +115,7 @@ public sealed class SettingsShowCommand : AsyncCommand<SettingsShowSettings>
             ? $"last {repl.ResumeReplayTurns} turn{(repl.ResumeReplayTurns == 1 ? "" : "s")}"
             : OnOff(false));
         Row("repl.plugins", repl.Plugins.Count > 0 ? Markup.Escape(string.Join(", ", repl.Plugins)) : Dim("(none)"));
+        Row("repl.disabledTools", repl.DisabledTools.Count > 0 ? Markup.Escape(string.Join(", ", repl.DisabledTools)) : Dim("(none)"));
 
         string Conn(string? provider, string? endpoint, string? keyVar) =>
             string.Join(", ", new[] { provider, endpoint, keyVar is null ? null : $"key from {keyVar}" }

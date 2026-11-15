@@ -171,3 +171,13 @@ public sealed record WireSetting(
         s.Key, s.Kind.ToString().ToLowerInvariant(), s.Description, s.Read(config), s.Default,
         s.Min, s.Max, s.Choices, s.Clearable);
 }
+
+/// <summary>
+/// A chat tool category from <c>fuseraft settings tools --json</c>: whether new chats start with it on, and its tools.
+/// <c>Tools</c> is null for the categories only a running chat can list (Skills, MCP servers).
+/// </summary>
+public sealed record WireToolCategory(
+    string Name, string Description, bool Optional, bool Enabled, IReadOnlyList<WireTool>? Tools);
+
+/// <summary>One tool in a <see cref="WireToolCategory"/>, and whether new chats start with it on.</summary>
+public sealed record WireTool(string Name, string Description, bool Enabled);

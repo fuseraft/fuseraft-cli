@@ -117,6 +117,9 @@ public sealed class SettingsSetCommand : Command<SettingsSetSettings>
             "repl.plugins"             => Assign(() => config.Repl.Plugins = value
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList()),
+            "repl.disabledtools"       => Assign(() => config.Repl.DisabledTools = value
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList()),
 
             "telemetry.otlpendpoint"   => Assign(() => config.Telemetry = string.IsNullOrWhiteSpace(value)
                 ? null

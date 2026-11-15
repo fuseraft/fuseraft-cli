@@ -114,6 +114,15 @@ public sealed class WireModelsTests
     }
 
     [Fact]
+    public void WireToolCategory_Fields()
+    {
+        var wire = new WireToolCategory("Git", "Status and commits", false, true, [new WireTool("git_push", "Push.", false)]);
+
+        Assert.Equal(["name", "description", "optional", "enabled", "tools"], Keys(wire));
+        Assert.Equal(["name", "description", "enabled"], Keys(wire.Tools![0]));
+    }
+
+    [Fact]
     public void WireMemory_Fields_OmitFilePath()
     {
         var wire = WireMemory.From(new MemoryEntry

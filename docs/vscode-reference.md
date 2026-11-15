@@ -68,7 +68,9 @@ Change them in **Keyboard Shortcuts** by searching for `fuseraft`. The panel's o
 | `fuseraft.notifications` | `true` | Notify you when a reply finishes, or an approval or question is waiting, while you're away from the panel. |
 | `fuseraft.includeActiveFile` | `true` | Name the file you're working in, and the lines you've selected, with each message. |
 
-Everything else — model, provider, sampling, REPL behaviour, MCP servers — is the CLI's configuration, shared with the terminal. See [`fuseraft settings`](cli-reference.md#fuseraft-settings).
+Everything else — model, provider, sampling, REPL behaviour, MCP servers — is the CLI's configuration, shared with the terminal. **fuseraft: Settings** edits it in a panel, including a **Tools** section for the tools new chats start with. See [`fuseraft settings`](cli-reference.md#fuseraft-settings).
+
+![The Tools section of fuseraft settings with Changed only checked: Git expanded with git_commit off, and the optional Http plugin on](src/assets/vscode-settings-tools.png)
 
 ---
 

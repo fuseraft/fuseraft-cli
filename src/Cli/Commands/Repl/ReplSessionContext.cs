@@ -148,6 +148,10 @@ internal sealed class ReplSessionContext
 
     // Tool state
     public readonly HashSet<string> DisabledCategories = new(StringComparer.OrdinalIgnoreCase);
+    // Single tools turned off (/tools disable git_push, the panel's tools menu, repl.disabledTools).
+    public readonly HashSet<string> DisabledTools = new(StringComparer.OrdinalIgnoreCase);
+    // Optional plugins --plugins turned on for this run: /tools reset keeps them on, as the chat started with them.
+    public IReadOnlySet<string> FlagPlugins { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     public ChatOptions? ChatOptions;
 
     // Per-plugin capability restrictions set via /tools restrict, using the same
@@ -382,7 +386,7 @@ internal sealed class ReplSessionContext
     public List<AIFunction> GetActiveTools() => McpToolNames.Disambiguate([.. ToolsByCategory
         .Where(kv => !DisabledCategories.Contains(kv.Key))
         .SelectMany(kv => kv.Value
-            .Where(f => IsToolAllowed(f.Name) && PassesSafeMode(kv.Key, f))
+            .Where(f => !DisabledTools.Contains(f.Name) && IsToolAllowed(f.Name) && PassesSafeMode(kv.Key, f))
             .Select(f => (McpServerOf(kv.Key), f)))]);
 
     // An MCP server's tools sit under "mcp:<server>"; every other category is built in.
