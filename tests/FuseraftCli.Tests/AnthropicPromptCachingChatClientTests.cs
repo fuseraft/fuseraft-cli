@@ -108,10 +108,82 @@ public sealed class AnthropicPromptCachingChatClientTests
         Assert.Equal("claude-default", (string?)handler.Body!["model"]);
     }
 
+    // The shape of a live reply that patched a file and ran the tests in one go. Anthropic.SDK's stream kept only the last
+    // tool_use block, so the patch was dropped, the tests kept failing, and the model concluded it had forgotten to patch.
+    private const string TwoToolCallsStream = """
+        event: message_start
+        data: {"type":"message_start","message":{"id":"msg_2","type":"message","role":"assistant","model":"claude-test","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Fixing it."}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":0}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_a","name":"patch_file","input":{}}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\": \"cart.py\", "}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"newText\": \"x\"}"}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":1}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_b","name":"shell_run","input":{}}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"command\": \"make test\"}"}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":2}
+
+        event: content_block_start
+        data: {"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"toolu_c","name":"git_status","input":{}}}
+
+        event: content_block_stop
+        data: {"type":"content_block_stop","index":3}
+
+        event: message_delta
+        data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":40}}
+
+        event: message_stop
+        data: {"type":"message_stop"}
+
+
+        """;
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_KeepsEveryToolCallInAReply()
+    {
+        var handler = new RecordingHandler(TwoToolCallsStream, "text/event-stream");
+        using var client = NewClient(handler);
+        var tools = new[] { "patch_file", "shell_run", "git_status" }
+            .Select(n => (AITool)AIFunctionFactory.Create(() => "", n, n)).ToList();
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var u in client.GetStreamingResponseAsync([new(ChatRole.User, "fix it")], new ChatOptions { Tools = tools }))
+            updates.Add(u);
+
+        var calls = updates.SelectMany(u => u.Contents).OfType<FunctionCallContent>().ToList();
+        Assert.Equal(["patch_file", "shell_run", "git_status"], calls.Select(c => c.Name));
+        Assert.Equal(["toolu_a", "toolu_b", "toolu_c"], calls.Select(c => c.CallId));
+        Assert.Equal("cart.py", calls[0].Arguments!["path"]!.ToString());
+        Assert.Equal("make test", calls[1].Arguments!["command"]!.ToString());
+        Assert.Empty(calls[2].Arguments!);
+        Assert.Equal("Fixing it.", string.Concat(updates.SelectMany(u => u.Contents).OfType<TextContent>().Select(t => t.Text)));
+    }
+
     private static AnthropicPromptCachingChatClient NewClient(RecordingHandler handler) =>
         new(new AnthropicClient("test-key", new HttpClient(handler)), "claude-default");
 
-    private sealed class RecordingHandler(string reply) : HttpMessageHandler
+    private sealed class RecordingHandler(string reply, string mediaType = "application/json") : HttpMessageHandler
     {
         public JsonNode? Body { get; private set; }
 
@@ -120,7 +192,7 @@ public sealed class AnthropicPromptCachingChatClientTests
             Body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(reply, Encoding.UTF8, "application/json"),
+                Content = new StringContent(reply, Encoding.UTF8, mediaType),
             };
         }
     }

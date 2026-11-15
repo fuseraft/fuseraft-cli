@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using Anthropic.SDK;
 using Anthropic.SDK.Messaging;
@@ -64,6 +65,7 @@ internal sealed class AnthropicPromptCachingChatClient(AnthropicClient client, s
     {
         var parameters = BuildParameters(messages, options);
         var thinking = string.Empty;
+        PendingToolCall? tool = null;
 
         await foreach (MessageResponse response in client.Messages.StreamClaudeMessageAsync(parameters, cancellationToken))
         {
@@ -105,19 +107,34 @@ internal sealed class AnthropicPromptCachingChatClient(AnthropicClient client, s
                     update.Contents.Add(new UsageContent(ChatClientHelper.CreateUsageDetails(usage)));
             }
 
-            if (response.ToolCalls is { Count: > 0 })
+            // Anthropic.SDK's own ToolCalls keeps one slot that each tool_use block overwrites, so of several calls
+            // in a reply only the last arrived: a patch sent with the test run to check it never happened. Blocks
+            // stream one after another, so each call is built from its own block and sent when the block ends.
+            if (response.ContentBlock is { Type: "tool_use" } block)
+                tool = new PendingToolCall(block.Id ?? string.Empty, block.Name ?? string.Empty);
+            if (tool is not null && !string.IsNullOrEmpty(response.Delta?.PartialJson))
+                tool.Arguments.Append(response.Delta.PartialJson);
+            if (tool is not null && response.Type == "content_block_stop")
             {
-                foreach (var f in response.ToolCalls)
-                {
-                    update.Contents.Add(new FunctionCallContent(f.Id, f.Name,
-                        !string.IsNullOrEmpty(f.Arguments?.ToString())
-                            ? JsonSerializer.Deserialize<Dictionary<string, object?>>(f.Arguments!.ToString())
-                            : new Dictionary<string, object?>()));
-                }
+                update.Contents.Add(tool.ToContent());
+                tool = null;
             }
 
             yield return update;
         }
+
+        if (tool is not null)
+            yield return new ChatResponseUpdate { Role = ChatRole.Assistant, Contents = [tool.ToContent()] };
+    }
+
+    private sealed class PendingToolCall(string id, string name)
+    {
+        public StringBuilder Arguments { get; } = new();
+
+        public FunctionCallContent ToContent() => new(id, name,
+            Arguments.Length > 0
+                ? JsonSerializer.Deserialize<Dictionary<string, object?>>(Arguments.ToString())
+                : new Dictionary<string, object?>());
     }
 
     // Converts the abstract message list into native MessageParameters, turns on the SDK's
