@@ -1786,7 +1786,9 @@ internal static class ReplTurn
         // Tokens a provider reported are billed whether or not the turn went on to succeed.
         void CommitUsage()
         {
-            ctx.CumulativeInputTokens  += turnInputTokens;
+            // The whole prompt, cached part included: Anthropic's input count leaves cache reads out, so the
+            // status line's "% cached" ran into the thousands.
+            ctx.CumulativeInputTokens  += turnUncachedInputTokens + turnCacheReadTokens;
             ctx.CumulativeOutputTokens += turnOutputTokens;
             ctx.CumulativeCacheReadTokens += turnCacheReadTokens;
         }
