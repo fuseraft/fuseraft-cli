@@ -54,14 +54,14 @@ public record OrchestrationConfig
     public List<AgentConfig> Agents { get; init; } = [];
 
     /// <summary>
-    /// Controls which agent speaks next each turn.
+    /// Which runtime drives the team: the state machine for Steps flows, or a pattern.
     /// </summary>
     public SelectionStrategyConfig Selection { get; init; } = new();
 
     /// <summary>
-    /// Controls when the conversation ends.
+    /// Hard cap on agent turns; the run stops after this many. <c>0</c> means no cap.
     /// </summary>
-    public TerminationStrategyConfig? Termination { get; init; }
+    public int MaxTurns { get; init; }
 
     /// <summary>
     /// Optional security constraints for plugins that execute code, access files, or make
@@ -74,13 +74,6 @@ public record OrchestrationConfig
     /// When the cumulative token count exceeds this value, the orchestration stops before the
     /// next turn and surfaces a <see cref="BudgetExceededException"/>. Null (default) means
     /// no limit is enforced.
-    ///
-    /// <para>
-    /// This is a hard, unconditional abort. For a graceful stop instead — the session ends
-    /// through its normal termination path rather than throwing — add a <c>tokenbudget</c>
-    /// <see cref="TerminationStrategyConfig"/> with a <see cref="TerminationStrategyConfig.MaxTokens"/>
-    /// value lower than this one, so it fires first.
-    /// </para>
     /// </summary>
     public int? MaxTotalTokens { get; init; }
 
@@ -189,14 +182,6 @@ public record OrchestrationConfig
     /// Example key: <c>"servicenow"</c>.
     /// </summary>
     public Dictionary<string, ApiProfileConfig> ApiProfiles { get; init; } = [];
-
-    /// <summary>
-    /// Optional saga (compensating rollback) configuration. When <see cref="SagaConfig.Enabled"/>
-    /// is <c>true</c>, workflow execution is wrapped in a <c>SagaOrchestrator</c> that unwinds
-    /// completed steps in reverse order and calls each step's compensation logic on failure.
-    /// Null (default) disables the saga pattern.
-    /// </summary>
-    public SagaConfig? Saga { get; init; }
 
     /// <summary>
     /// Optional structured evidence graph configuration. When present, every file write,

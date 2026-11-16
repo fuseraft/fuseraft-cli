@@ -50,7 +50,4 @@ public enum MergeStrategy
     /// semantic conflicts between branch outputs.
     /// </summary>
     SemanticDiff,
-
-    /// <summary>Select the branch whose produced artifact passes a runtime benchmark.</summary>
-    Benchmark,
 }

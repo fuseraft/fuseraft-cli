@@ -9,7 +9,7 @@ using fuseraft.Core.Models;
 namespace fuseraft.Orchestration.Validation;
 
 /// <summary>
-/// Blocks the <c>APPROVED</c> termination keyword unless the Reviewer's current turn
+/// Blocks an approving handoff unless the Reviewer's current turn
 /// contains a structured review judgement block.
 ///
 /// <para>
@@ -75,7 +75,7 @@ public sealed class RequireReviewJudgementValidator(string? briefPath = null) : 
                     string.Equals(e.Verdict, "PASS", StringComparison.OrdinalIgnoreCase));
 
                 // If any criterion is FAIL, the change is not complete — the agent must fix it
-                // or explicitly route REVISION REQUIRED instead of writing APPROVED.
+                // or explicitly hand off for revision instead of approving.
                 var failingCriteria = judgement.Review
                     .Where(e => string.Equals(e.Verdict, "FAIL", StringComparison.OrdinalIgnoreCase))
                     .Select(e => e.Criterion)
@@ -85,9 +85,9 @@ public sealed class RequireReviewJudgementValidator(string? briefPath = null) : 
                 if (failingCriteria.Count > 0)
                 {
                     return Task.FromResult(RoutingValidationResult.Fail(
-                        "APPROVED blocked: review contains FAIL verdict(s).\n\n" +
-                        "Fix the failing criteria before writing APPROVED, or route " +
-                        "REVISION REQUIRED so the developer can address them.\n\n" +
+                        "Approval blocked: review contains FAIL verdict(s).\n\n" +
+                        "Fix the failing criteria before approving, or hand off " +
+                        "for revision so they can be addressed.\n\n" +
                         "Failing:\n" +
                         string.Join("\n", failingCriteria.Select(c => $"  ✗ {c}"))));
                 }
@@ -101,7 +101,7 @@ public sealed class RequireReviewJudgementValidator(string? briefPath = null) : 
                 if (hasAnyPass && !CurrentTurnHasSuccessfulShellRun(history))
                 {
                     return Task.FromResult(RoutingValidationResult.Fail(
-                        "APPROVED blocked: review contains PASS verdicts but no shell command " +
+                        "Approval blocked: review contains PASS verdicts but no shell command " +
                         "was successfully run this turn.\n\n" +
                         "Code inspection alone is not sufficient — the Reviewer must execute " +
                         "something to confirm behavioral correctness:\n\n" +
@@ -110,7 +110,7 @@ public sealed class RequireReviewJudgementValidator(string? briefPath = null) : 
                         "       • Tests:  shell_run(\"dotnet test\") / shell_run(\"cargo test\") / etc.\n" +
                         "       • Run-it: shell_run(\"kiwi test_include.ki\") or equivalent.\n" +
                         "  2. Update 'evidence' fields to describe what you ran and what you observed.\n" +
-                        "  3. Re-emit the ```json review block followed by APPROVED on its own line."));
+                        "  3. Re-emit the ```json review block, then hand off again."));
                 }
 
                 return Task.FromResult(RoutingValidationResult.Pass());
@@ -118,20 +118,20 @@ public sealed class RequireReviewJudgementValidator(string? briefPath = null) : 
 
             // The Reviewer's message is present but lacks a valid judgement block — fail.
             return Task.FromResult(RoutingValidationResult.Fail(
-                "APPROVED blocked: response has no structured review block.\n\n" +
-                "Add a ```json block before APPROVED:\n\n" +
+                "Approval blocked: response has no structured review block.\n\n" +
+                "Add a ```json block before you hand off:\n\n" +
                 "```json\n{ \"review\": [{ \"criterion\": \"...\"," +
                 " \"verdict\": \"PASS\", \"evidence\": \"...\" }] }\n```\n\n" +
-                "Cover every acceptance criterion. Use PASS or FAIL. Then write APPROVED on its own line."));
+                "Cover every acceptance criterion. Use PASS or FAIL. Then hand off again."));
         }
 
         // No Reviewer message found in history at all.
         return Task.FromResult(RoutingValidationResult.Fail(
-            "APPROVED blocked: your last reply had no text content at all — you called the " +
+            "Approval blocked: your last reply had no text content at all — you called the " +
             "routing tool without writing anything first. This validator reads your reply's " +
             "visible text; a tool call alone, with no accompanying text, has nothing for it to " +
             "check.\n\n" +
-            "Write the ```json review block AND the routing keyword as text in this same reply " +
+            "Write the ```json review block as text in this same reply " +
             "(before or alongside calling the handoff tool) — do not call handoff with an empty " +
             "or missing text response, even if you believe you already reviewed everything in an " +
             "earlier turn."));
@@ -161,7 +161,7 @@ public sealed class RequireReviewJudgementValidator(string? briefPath = null) : 
         if (reviewEntries.Count >= criteriaCount) return null;
 
         return
-            $"APPROVED blocked: the review covers {reviewEntries.Count} criterion/criteria " +
+            $"Approval blocked: the review covers {reviewEntries.Count} criterion/criteria " +
             $"but brief.json lists {criteriaCount}.\n\n" +
             $"Add one review entry per acceptance criterion — every criterion must be explicitly " +
             $"addressed with its own verdict and evidence:\n\n" +
@@ -170,7 +170,7 @@ public sealed class RequireReviewJudgementValidator(string? briefPath = null) : 
             $"  {{\"criterion\":\"<criterion text>\",\"verdict\":\"PASS\",\"evidence\":\"<what you ran and observed>\"}},\n" +
             $"  ... ({criteriaCount} entries total)\n" +
             $"]}}\n```\n\n" +
-            $"Then write APPROVED on its own line.";
+            $"Then hand off again.";
     }
 
     // Scans the current turn (back to the last user boundary) for a shell_run result

@@ -86,15 +86,15 @@ These criteria are checkable by code inspection. A Reviewer can claim PASS on al
 ]
 ```
 
-The `RequireAcceptanceCriteriaPassed` validator reads `expected_output_contains` from the brief and blocks `APPROVED` if any sentinel was never found in a session command output. The Reviewer is forced to run the program, not just read the code.
+The `acceptanceCriteriaPassed` gate reads `expected_output_contains` from the brief and blocks the handoff if any sentinel was never found in a command's output this run. The Reviewer is forced to run the program, not just read the code.
 
-See [Routing Validators — RequireReviewJudgement](validators.md#requirereviewjudgement) for the coverage check that enforces one review entry per criterion.
+See [Gates — `reviewJudgement`](validators.md#reviewjudgement) for the coverage check that enforces one review entry per criterion.
 
 ---
 
 ## List the files explicitly
 
-The `RequireAllFilesWritten` validator blocks developer handoff until every file in `files_to_change` has been written. If you omit a file from the list, the validator cannot catch the omission.
+A `filesWritten: brief.files_to_change` gate blocks the developer's handoff until every file in `files_to_change` has been written. If you omit a file from the list, the gate cannot catch the omission.
 
 **Incomplete:**
 
@@ -149,20 +149,19 @@ When the runtime criterion fails, the Reviewer knows exactly which layer is brok
 
 ---
 
-## Use the right validators
+## Use the right gates
 
-| What you want to enforce | Validator |
+| What you want to enforce | Gate |
 |---|---|
-| Developer wrote at least one file | `RequireWriteFile` |
-| Developer wrote every file in the brief | `RequireAllFilesWritten` |
-| Reviewer ran a shell command | `RequireShellPass` |
-| Reviewer produced a per-criterion judgement block | `RequireReviewJudgement` |
-| Reviewer covered every brief criterion | `RequireReviewJudgement` + `Validation.BriefPath` |
-| Testable criteria were run and output matched | `RequireAcceptanceCriteriaPassed` |
+| Developer wrote at least one file | `anyFileWritten` |
+| Developer wrote every file in the brief | `filesWritten: brief.files_to_change` |
+| The brief's verify command ran and passed | `commandSucceeded: brief.verify_command` |
+| Reviewer produced a per-criterion judgement block | `reviewJudgement` |
+| Testable criteria were run and output matched | `acceptanceCriteriaPassed: brief` |
 
-`RequireWriteFile` is the cheapest check — use it when any file write is sufficient. `RequireAllFilesWritten` is stricter and requires `Validation.BriefPath` to be set. For the Reviewer, combine `RequireShellPass` and `RequireReviewJudgement` at minimum; add a `BriefPath` to enforce criterion coverage.
+`anyFileWritten` is the cheapest check — use it when any file write is sufficient. `filesWritten` is stricter: every file the brief lists. For the Reviewer's edge to `end`, `reviewJudgement` checks one verdict per criterion in the `brief` artifact.
 
-See [Routing Validators](validators.md) for configuration details.
+See [Gates](validators.md) for details.
 
 ---
 
@@ -175,8 +174,8 @@ Before running a session, verify your task covers:
 - [ ] Each acceptance criterion names one verifiable behavior
 - [ ] At least one criterion has `expected_output_contains` (or you have a test suite that covers the behavior)
 - [ ] If you gave a code example, you also wrote what running it should produce
-- [ ] `RequireAllFilesWritten` is on the developer handoff route (not just `RequireWriteFile`)
-- [ ] `Validation.BriefPath` is set so `RequireReviewJudgement` enforces criterion coverage
+- [ ] `filesWritten: brief.files_to_change` gates the Developer's handoff (not just `anyFileWritten`)
+- [ ] The team declares a `brief` artifact, so `reviewJudgement` enforces criterion coverage
 
 ---
 

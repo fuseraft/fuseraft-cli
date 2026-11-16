@@ -154,7 +154,7 @@ A REPL chat.
 | `path` | string | Absolute. |
 | `name`, `description` | string \| null | Null when the file didn't load. |
 | `agents` | array | Agent names. |
-| `selectionType` | string \| null | `Selection.Type`. |
+| `selectionType` | string \| null | How the flow runs: `statemachine` for a `Steps` flow, or the pattern name. |
 | `error` | string \| null | Why the file didn't load; null when it did. |
 
 ### Validation
@@ -309,7 +309,7 @@ Input is `approval_response` and `interrupt`; `user_input` isn't read. An interr
 | `shell_command` | `command` |
 | `tool_action` | `plugin`, `action`, `detail` |
 | `file_write` | `plugin`, `action`, `path`, `oldContent`, `newContent`. Render it as a diff. |
-| `route_approval` | `keyword`, `sourceAgent`, `targetAgent` (serve and run bridge: an agent handoff that needs a human) |
+| `route_approval` | `keyword`, `sourceAgent`, `targetAgent` (serve and run bridge: a flow edge with `Approve: true`; `keyword` is the route name) |
 
 New kinds may be added. If a client doesn't recognize a kind, it should show the raw event and ask, or deny it. It must never auto-approve.
 

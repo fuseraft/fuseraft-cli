@@ -51,16 +51,14 @@ public static class MergeEngine
             MergeStrategy.Vote         => Vote(results, logger),
             MergeStrategy.Ranked       => await RankedAsync(results, agentRunner, logger, cancellationToken),
             MergeStrategy.SemanticDiff => await SemanticDiffAsync(results, agentRunner, logger, cancellationToken),
-            MergeStrategy.Benchmark    => throw NotImplemented(MergeStrategy.Benchmark),
             _                          => Union(results),
         };
     }
 
     /// <summary>
     /// Synchronous merge for strategies that do not require an agent call
-    /// (Union, Consensus, Vote). Ranked, SemanticDiff, and Benchmark all require
-    /// <see cref="MergeAsync"/> — Ranked/SemanticDiff need an agent call, and Benchmark
-    /// is not implemented at all. Calling this overload for any of the three throws rather
+    /// (Union, Consensus, Vote). Ranked and SemanticDiff need an agent call, so they require
+    /// <see cref="MergeAsync"/>. Calling this overload for either throws rather
     /// than silently substituting Union, so a misconfigured merge strategy fails loudly at
     /// the call site instead of quietly changing what gets merged.
     /// </summary>
@@ -84,14 +82,9 @@ public static class MergeEngine
                 $"MergeStrategy.Ranked requires an agent call — use {nameof(MergeAsync)} instead of {nameof(Merge)}."),
             MergeStrategy.SemanticDiff => throw new InvalidOperationException(
                 $"MergeStrategy.SemanticDiff requires an agent call — use {nameof(MergeAsync)} instead of {nameof(Merge)}."),
-            MergeStrategy.Benchmark    => throw NotImplemented(MergeStrategy.Benchmark),
             _                          => Union(results),
         };
     }
-
-    private static NotSupportedException NotImplemented(MergeStrategy strategy) => new(
-        $"MergeStrategy.{strategy} is not implemented. Configure a different Merge.Strategy " +
-        $"(Union, Consensus, Vote, Ranked, or SemanticDiff).");
 
     // Union ────────────────────────────────────────────────────────────────────
 

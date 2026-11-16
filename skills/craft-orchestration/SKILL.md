@@ -1,148 +1,93 @@
 ---
 name: craft-orchestration
-description: Build a working fuseraft orchestration YAML config for a multi-agent pipeline. Trigger when the user asks to create, scaffold, or design an orchestration file, a fuseraft config, or a multi-agent workflow.
+description: Build a working fuseraft team file (YAML) for a multi-agent pipeline. Trigger when the user asks to create, scaffold, or design a team file, an orchestration, a fuseraft config, or a multi-agent workflow.
 ---
 
-# Craft Orchestration
+# Craft a Team File
 
-Build a valid, runnable `orchestration.yaml` by gathering requirements through targeted questions, generating the config, validating it, and writing it to disk.
+Build a valid, runnable team file by gathering requirements, generating the YAML, validating it, and writing it to disk.
 
 ## Purpose
 
-An orchestration file wires together agents, models, routing, validators, and termination. Getting all the pieces right from scratch is tedious. This skill drives the process — ask the right questions, generate the YAML, validate it, and write it to disk so the user can run it immediately.
+A team file declares agents, the files they hand each other (artifacts), and the flow between them, with gates that block a handoff until the evidence exists. This skill drives the process: ask the right questions, generate the YAML, validate it, and write it so the user can run it immediately.
 
 ## When to Use
 
 Use this skill when the user asks to:
-- Create or scaffold a fuseraft orchestration file
+- Create or scaffold a fuseraft team file or orchestration
 - Set up a multi-agent pipeline
 - Design a new agent workflow for a project
 - Convert a described workflow into a runnable config
 
-Do **not** use this skill to modify an existing config — use `patch_file` or `write_file` directly for edits.
+Do **not** use this skill to modify an existing team file; edit it directly. If the user has a file starting with `Orchestration:`, that's the old format: run `fuseraft migrate <file>` first.
 
 ## Workflow
 
 ### Step 1: Gather Requirements
 
-Ask these questions. If the user already described the workflow in detail, extract answers from their description instead of asking again.
+Ask these questions. If the user already described the workflow, extract the answers instead of asking again.
 
-**Pipeline topology**
-- How many agents? What are their names and roles?
-- Is this a linear pipeline (A → B → C), does it branch (retry loops, recovery agents), or does it fan out to parallel work?
-- Parallel fan-out: does any step produce N independent results that can later be combined? (e.g., backend + frontend + migration written at the same time) If so, note which step fans out, which agents run concurrently, and how outputs should be merged (union = concatenate all; ranked = pick best; semantic_diff = LLM resolves conflicts).
+**Agents and flow**
+- Which agents, and what does each one do?
+- What does each agent leave behind for the next one? (A brief, code, a test report, a review.) These become **artifacts**.
+- Where can the work loop back? (Tester → Developer when a test fails, Reviewer → Planner when the plan is wrong.)
+- Where does the run finish? Every flow needs an edge to `end`.
+- Can any step fan out to agents that work in parallel and are then joined?
+- Is this really a fixed flow? If a manager model should decide who works each round, use `pattern: magentic`; for the same work over many items, `mapreduce`; for several independent opinions, `scattergather`.
 
 **Model**
-- Which provider and model? (xAI Grok, Claude, OpenAI, Ollama, etc.)
-- One model for all agents, or different models per agent (e.g. fast model for cheap steps, reasoning model for review)?
+- Which provider and model? One model for all agents, or different ones per agent (a fast model for cheap steps, a reasoning model for review)?
 
-**Routing strategy**
-- Keyword routing: agents emit a keyword string; simple, good for linear flows.
-- State machine routing: explicit states and transitions; good for branching, recovery agents, or terminal states.
-- Graph topology (`Selection.Type: graph`): declare nodes and edges explicitly; best when back-edges must target specific earlier nodes, per-branch isolated histories are needed, or terminal-node validator gates are required. Use `fuseraft init --template graph` to scaffold.
-- Ask only if the user hasn't indicated a preference. Default to state machine for pipelines with 3+ agents or any retry logic; suggest graph when the user describes an explicit directed-graph structure or named cycle targets.
+**Tools per agent**
+- `FileSystem`, `Shell`, `Git`, `Search`, `Http`, `Json`, `Document`, `Scratchpad`, `Subagent`, `Changes` (read the change log; give it to agents that check others' work), `Decision`, `Graph`, `Objective`, or an MCP server's name.
+- Don't list `Handoff`: every agent in a `steps` flow gets it automatically.
 
-**Plugins per agent**
-- Which agents need filesystem access (`FileSystem`)?
-- Which need shell commands (`Shell`)?
-- Which need git (`Git`)?
-- Which need web search or HTTP (`Search`, `Http`)?
-- Which need scratchpad memory across sessions (`Scratchpad`)?
-- Which need architecture decision records (`Decision`)? Tools: `decision_search`, `decision_read` (read capability); `decision_create`, `decision_supersede` (write capability). Add `Capabilities: {Decision: [read]}` to restrict to read-only.
-- Which need repository semantic graph queries (`Graph`)? Tools: `graph_search`, `graph_refs`, `graph_dependents` (all read-only). Requires `fuseraft graph build` to have been run at least once.
-- Which need long-horizon objective tracking (`Objective`)? Tools: `objective_create`, `objective_read`, `objective_update`, `objective_list`, `objective_link_task`.
-- Add `Handoff` to every agent that advances the pipeline.
+**Evidence** (skip for quick prototypes)
+- Which handoffs need proof? A brief must exist, every planned file written, the verify command passing, a test report with no failures, a structured review verdict.
 
-**Validators / evidence contracts** (ask only if the user wants enforcement — skip for simple prototypes)
-- Should handoffs be blocked until files are written, shell commands pass, or a brief exists?
-- Should the test handoff require a valid test report?
+**Output path**: default `.fuseraft/config/team.yaml`.
 
-**Output path**
-- Default: `.fuseraft/config/orchestration.yaml`
+### Step 2: Build the YAML
 
-### Step 2: Choose a Skeleton
+Load `references/schema-cheatsheet.md` for the full field reference. Apply these rules:
 
-Pick the appropriate skeleton based on routing type and agent count. Load `references/schema-cheatsheet.md` for the full field reference if needed.
+1. **Declare models once** under `models:` and reference them by alias (`model: fast`).
+2. **Declare every artifact once** under `artifacts:` with a `path` and a `shape`. List it under the writer's `writes` and the readers' `reads`. fuseraft tells each agent the path and shape, so **don't repeat them in `instructions`**.
+3. **Draw the flow** under `flow: { Start, Steps }`. Each step is an agent name with a list of edges `{ to, when, requires, onStuck }`. Give back-edges a `when` that says when to take them.
+4. **Gate handoffs** with `requires:`: the artifact name, `filesWritten: brief.files_to_change`, `commandSucceeded: brief.verify_command`, `testReport: testResults`, `reviewJudgement`. Use `onStuck: <agent>` where another agent can fix a gate that keeps failing.
+5. **Don't write routing into instructions.** fuseraft generates each agent's routes, when to take them and what each requires. Instructions describe the work: what to read, what to do, which tools to use.
+6. **Agents see their handoff by default** (`sees: handoff`): the task or handoff note, their `reads` artifacts and their own recent turns. Use `sees: conversation` only for agents that need the discussion; a Verifier that audits other agents' claims uses `sees: fork`.
+7. **Set `advanced.functionChoice: required`** on agents that must act every turn (Developer, Tester).
+8. **Set `limits.maxTurns`** (40 suits a dev pipeline).
+9. **For long runs**, add `advanced.compaction` (`mode: lossless` for Steps flows) and `advanced.contextBudget` (`warnAt: 60000`, `cutoverAt: 100000`).
+10. **For pipelines of 3+ agents**, add `advanced.failureHandling` with `maxConsecutiveContractFailures: 6` and `maxConsecutiveTurnsWithoutSignal: 8`, so a gate that can't pass, or an agent that never hands off, stops the run instead of looping.
+11. **Parallel fan-out**: `- to: [A, B]` with `join: C`. Branch agents run one turn each and need no `steps` entry of their own. `merge: { strategy: union }` concatenates outputs; `ranked` and `semantic_diff` need `merge.agent`.
 
-**Keyword routing** — simple linear flow, 2–4 agents, no recovery loops.
+Write each agent's instructions like this, under ~25 lines:
 
-**State machine** — any pipeline with retry logic, recovery agents, branching transitions, or terminal states. Preferred when 3+ agents are involved.
-
-**State machine with parallel fan-out** — use when two or more agents can do independent work simultaneously and their outputs need to be combined before the pipeline continues. The fan-out transition uses `Parallel: true`, lists branch states in `Targets`, and sets `To` to the join state entered after merge.
-
-**Graph topology** (`Selection.Type: graph`) — when exact node/edge structure matters: back-edges to specific earlier nodes, per-branch isolated histories, or terminal-node validator gates. Node `Id` values must be unique, lowercase, and stable. `Compaction.Mode: lossless` and `hybrid` are unsupported — use `Mode: intent` (with `ChangeTracking`) or `Mode: llm`. See `references/schema-cheatsheet.md` for the full `Selection.Graph` field reference.
-
-### Step 3: Build the YAML
-
-Construct the YAML from the gathered answers. Apply these rules:
-
-1. **Name model aliases** under `Models:` and reference them by alias in each agent's `Model.ModelId` — avoids repeating endpoint and API key.
-2. **Add `Handoff` to every agent** that needs to advance the pipeline. Agents call `handoff(route_keyword: "KEYWORD")` — the keyword must match the `Signal` (state machine) or `Keyword` (keyword routing) exactly.
-3. **Set `FunctionChoice: required`** on agents that must call at least one tool every turn (Developer, Tester).
-4. **Include `ChangeTracking`** when agents use `changes_read` / `changes_read_latest` (the `Changes` plugin), or when validators like `TestReportValid` or `RequireAllFilesWritten` perform cross-session checks.
-5. **Include `EvidenceStore`** when using evidence contracts or lossless compaction.
-6. **Include a `Validation` section** whenever `TestReportValid`, `RequireBrief`, `RequireAllFilesWritten`, or `RequireAcceptanceCriteriaPassedValidator` are used.
-7. **Always include a `Termination` block** — use `MaxIterations` as a hard cap (40 is a safe default for dev pipelines).
-8. **Include `FailureHandling`** for any pipeline longer than 2 agents to prevent infinite reinstruct loops. Always set both global backstops:
-   - `MaxConsecutiveContractFailures: 6` — prevents a `Reinstruct` policy from looping indefinitely when a contract cannot be satisfied.
-   - `MaxConsecutiveTurnsWithoutSignal: 8` — escalates to HITL when an agent completes work but never calls `handoff()`. This counter survives compaction cycles; the built-in loop warning does not.
-9. **Include `ContextBudget`** when using `Compaction`. Recommended defaults: `WarnAt: 60000`, `CutoverAt: 100000`, `MaxSingleTurnInputTokens: 200000`. Keep `WarnTurnTokens` (top-level) below `CutoverAt` so the per-turn warning fires before compaction is forced.
-10. **Parallel fan-out rules** (state machine only):
-   - Put `Parallel: true`, `Targets: [BranchStateA, BranchStateB, ...]`, and `To: JoinState` on the triggering transition. `To` is the join state entered after all branches finish — it is **not** a branch target.
-   - Each branch state must be declared in `States` with an `Agent`. Branch agents run for **one turn only** with an isolated history snapshot — do **not** instruct them to emit a handoff signal.
-   - Branch agents do not need the `Handoff` plugin.
-   - If `Merge.Strategy` is `ranked` or `semantic_diff`, set `Merge.Agent` to a named agent (declared in `Agents`) that will evaluate or reconcile the outputs. This agent needs no special plugins — it receives the branch outputs as context and returns text.
-   - `Merge.Strategy: union` (default) concatenates all branch outputs in declaration order — no merge agent needed.
-11. **Graph sessions** (`Selection.Type: graph`): `Compaction.Mode: lossless` and `hybrid` are unsupported — the graph orchestrator has no snapshotter and silently falls back to LLM compaction. Use `Mode: intent` (requires `ChangeTracking`) or `Mode: llm`.
-
-Write instructions for each agent using this pattern:
 ```
 You are a <role>.
 
-FOLLOW THESE STEPS IN ORDER:
-1. <first action — usually read something from disk>
-2. <main work>
-...
-N. HAND OFF: Call handoff(route_keyword: "<KEYWORD>").
+1. <first action, e.g. read what changed with changes_read_latest>
+2. <main work, naming the tools to call>
+3. <what must be true before handing off>
 ```
 
-Keep instructions under 30 lines per agent. Name specific tools to call (e.g. `read_file`, `write_file`, `shell_run`) and the exact keyword to emit. Be explicit about what to write to disk before handing off — vague instructions cause validator failures.
-
-### Step 4: Validate
-
-After generating the YAML, call `shell_run` to validate it:
+### Step 3: Validate
 
 ```bash
 fuseraft validate <output-path>
 ```
 
-Fix all reported errors before writing the file. Common issues:
-- Route keyword mismatch: agent instructions say `"HANDOFF TO X"` but config uses a different string
-- Missing `Validation` section when `TestReportValid` or `RequireBrief` is used
-- Missing `ChangeTracking` when `Changes` plugin is listed or when `TestReportValid` cross-references `changes.json`
-- Agent references a plugin that is not in its `Plugins` list
-- `EvidenceStore` missing when `Contracts` reference `FilesWritten` or `TestReport` predicates
-- Graph session: `Selection.Graph` block missing when `Selection.Type: graph` is set
-- Graph session: `EntryNode` does not match any declared node `Id`
-- Graph session: edge `From` or `To` references an undefined node `Id`
-- Graph session: `Compaction.Mode: lossless` or `hybrid` used (unsupported — switch to `intent` or `llm`)
+Fix every error before finishing. Errors name the exact field: an unknown field, an agent or artifact that isn't declared, a gate that isn't a real check, an edge to an agent with no `steps` entry, or a flow with no edge to `end`. `fuseraft validate <path> --diagram` prints the flow as a Mermaid chart.
 
-### Step 5: Write and Confirm
+### Step 4: Write and Confirm
 
-1. Call `write_file` to save the YAML to the output path.
-2. Show the user the command to run it:
-   ```bash
-   fuseraft run --config <output-path> "Your task here"
-   ```
-3. Show the validate command for CI:
-   ```bash
-   fuseraft validate <output-path>
-   ```
-4. Briefly explain what the user should adjust before their first real run:
-   - Set any required API key env vars
-   - Update `ModelId` / `Endpoint` if they are using a different provider
-   - Replace placeholder acceptance criteria in agent instructions with task-specific ones
+1. Call `write_file` to save the YAML.
+2. Show the run command: `fuseraft run --config <output-path> "Your task here"`.
+3. Mention what to adjust before a real run: API key env vars, `modelId`/`endpoint` for their provider, and any project-specific commands in the instructions.
 
 ## References
 
-- `references/schema-cheatsheet.md` — Quick-reference for all config sections, plugin names, validator names, routing patterns, and common providers
+- `references/schema-cheatsheet.md` — every field, the gate checks, patterns, tools and provider settings
+- `config/examples/` in the fuseraft-cli repo — complete, tested team files

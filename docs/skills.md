@@ -89,7 +89,7 @@ The skill reads the session checkpoint, events log, and crash dumps, maps the sy
 
 ### `config-audit`
 
-Reviews an existing orchestration config for correctness before running it. Triggers when the user wants to validate a config, when `fuseraft validate` passes but the run still fails, or when a config was recently written or modified.
+Reviews an existing team file for correctness before running it. Triggers when the user wants to validate a config, when `fuseraft validate` passes but the run still fails, or when a config was recently written or modified.
 
 The skill runs `fuseraft validate`, then performs a deeper semantic audit: routing keyword alignment, plugin prerequisites, validator dependency chains, termination safety, failure handling, instruction quality, and model alias consistency. Findings are grouped by severity (error / warning / suggestion).
 
@@ -97,9 +97,9 @@ The skill runs `fuseraft validate`, then performs a deeper semantic audit: routi
 
 ### `mcp-setup`
 
-Connects a fuseraft config to an MCP server and wires its tools to agents. Triggers when the user wants to add an MCP server (npm package, Python module, or HTTP endpoint), or when an existing `McpServers` block is failing at startup.
+Connects a fuseraft config to an MCP server and wires its tools to agents. Triggers when the user wants to add an MCP server (npm package, Python module, or HTTP endpoint), or when an existing `mcpServers` block is failing at startup.
 
-The skill verifies the server command or endpoint, adds the `McpServers` entry to the config, wires the plugin name to the right agents, validates the result, and runs a one-turn dry-run to confirm the connection and tool registration.
+The skill verifies the server command or endpoint, adds the `mcpServers` entry to the config, wires the plugin name to the right agents, validates the result, and runs a one-turn dry-run to confirm the connection and tool registration.
 
 ---
 
@@ -255,4 +255,4 @@ All the standard knobs are supported (`minTurns`, `digestTurns`, `model`, `libra
 
 ### Enabling curation for `fuseraft run` sessions
 
-Set `SkillCuration.Enabled: true` in your orchestration YAML. See [Configuration → Skill curation](configuration.md#skill-curation) for the full field reference, start-of-session skill injection, and the curation log format.
+Set `skillCuration.enabled: true` in your orchestration YAML. See [Configuration → Skill curation](configuration.md#skill-curation) for the full field reference, start-of-session skill injection, and the curation log format.

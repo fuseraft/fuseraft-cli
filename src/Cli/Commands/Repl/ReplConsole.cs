@@ -45,7 +45,11 @@ internal static class ReplConsole
     // SuspendSpinner's doc comment for the bug this fixes.
     private static int _suspendCount;
 
-    internal static async Task RunSpinnerAsync(string label, CancellationToken ct, DateTime? startedAt = null)
+    internal static Task RunSpinnerAsync(string label, CancellationToken ct, DateTime? startedAt = null) =>
+        RunSpinnerAsync(() => label, ct, startedAt);
+
+    /// <summary>Runs the spinner with a label read on every frame, so a caller can change it while it spins.</summary>
+    internal static async Task RunSpinnerAsync(Func<string> label, CancellationToken ct, DateTime? startedAt = null)
     {
         // The TUI's status line has its own spinner and timer, and its transcript shows each tool call.
         if (ReplInput.Screen is not null)
@@ -70,7 +74,7 @@ internal static class ReplConsole
                     ? $" ({(int)(DateTime.UtcNow - startedAt.Value).TotalSeconds}s)"
                     : string.Empty;
                 var frame = SpinnerFrames[i % SpinnerFrames.Length];
-                var text  = $"{frame} {label}{elapsed}";
+                var text  = $"{frame} {label()}{elapsed}";
 
                 // Clamp to one terminal line so the text never wraps. When a line wraps,
                 // the subsequent \r\x1b[2K only clears the continuation line and leaves

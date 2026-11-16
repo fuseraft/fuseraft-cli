@@ -29,7 +29,7 @@ public sealed class RunSettings : CommandSettings
     public string? Task { get; set; }
 
     [CommandOption("-c|--config")]
-    [Description("Path to orchestration config YAML or JSON (default: config/orchestration.yaml).")]
+    [Description("Path to the team file, YAML or JSON (default: .fuseraft/config/orchestration.yaml).")]
     public string? ConfigPath { get; set; }
 
     [CommandOption("-r|--resume")]
@@ -263,7 +263,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
             return 1;
         }
 
-        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics, adaptiveTrimTracker, _) = built;
+        var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, sessionMetrics, adaptiveTrimTracker, _) = built;
 
         // The config can also request JSON mode (Output.Json: true) for orchestrations that are
         // always invoked by scripts. Apply the same stderr redirect if the CLI flag didn't
@@ -631,7 +631,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         var runner = new SessionRunner(
             orchestrator, compactor, activeStore, approvalService,
             eventEmitter, telemetry, modelIdByAgent, devUI, configPath,
-            maxIterations: config.Termination?.ResolveMaxIterations() ?? 0,
+            maxIterations: config.MaxTurns,
             contextBudget: config.ContextBudget,
             contextWindowRecorder: ctxRecorder,
             sessionMetrics: sessionMetrics,
@@ -1009,8 +1009,6 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         // If the checkpoint carries an explicit resume executor hint (written before a prior
         // compaction or crash), push it to the orchestrator so the first StreamAsync starts
         // from the correct agent.  This covers the --resume path as well as in-session restarts.
-        if (checkpoint.ResumeExecutorId is not null)
-            orchestrator.SetResumeExecutorId(checkpoint.ResumeExecutorId);
 
         // Restore the state machine's current state so --resume picks up at the correct
         // workflow state (e.g. "Testing") instead of restarting from the initial state.
@@ -1166,7 +1164,7 @@ public sealed class RunCommand(ILoggerFactory loggerFactory, PluginRegistry plug
         }
     }
 
-    // Minimal DTOs for the CI report check — no dependency on HandoffToReviewerValidator internals.
+    // Minimal DTOs for the CI report check.
     private sealed record CiTestReport
     {
         public List<CiTestResult>? Results { get; init; }

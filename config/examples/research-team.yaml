@@ -1,146 +1,88 @@
 ## Two-agent research pipeline: Researcher fetches and saves findings, Writer synthesises a report.
-## State machine routing with a ResearchComplete contract ensures the Writer cannot start before
-## findings exist on disk.
+## The handoff to the Writer is gated on the findings existing on disk.
 ##
 ## Run:      fuseraft run --config config/examples/research-team.yaml "Your task"
 ## Validate: fuseraft validate config/examples/research-team.yaml
 
-Orchestration:
-  Name: ResearchTeam
-  Description: >-
-    Two-agent research pipeline: Researcher fetches data and writes structured
-    findings to disk; Writer synthesises a polished report. State machine routing
-    with a ResearchComplete contract ensures the Writer cannot start before
-    findings exist on disk.
+team: ResearchTeam
+description: "Two-agent research pipeline: Researcher fetches data and writes structured findings to disk; Writer synthesises a polished report. The Writer cannot start before the findings exist on disk."
 
-  EvidenceStore:
-    Path: .fuseraft/state/evidence.json
+agents:
+  Researcher:
+    role: Data researcher who fetches real information using HTTP and filesystem tools.
+    model:
+      modelId: grok-4.3
+      endpoint: https://api.x.ai/v1
+      apiKeyEnvVar: XAI_API_KEY
+      maxTokens: 8192
+      reasoningEffort: none
+    tools: [Http, Json, FileSystem, Changes]
+    sees: conversation
+    instructions: |
+      You are a research specialist.
 
-  ChangeTracking:
-    Path: .fuseraft/state/changes.json
+      FOLLOW THESE STEPS IN ORDER:
 
-  Contracts:
-    - Name: ResearchComplete
-      Requires:
-        - Type: FileExists
-          Path: research/raw_data.txt
+      1. FETCH: Use http_get to retrieve data from relevant public APIs or URLs. Include the exact response content.
 
-  FailureHandling:
-    MissingEvidence:
-      Action: Reinstruct
-      Threshold: 3
-    NoProgress:
-      Action: Abort
-      Threshold: 3
+      2. EXTRACT: Use json_get to pull specific fields from JSON responses. Don't paraphrase — capture the real data.
 
-  Compaction:
-    TriggerTurnCount: 20
-    KeepRecentTurns: 6
-    Mode: lossless
+      3. SAVE: Use write_file to save your raw findings to 'research/raw_data.txt'. The file must exist on disk before you hand off.
 
-  # Isolation: Shared declared explicitly on every agent below to preserve this example's
-  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
-  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
-  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
-  Agents:
-    - Name: Researcher
-      Isolation: Shared
-      Description: Data researcher who fetches real information using HTTP and filesystem tools.
-      Instructions: |
-        You are a research specialist.
+      4. VERIFY: Use read_file on 'research/raw_data.txt' to confirm it was written correctly.
 
-        FOLLOW THESE STEPS IN ORDER:
+      5. HAND OFF: Call handoff(route_keyword: "Writer") with a summary of what sources you consulted and what data was captured.
 
-        1. FETCH: Use http_get to retrieve data from relevant public APIs or URLs. Include the exact response content.
+      RULES:
+      - Never summarize or paraphrase API responses — write the actual data to the file.
+      - Never claim a file was written without verifying it with read_file.
+    advanced:
+      functionChoice: required
+  Writer:
+    role: Technical writer who synthesises research into a structured report.
+    model:
+      modelId: grok-4.3
+      endpoint: https://api.x.ai/v1
+      apiKeyEnvVar: XAI_API_KEY
+      maxTokens: 8192
+      reasoningEffort: low
+    tools: [FileSystem, Json]
+    sees: conversation
+    instructions: |
+      You are a technical writer.
 
-        2. EXTRACT: Use json_get to pull specific fields from JSON responses. Don't paraphrase — capture the real data.
+      FOLLOW THESE STEPS IN ORDER:
 
-        3. SAVE: Use write_file to save your raw findings to 'research/raw_data.txt'. The file must exist on disk before you hand off.
+      1. READ: Use read_file to load 'research/raw_data.txt'. Do not proceed if the file is missing or empty —
+         report BLOCKED: no research data found.
 
-        4. VERIFY: Use read_file on 'research/raw_data.txt' to confirm it was written correctly.
+      2. ANALYSE: Identify key insights, patterns, trends, and gaps in the data.
 
-        5. HAND OFF: Call handoff(route_keyword: "HANDOFF TO WRITER") with a summary of what sources you consulted and what data was captured.
+      3. WRITE REPORT: Use write_file to save a structured Markdown report to 'research/report.md'. The report
+         must have clear sections: Summary, Key Findings, and Recommendations.
 
-        RULES:
-        - Never summarize or paraphrase API responses — write the actual data to the file.
-        - Never claim a file was written without verifying it with read_file.
-      Model:
-        ModelId: grok-4.3
-        Endpoint: https://api.x.ai/v1
-        ApiKeyEnvVar: XAI_API_KEY
-        MaxTokens: 8192
-        ReasoningEffort: none
-      FunctionChoice: required
-      Plugins:
-        - Http
-        - Json
-        - FileSystem
-        - Changes
-        - Handoff
+      4. VERIFY: Use read_file to confirm 'research/report.md' was written correctly.
 
-    - Name: Writer
-      Isolation: Shared
-      Description: Technical writer who synthesises research into a structured report.
-      Instructions: |
-        You are a technical writer.
+      5. COMPLETE: Call handoff(route_keyword: "end") followed by a one-paragraph summary of the findings.
+    advanced:
+      functionChoice: required
 
-        FOLLOW THESE STEPS IN ORDER:
+flow:
+  start: Researcher
+  steps:
+    Researcher:
+      - to: Writer
+        requires:
+          - fileExists: research/raw_data.txt
+    Writer:
+      - to: end
+        when: report complete
 
-        1. READ: Use read_file to load 'research/raw_data.txt'. Do not proceed if the file is missing or empty —
-           report BLOCKED: no research data found.
+limits:
+  maxTurns: 15
 
-        2. ANALYSE: Identify key insights, patterns, trends, and gaps in the data.
-
-        3. WRITE REPORT: Use write_file to save a structured Markdown report to 'research/report.md'. The report
-           must have clear sections: Summary, Key Findings, and Recommendations.
-
-        4. VERIFY: Use read_file to confirm 'research/report.md' was written correctly.
-
-        5. COMPLETE: Call handoff(route_keyword: "REPORT COMPLETE") followed by a one-paragraph summary of the findings.
-      Model:
-        ModelId: grok-4.3
-        Endpoint: https://api.x.ai/v1
-        ApiKeyEnvVar: XAI_API_KEY
-        MaxTokens: 8192
-        ReasoningEffort: low
-      FunctionChoice: required
-      Plugins:
-        - FileSystem
-        - Json
-        - Handoff
-
-  Selection:
-    Type: statemachine
-    StateMachine:
-      Initial: Research
-
-      States:
-        Research:
-          Agent: Researcher
-          Transitions:
-            - To: Writing
-              Signal: "HANDOFF TO WRITER"
-              Contract: ResearchComplete
-
-        Writing:
-          Agent: Writer
-          Transitions:
-            - To: Done
-              Signal: "REPORT COMPLETE"
-
-        Done:
-          Agent: Writer
-          Terminal: true
-
-  Termination:
-    Type: composite
-    MaxIterations: 15
-    Strategies:
-      - Type: regex
-        Pattern: "REPORT COMPLETE"
-        MaxIterations: 15
-        AgentNames:
-          - Writer
-
-  Events:
-    Path: .fuseraft/events.jsonl
+advanced:
+  compaction:
+    triggerTurnCount: 20
+    keepRecentTurns: 6
+    mode: lossless

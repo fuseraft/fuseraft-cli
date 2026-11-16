@@ -143,34 +143,6 @@ public sealed class ServeHumanApprovalServiceTests
     // action gates, not silently auto-approve regardless of policy or who's attached.
 
     [Fact]
-    public async Task RouteApproval_NoOrigin_DenyPolicy_Denies()
-    {
-        var service = new ServeHumanApprovalService(allowWhenUnattended: false);
-
-        Assert.False(await service.PromptRouteApprovalAsync("KEYWORD", "A", "B"));
-    }
-
-    [Fact]
-    public async Task RouteApproval_NoOrigin_AllowPolicy_Approves()
-    {
-        var service = new ServeHumanApprovalService(allowWhenUnattended: true);
-
-        Assert.True(await service.PromptRouteApprovalAsync("KEYWORD", "A", "B"));
-    }
-
-    [Fact]
-    public async Task RouteApproval_CurrentTaskOrigin_ReceivesTheRequest_AndItsAnswerWins()
-    {
-        var service = new ServeHumanApprovalService(allowWhenUnattended: false);
-        var origin = new FakeSink { ResponseToReturn = false };
-        service.RegisterConnection(origin);
-        service.SetCurrentTaskOrigin(origin);
-
-        Assert.False(await service.PromptRouteApprovalAsync("KEYWORD", "A", "B"));
-        Assert.Single(origin.Emitted);
-    }
-
-    [Fact]
     public async Task ConcurrentGateCalls_AgainstTheSameOrigin_DoNotCrossAnswers()
     {
         // Regression coverage for GateAsync's serialization: two concurrent gate calls (e.g.

@@ -32,9 +32,9 @@ After each run
 ```
 
 The pipeline is the single entry point for every agent invocation across all orchestrator
-types — `AgentOrchestrator` (sequential, parallel, verifier), `MagenticOrchestrator`
-(participant agents), and `GraphOrchestrator` (node executors, parallel nodes, recovery
-agents) all call `AssembleAsync` identically. Most layers are always-on; use `KnowledgeWeight`
+types — `AgentOrchestrator` (Steps flows: sequential, parallel, verifier) and the pattern
+orchestrators (magentic participants, map-reduce mappers, scatter-gather participants) all
+call `AssembleAsync` identically. Most layers are always-on; use `knowledgeWeight`
 on an agent's config to tune retrieval depth.
 
 ---
@@ -127,17 +127,17 @@ directory are loaded. Directories without `.fuseraft/` fall back to all global m
 automatically at the end of each session with `memory.autoSave` on, and are scoped to the working directory via
 `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json`. Use `/memory` commands to inspect or delete them.
 
-See [Configuration — Memory](configuration.md#memory) for the full field reference.
+See [Configuration — Memory](configuration.md#pluggable-memory-provider) for the full field reference.
 
 ---
 
 ## Layer 2b: Memory provider (per-turn)
 
-The `Memory:` top-level config key activates a live provider that runs pre- and post-turn hooks around every agent turn. The provider can persist the accumulated history after each turn and supply additional context from external sources.
+The `memory:` top-level config key activates a live provider that runs pre- and post-turn hooks around every agent turn. The provider can persist the accumulated history after each turn and supply additional context from external sources.
 
 ```yaml
-Memory:
-  Provider: local    # or "webhook"
+memory:
+  provider: local    # or "webhook"
 ```
 
 Two built-in providers are available:
@@ -151,13 +151,14 @@ See [Configuration — Pluggable memory provider](configuration.md#pluggable-mem
 
 ---
 
-## Layer 3: ContextWindow (per-agent history filter)
+## Layer 3: `contextWindow` (per-agent history filter)
 
-By default every agent receives the full accumulated conversation history, including tool-call
-frames and tool-result messages from all prior turns. In a long multi-agent session this can
-reach hundreds of thousands of tokens — most of it irrelevant to late-stage agents.
+An agent with `sees: conversation` or `fork` receives the accumulated conversation, including
+tool-call frames and tool-result messages from all prior turns. In a long multi-agent session
+this can reach hundreds of thousands of tokens — most of it irrelevant to late-stage agents.
+(Agents on the default `sees: handoff` never replay the conversation; see Layer 3a.)
 
-`ContextWindow` lets each agent declare a lighter view. The shared history is never mutated;
+`contextWindow` lets each such agent declare a lighter view. The shared history is never mutated;
 only the slice passed to that agent's turn is affected.
 
 ### Filters and their order
@@ -169,20 +170,21 @@ Filters are applied in this order every turn:
 3. **MaxTailMessages** — hard cap: keep only the last N messages (raw count)
 
 ```yaml
-Agents:
-  - Name: Reviewer
-    ContextWindow:
-      TextOnly: true          # strip all tool-call frames and tool results
-      ExcludeAgents:          # also strip all output from these agents
-        - Tester
-      MaxTurnAge: 5           # only keep messages from the last 5 assistant turns
-      MaxTailMessages: 40     # hard cap after the above filters
-      ContextCapFraction: 0.8 # emit context_cap_warning when at 80% of MaxTailMessages
-      MaxToolResultChars: 8000  # truncate individual tool results in replayed history
-      ToolResultCharOverrides:  # raise the cap for specific tools
-        search_content: 20000
-        grep_file: 20000
-      MaxReplayChars: 4000    # truncate verbose assistant messages in replayed history
+agents:
+  Reviewer:
+    sees: conversation
+    advanced:
+      contextWindow:
+        textOnly: true          # strip all tool-call frames and tool results
+        excludeAgents:          # also strip all output from these agents
+          - Tester
+        maxTurnAge: 5           # only keep messages from the last 5 assistant turns
+        maxTailMessages: 40     # hard cap after the above filters
+        maxToolResultChars: 8000  # truncate individual tool results in replayed history
+        toolResultCharOverrides:  # raise the cap for specific tools
+          search_content: 20000
+          grep_file: 20000
+        maxReplayChars: 4000    # truncate verbose assistant messages in replayed history
 ```
 
 ### TextOnly
@@ -195,8 +197,8 @@ messages are kept.
 files and re-runs commands gains nothing from seeing the hundreds of tool results produced by
 the Developer — stripping them can reduce input tokens by 90%+ in typical sessions.
 
-When `ExcludeAgents` is set, tool-result messages are stripped automatically even when
-`TextOnly` is false. Tool results are not attributed to a specific agent; leaving them without
+When `excludeAgents` is set, tool-result messages are stripped automatically even when
+`textOnly` is false. Tool results are not attributed to a specific agent; leaving them without
 their corresponding call frames produces a malformed context with orphaned result IDs.
 
 ### ExcludeAgents
@@ -207,7 +209,7 @@ tool-call frames.
 ### MaxTurnAge
 
 Keeps only messages from the last N *agent turns*, where each turn ends with an assistant
-reply. Unlike `MaxTailMessages` (a raw message count), `MaxTurnAge` is semantic: it counts
+reply. Unlike `maxTailMessages` (a raw message count), `maxTurnAge` is semantic: it counts
 backward from the end of history and discards everything before the cut-point.
 
 Use this to discard early-session context from phases or agents no longer relevant to the
@@ -216,156 +218,144 @@ current work — without needing to know the exact message count.
 ### MaxTailMessages
 
 Hard cap applied after the other filters. When the filtered list still exceeds this count,
-the oldest messages are dropped. Set `ContextCapFraction` to receive a `context_cap_warning`
-event as an early signal before the hard cap is reached.
+the oldest messages are dropped.
 
-### Replay truncation (`MaxReplayChars`)
+### Replay truncation (`maxReplayChars`)
 
 Agents sometimes produce verbose stream-of-consciousness output (3–5k tokens). When that text
 is replayed verbatim in every subsequent turn, compaction summaries grow each cycle and input
 tokens balloon. fuseraft truncates verbose non-summary assistant messages to 2,000 characters
-by default when replaying them; set `MaxReplayChars` to override this cap per agent.
+by default when replaying them; set `maxReplayChars` to override this cap per agent.
 Compaction summaries are never truncated regardless of this setting.
 
 ```yaml
-Agents:
-  - Name: Developer
-    ContextWindow:
-      MaxReplayChars: 4000   # truncate replayed assistant messages to 4 000 chars
+agents:
+  Developer:
+    sees: conversation
+    advanced:
+      contextWindow:
+        maxReplayChars: 4000   # truncate replayed assistant messages to 4 000 chars
 ```
 
 Default: `0` (uses the global 2,000-character fallback).
 
-### Tool-result truncation (`MaxToolResultChars`)
+### Tool-result truncation (`maxToolResultChars`)
 
 A large tool result — for example, a `read_file` on a 200 KB source file — is replayed
 verbatim into every subsequent agent turn, compounding context growth each cycle. Set
-`MaxToolResultChars` to truncate `FunctionResultContent` strings in the replayed history
+`maxToolResultChars` to truncate `FunctionResultContent` strings in the replayed history
 slice. A suffix noting the omitted character count is appended so agents know the result
 was cut.
 
-Unlike `TextOnly` (which drops tool messages entirely), this keeps the result visible
+Unlike `textOnly` (which drops tool messages entirely), this keeps the result visible
 but bounded:
 
 ```yaml
-Agents:
-  - Name: Developer
-    ContextWindow:
-      MaxToolResultChars: 8000   # truncate tool results in replayed history to 8 000 chars
-      ToolResultCharOverrides:   # per-tool overrides (search tools can afford a higher cap)
-        search_content: 20000
-        grep_file: 20000
+agents:
+  Developer:
+    sees: conversation
+    advanced:
+      contextWindow:
+        maxToolResultChars: 8000   # truncate tool results in replayed history to 8 000 chars
+        toolResultCharOverrides:   # per-tool overrides (search tools can afford a higher cap)
+          search_content: 20000
+          grep_file: 20000
 ```
 
-Default: `0` (no truncation). `ToolResultCharOverrides` is only meaningful when `MaxToolResultChars` is also set; a value of `0` in the overrides map disables truncation for that specific tool entirely.
+Default: `0` (no truncation). `toolResultCharOverrides` is only meaningful when `maxToolResultChars` is also set; a value of `0` in the overrides map disables truncation for that specific tool entirely.
 
 **Consumed-read optimisation:** fuseraft distinguishes between `read_file` results that
 the agent has already acted on and those that are still load-bearing:
 
 - **Consumed read** — a `write_file` or `patch_file` to the same path appears later in
   the history. The content is stale (the file has since been rewritten). These are capped
-  at 500 characters regardless of `MaxToolResultChars`, with a stub noting that the file
+  at 500 characters regardless of `maxToolResultChars`, with a stub noting that the file
   was subsequently modified and can be re-read if needed.
 - **Unconsumed read** — no downstream write to the same path exists. The model may still
-  need this content to plan its next action, so it is left at the full `MaxToolResultChars`
+  need this content to plan its next action, so it is left at the full `maxToolResultChars`
   limit.
 - **All other tool results** (shell output, grep results, etc.) are truncated uniformly
-  at `MaxToolResultChars`.
+  at `maxToolResultChars`.
 
 This means a file that was read and then immediately patched stops consuming context across
 all subsequent turns, while a file that was read but not yet written remains fully visible.
 
 ---
 
-## HandoffContext (targeted transition injection)
+## Handoffs (what moves between agents)
 
-Declared on a `TransitionConfig` in the state machine. When a transition fires, the orchestrator reads from durable disk artifacts and injects a compact block into shared history before the receiving agent's first turn. Agents that don't use a `Context` spec see the injected block as part of the conversation history.
+In a `steps` flow, two things travel with every handoff:
+
+- **The handoff directive.** The `goal`, `background` and `constraints` the agent passes to `handoff` become the next agent's task. An agent with `sees: handoff` (the default) gets this instead of the conversation.
+- **Artifacts.** Each artifact the receiving agent lists in `reads` is included in its context whenever the file exists.
+
+For anything else an agent should start with, add sources to its `advanced.context` (Layer 3a):
 
 ```yaml
-Transitions:
-  - To: Testing
-    Signal: "HANDOFF TO TESTER"
-    Contract: ImplementationComplete
-    HandoffContext:
-      - Source: session_context
-      - Source: changes_recent
-      - Source: brief_field:test_targets
+agents:
+  Tester:
+    reads: [brief]
+    advanced:
+      context:
+        - source: session_context
+        - source: changes_recent:5
 ```
-
-**Supported source types** (same as `Context` spec, minus `own_history`):
-
-| Source | Description |
-|--------|-------------|
-| `session_context` | Handoff summary from `session_context_write` |
-| `changes_recent[:N]` | Last N entries from `changes.json` (default: all recent) |
-| `brief_field:FIELD` | A named field from `brief.json` |
-| `file:PATH` | Raw contents of an artifact file |
-
-`own_history` is not supported in `HandoffContext`. Use the `Context` spec on the receiving agent instead.
-
-**How it differs from `Context` spec:** `HandoffContext` injects content *into shared history* so any agent (including those without a `Context` spec) sees it in subsequent turns. `Context` spec is a per-agent read at invocation time and does not touch shared history at all.
 
 ---
 
 ## Layer 3a: Context spec (artifact-first assembly)
 
-When `Context:` is declared on an agent, the orchestrator assembles that agent's context from disk artifacts instead of filtering or replaying the shared transcript. The agent receives only the declared sources plus its own prior turns — no Planner analysis, no Developer tool traces, nothing from other agents.
+An agent with `sees: handoff` (the default) has its context assembled from disk artifacts instead of the shared transcript: the task or handoff directive, its `reads` artifacts, its own last few turns, any correction addressed to it, and any extra sources in `advanced.context`. No Planner analysis, no Developer tool traces, nothing from other agents.
 
 > **Recommended for judgment-independent roles.** When every agent shares the same growing
 > transcript (Layer 3), a downstream agent can't distinguish a verified fact from an earlier
 > agent's unverified claim — the conversation itself becomes evidence, and claims compound
-> into hallucinations several turns later. `Context:` spec is the fix: it drives assembly from
-> durable artifacts (`brief.json`, `changes.json`, the evidence graph) instead of replayed
-> chat, so an agent's information diet is exactly what someone deliberately packaged for it.
-> Treat it as the default for roles that render an independent verdict — Reviewer, Tester,
-> Critic, Auditor — and reserve full shared-history replay (`ContextWindow`, below) for
-> collaborative/continuity roles (Planner, Developer mid-phase) and for rapid prototyping,
-> where you don't yet know which artifacts a new agent needs. The `swe`, `greenfield`,
-> `audit`, `research`, `brownfield`, and `devops` templates generated by `fuseraft init`
-> apply `Context:` to their Reviewer/Tester/Critic/Auditor/Verifier-equivalent agents by
-> default — use those as a starting point rather than designing a source list from scratch.
+> into hallucinations several turns later. Artifact-first assembly is the fix: an agent's
+> information diet is exactly what was deliberately packaged for it (artifacts, the change
+> log, the evidence graph) instead of replayed chat. That's why `sees: handoff` is the default;
+> reserve `sees: conversation` for agents that genuinely need the discussion.
 >
 > **Exception:** an agent whose job is specifically to catch a mismatch between what other
 > agents *claimed* and what the change log / execution state actually shows (e.g. an
-> evidence-auditor `Verifier` that cross-checks "claimed success without evidence" patterns)
-> needs to see the claims to audit them — isolating it via `Context:` would remove the very
-> signal it exists to check. The `swe` template's `Verifier` is intentionally left on shared
-> history for this reason.
+> evidence-auditor `verifier` that cross-checks "claimed success without evidence" patterns)
+> needs to see the claims to audit them — isolating it would remove the very signal it exists
+> to check. Give such an agent `sees: fork`, as the `swe` template's `verifier` does.
 >
 > A declared source resolving to no content is itself a signal worth watching, not just a
-> silent gap — see `empty_sources` in the [`context_assembly` event payload](configuration.md#events) below.
+> silent gap — see `empty_sources` in the [`context_assembly` event payload](configuration.md#what-every-run-records).
 
 ```yaml
-Agents:
-  - Name: Tester
-    Context:
-      - Source: session_context
-      - Source: changes_recent:5        # last 5 change-log entries
-      - Source: brief_field:test_targets
-      - Source: brief_field:build_command
-      - Source: own_history:4           # agent's own last 4 turns, text-only, char-bounded
+agents:
+  Tester:
+    advanced:
+      context:
+        - source: session_context
+        - source: changes_recent:5        # last 5 change-log entries
+        - source: brief_field:test_targets
+        - source: brief_field:build_command
+        - source: own_history:4           # agent's own last 4 turns, text-only, char-bounded
 ```
 
 **`ContextSource` fields:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Source` | string | — | Required. One of: `session_context`, `changes_recent[:N]`, `brief_field:FIELD`, `file:PATH`, `own_history[:N]` |
-| `MaxChars` | int | 4000 (artifacts) / 8000 (own_history) | Per-source character cap |
-| `Label` | string | derived from source type | Section header override |
+| `source` | string | — | Required. One of: `session_context`, `changes_recent[:N]`, `brief_field:FIELD`, `file:PATH`, `own_history[:N]` |
+| `maxChars` | int | 4000 (artifacts) / 8000 (own_history) | Per-source character cap |
+| `label` | string | derived from source type | Section header override |
 
-**`own_history` semantics:** text-only (tool-call frames and tool results stripped), char-bounded to `MaxChars`, oldest turns dropped first if the cap is reached. If the last surviving turn is still over the cap, it is truncated at the cap boundary.
+**`own_history` semantics:** text-only (tool-call frames and tool results stripped), char-bounded to `maxChars`, oldest turns dropped first if the cap is reached. If the last surviving turn is still over the cap, it is truncated at the cap boundary.
 
 **Architectural shift:**
 
 | Mode | What the agent receives |
 |------|------------------------|
-| Without `Context` spec | `filtered_history` (via `ContextWindow`) + optional `HandoffContext` injection |
-| With `Context` spec | `task` + `own_history` + assembled artifact block |
+| `sees: conversation` / `fork` | `filtered_history` (via `contextWindow`) |
+| `sees: handoff` (default) | task or handoff directive + `own_history` + `reads` artifacts + `advanced.context` sources |
 
-Token cost with a `Context` spec is O(relevant artifacts + own recent work) rather than O(session length).
+Token cost with `sees: handoff` is O(relevant artifacts + own recent work) rather than O(session length).
 
-**`ContextWindow` interaction:** when `Context:` is declared, `ContextWindow:` is ignored for that agent. Shared history is still written after each turn so routing and termination strategies work normally; only what the model receives changes.
+**`contextWindow` interaction:** `contextWindow` only applies to agents that see the conversation. Shared history is still written after each turn so routing and termination strategies work normally; only what the model receives changes.
 
 ---
 
@@ -378,9 +368,10 @@ background, then resumes from the retained tail.
 ### Trigger
 
 ```yaml
-Compaction:
-  TriggerTurnCount: 50   # fire when assistant-turn count reaches this
-  KeepRecentTurns: 10    # keep this many turns verbatim; compact the rest
+advanced:
+  compaction:
+    triggerTurnCount: 50   # fire when assistant-turn count reaches this
+    keepRecentTurns: 10    # keep this many turns verbatim; compact the rest
 ```
 
 Compaction fires in three situations:
@@ -388,20 +379,20 @@ Compaction fires in three situations:
 - Mid-session, after each checkpoint save, once the live history crosses the threshold.
 - On demand, when an agent calls `compact_conversation` via the [`Compaction` plugin](plugins.md#compaction).
 
-`TriggerTurnCount` must be greater than `KeepRecentTurns`.
+`triggerTurnCount` must be greater than `keepRecentTurns`.
 
 ### Modes
 
 | Mode | How context is reconstructed | LLM call? | Requirements |
 |---|---|---|---|
 | `llm` | LLM summarizes the compacted turns | Yes | A model |
-| `intent` | Deterministic `✓`/`✗`/`⧖` per tool call from `intents.json` | No | `ChangeTracking` |
-| `lossless` | Evidence graph + contract status + state machine position | No | `statemachine` strategy + `EvidenceStore` |
-| `hybrid` | Lossless reconstruction prepended before the LLM summary | Yes | `statemachine` strategy + `EvidenceStore` |
-| `window` | Oldest user+assistant pairs dropped until within `TokenBudget` | No | — |
+| `intent` | Deterministic `✓`/`✗`/`⧖` per tool call from `intents.json` | No | — |
+| `lossless` | Evidence graph + gate status + current step | No | A `steps` flow |
+| `hybrid` | Lossless reconstruction prepended before the LLM summary | Yes | A `steps` flow |
+| `window` | Oldest user+assistant pairs dropped until within `tokenBudget` | No | — |
 
-**`intent` is the recommended mode** for most sessions when `ChangeTracking` is configured.
-It requires no state machine and produces a deterministic record of every tool call:
+**`intent` is a good default.** It works with any flow and produces a deterministic record
+of every tool call:
 
 ```
 [INTENT-DERIVED RECONSTRUCTION — covers turns 1–20]
@@ -416,9 +407,9 @@ Do not re-execute operations marked ✓ (applied).
 Operations marked ✗ (failed) should be retried if the task requires them.
 ```
 
-**`lossless` is the recommended mode** for `statemachine` sessions with an `EvidenceStore`.
-Instead of summarizing the conversation, it reads disk state directly — state machine position,
-contract pass/fail, evidence items — and injects it as ground truth. No hallucination is
+**`lossless` is the recommended mode** for `steps` flows.
+Instead of summarizing the conversation, it reads disk state directly — the current step,
+gate pass/fail, evidence items — and injects it as ground truth. No hallucination is
 possible because no LLM generates the summary.
 
 **`window` mode** trades context continuity for simplicity. No summary is injected; the oldest
@@ -434,15 +425,15 @@ at the front while the window trims from behind it.
 ### Compaction model
 
 By default, `llm` and `hybrid` modes use the first agent's model to generate the summary.
-Override with `Compaction.Model` to use a cheaper model for compaction:
+Override with `compaction.model` (an alias or a model map) to use a cheaper model for compaction:
 
 ```yaml
-Compaction:
-  TriggerTurnCount: 50
-  KeepRecentTurns: 10
-  Mode: hybrid
-  Model:
-    ModelId: gpt-4o-mini
+advanced:
+  compaction:
+    triggerTurnCount: 50
+    keepRecentTurns: 10
+    mode: hybrid
+    model: gpt-4o-mini
 ```
 
 ### Enriching summaries
@@ -451,50 +442,49 @@ Several structured context blocks are automatically prepended before the LLM sum
 When all are enabled, they appear in this order: brief snapshot, symbol graph, objectives,
 reasoning excerpts, exploration history.
 
-**`[BRIEF SNAPSHOT]`** — always prepended when `Validation.BriefPath` is configured and the
+**`[BRIEF SNAPSHOT]`** — always prepended when the team has a brief artifact and the
 brief file exists. Embeds the brief's `goal`, `files_to_change`, `verify_command`, and
 `execution_checklist` directly in every compaction summary. With the brief content in the
 summary, agents resuming after compaction do not need to re-read `brief.json` — the resumption
 note's step (1) becomes a no-op. No configuration flag: the block is present whenever
-`Validation.BriefPath` resolves to an existing file.
+the brief file exists.
 
-**`IncludeReasoning`** (default `true`) — prepends a `[REASONING EXCERPTS]` block containing
+**`includeReasoning`** (default `true`) — prepends a `[REASONING EXCERPTS]` block containing
 the model's thinking for each compacted turn (truncated to ~500 tokens per turn). Useful when
-the *why* behind prior decisions matters as much as the *what*. Requires `Events` to be
-configured (reasoning excerpts are read from the session events log). When the events log is
-absent or contains no reasoning events the block is omitted silently.
+the *why* behind prior decisions matters as much as the *what*. Reasoning excerpts are read
+from the run's event log; when it contains no reasoning events the block is omitted silently.
 
-**`IncludeSymbolGraph`** (default `true`) — prepends a `[SYMBOL DEPENDENCY GRAPH]` block
+**`includeSymbolGraph`** (default `true`) — prepends a `[SYMBOL DEPENDENCY GRAPH]` block
 listing every `SymbolDefinition` and `SymbolReference` node in the evidence store for files
 written during the session. Gives agents an explicit map of what symbols were in scope during
-the compacted turns. Requires `EvidenceStore` and `ChangeTracking` to be configured. When no
-evidence store is wired the block is omitted silently.
+the compacted turns. When no symbol nodes exist the block is omitted silently.
 
-**`IncludeExploration`** (default `true`) — prepends an `[EXPLORATION HISTORY]` block listing
+**`includeExploration`** (default `true`) — prepends an `[EXPLORATION HISTORY]` block listing
 files read, files grepped, and shell searches performed before compaction. When the session
 events log has no reads yet (e.g. on the first compaction), the block falls back to
 `read_cache.json` (written synchronously on every `read_file` call) so the history is never
 empty due to event-log timing. Omitted silently when both sources are empty.
 
 ```yaml
-Compaction:
-  TriggerTurnCount: 40
-  KeepRecentTurns: 8
-  Mode: hybrid
-  IncludeReasoning: true    # default; set to false to suppress
-  IncludeSymbolGraph: true  # default; set to false to suppress
-  IncludeExploration: true  # default; set to false to suppress
+advanced:
+  compaction:
+    triggerTurnCount: 40
+    keepRecentTurns: 8
+    mode: hybrid
+    includeReasoning: true    # default; set to false to suppress
+    includeSymbolGraph: true  # default; set to false to suppress
+    includeExploration: true  # default; set to false to suppress
 ```
 
 **Conditional resumption note** — the `RESUMPTION NOTE` appended to every compaction summary
 instructs agents to re-read `brief.json` only when the brief's `goal` and `files_to_change`
-are not already visible in the summary. When the `[BRIEF SNAPSHOT]` block is present (i.e.
-`Validation.BriefPath` is configured), agents skip the re-read automatically.
+are not already visible in the summary. When the `[BRIEF SNAPSHOT]` block is present, agents
+skip the re-read automatically.
 
 ### History pre-pruning
 
 Before passing conversation history to the LLM summarizer, fuseraft truncates any single
-message whose content exceeds `MaxCharsPerHistoryMessage` (default 8 000 characters, ≈2 000
+message whose content exceeds `maxCharsPerHistoryMessage` (default 8 000 characters, ≈2 000
 tokens). Long messages receive a `[TRUNCATED — N chars total]` suffix, and any tool calls
 recorded for that turn are appended as a compact one-line list so the summarizer still knows
 what operations were attempted.
@@ -503,10 +493,11 @@ This prevents a single verbose agent turn — a large shell output or a file rea
 reply — from dominating the summary prompt and inflating LLM cost.
 
 ```yaml
-Compaction:
-  TriggerTurnCount: 50
-  KeepRecentTurns: 10
-  MaxCharsPerHistoryMessage: 4000   # stricter; ~1 000 tokens per message max
+advanced:
+  compaction:
+    triggerTurnCount: 50
+    keepRecentTurns: 10
+    maxCharsPerHistoryMessage: 4000   # stricter; ~1 000 tokens per message max
 ```
 
 Set to `0` to disable truncation and restore the previous behaviour (full content verbatim).
@@ -517,17 +508,18 @@ If repeated compactions save very little — for example, a conversation that is
 threshold but whose LLM summary is nearly as long as the history it replaced — fuseraft
 suppresses further compaction until the history grows meaningfully.
 
-The guard tracks the savings ratio of the last `AntiThrashWindow` compactions (default 10). If
-every entry in that window is below `AntiThrashMinSavingsRatio` (default 10%), `ShouldCompact`
+The guard tracks the savings ratio of the last `antiThrashWindow` compactions (default 10). If
+every entry in that window is below `antiThrashMinSavingsRatio` (default 10%), `ShouldCompact`
 returns `false`. The guard resets automatically as new turns extend the conversation past the
 trigger again.
 
 ```yaml
-Compaction:
-  TriggerTurnCount: 20
-  KeepRecentTurns: 5
-  AntiThrashMinSavingsRatio: 0.15   # suppress if saving less than 15% (default: 0.10)
-  AntiThrashWindow: 4               # look at last 4 compactions (default: 10)
+advanced:
+  compaction:
+    triggerTurnCount: 20
+    keepRecentTurns: 5
+    antiThrashMinSavingsRatio: 0.15   # suppress if saving less than 15% (default: 0.10)
+    antiThrashWindow: 4               # look at last 4 compactions (default: 10)
 ```
 
 Set either field to `0` to disable the guard entirely.
@@ -549,8 +541,7 @@ can be resumed.
 
 ### Change log grounding
 
-When `ChangeTracking` or `Validation.ChangeLogPath` is configured, `llm` and `hybrid`
-compactors read `changes.json` at compaction time and inject it into the summary prompt as
+The `llm` and `hybrid` compactors read the run's `changes.json` at compaction time and inject it into the summary prompt as
 authoritative ground truth. Agent success claims are overridden by what `changes.json` actually
 records — exit codes and file writes are facts; assistant self-reports are not.
 
@@ -567,20 +558,21 @@ no LLM cost at compaction time.
 While Layer 4 Compaction fires on *turn count*, the Context Budget fires on *cumulative input tokens* — a more direct measure of context pressure. Each agent's input token consumption is tracked independently across turns, and two thresholds can be configured:
 
 ```yaml
-ContextBudget:
-  WarnAt: 80000      # warn when any agent exceeds this
-  CutoverAt: 120000  # compact when any agent exceeds this
+advanced:
+  contextBudget:
+    warnAt: 80000      # warn when any agent exceeds this
+    cutoverAt: 120000  # compact when any agent exceeds this
 ```
 
 **Why input tokens?** Turn count is a coarse proxy — a single tool-heavy turn can consume as many tokens as ten brief turns. Tracking cumulative input tokens catches context rot directly, regardless of turn count.
 
-**Warn phase (`WarnAt`):** when a single agent's cumulative input tokens since the last compaction reach `WarnAt`, a yellow warning is printed to the console and a `context_budget_warn` event is emitted. This is a signal that compaction is coming soon. The warning fires at most once per agent per compaction cycle so it doesn't spam.
+**Warn phase (`warnAt`):** when a single agent's cumulative input tokens since the last compaction reach `warnAt`, a yellow warning is printed to the console and a `context_budget_warn` event is emitted. This is a signal that compaction is coming soon. The warning fires at most once per agent per compaction cycle so it doesn't spam.
 
-**Cutover phase (`CutoverAt`):** when a single agent's cumulative input tokens reach `CutoverAt`, compaction triggers immediately (same as if turn-count compaction had fired). The per-agent counters reset after compaction, so the next context window starts with a fresh budget — allowing the session to run indefinitely.
+**Cutover phase (`cutoverAt`):** when a single agent's cumulative input tokens reach `cutoverAt`, compaction triggers immediately (same as if turn-count compaction had fired). The per-agent counters reset after compaction, so the next context window starts with a fresh budget — allowing the session to run indefinitely.
 
 **Relationship to turn-count compaction:** both triggers are active simultaneously. Whichever fires first wins. If turn-count compaction fires, the context budget counters reset too. The two mechanisms complement each other: turn count protects against verbose-but-sparse sessions; token budget protects against dense, token-heavy turns.
 
-**Requires `Compaction`:** `CutoverAt` cannot fire without a configured compactor. `fuseraft validate` reports an error if `CutoverAt > 0` without a `Compaction` section.
+**Requires `advanced.compaction`:** `cutoverAt` cannot fire without a configured compactor. `fuseraft validate` reports an error if `cutoverAt > 0` without an `advanced.compaction` section.
 
 See [Configuration — Context budget](configuration.md#context-budget) for the full field reference.
 
@@ -593,18 +585,19 @@ Compaction and Context Budget operate across turns. The in-turn sliding window o
 
 Without a cap, N sequential tool calls cost O(N²) cumulative tokens across the turn because
 each iteration resends all prior tool results. The sliding window keeps this cost at O(window)
-by replacing every tool result older than the last `MaxInTurnToolPairs` with a compact
+by replacing every tool result older than the last `maxInTurnToolPairs` with a compact
 placeholder before the next LLM call:
 
 ```yaml
-Agents:
-  - Name: Developer
-    MaxInTurnToolPairs: 12   # keep only the last 12 tool call/result pairs in full
+agents:
+  Developer:
+    advanced:
+      maxInTurnToolPairs: 12   # keep only the last 12 tool call/result pairs in full
 ```
 
 **Trigger-gated, not unconditional:** the window only actually collapses anything once the
 turn's estimated size reaches `CompactionTriggerRatio` (90%) of a reference budget — the
-agent's `MaxContextTokens` when configured, otherwise a 200k-char fallback. Below that
+agent's `maxContextTokens` when configured, otherwise a 200k-char fallback. Below that
 threshold every call resends the exact same tool-pair sequence as the previous one, so a
 provider's prompt-cache prefix stays intact across the turn instead of being rewritten (and
 the cache invalidated) on every single round once the pair count merely exceeds N. This
@@ -614,7 +607,7 @@ rather than reshaping the transcript on every call.
 **Moves in steps once triggered:** past the trigger, the window and the char budget below
 move their cut points 8 groups or results at a time rather than one per round. Each move
 rewrites a message near the start of the request — a prompt-cache miss on nearly all of
-it — so the window floats between `MaxInTurnToolPairs` and `MaxInTurnToolPairs + 7` groups,
+it — so the window floats between `maxInTurnToolPairs` and `MaxInTurnToolPairs + 7` groups,
 and the char budget trims results in batches of 8, keeping the prefix unchanged for the
 rounds in between instead of breaking the cache on every one.
 
@@ -622,11 +615,11 @@ rounds in between instead of breaking the cache on every one.
 
 | Field | When it fires | Guarantee |
 |-------|--------------|-----------|
-| `MaxInTurnToolPairs` | Once the turn crosses the size trigger above | O(N) tool-result footprint once triggered |
-| `MaxInTurnContextTokens` | Only when total in-turn chars exceed the budget | Fires only after the budget is exceeded |
+| `maxInTurnToolPairs` | Once the turn crosses the size trigger above | O(N) tool-result footprint once triggered |
+| `maxInTurnContextTokens` | Only when total in-turn chars exceed the budget | Fires only after the budget is exceeded |
 
-Use `MaxInTurnToolPairs` when you want a hard bound regardless of result sizes. Use
-`MaxInTurnContextTokens` when result sizes vary and you want to preserve more context for
+Use `maxInTurnToolPairs` when you want a hard bound regardless of result sizes. Use
+`maxInTurnContextTokens` when result sizes vary and you want to preserve more context for
 turns with small results. Both can be set simultaneously — the sliding window runs first.
 
 **Replaced results:** replaced pairs become `[result omitted — sliding window]`. The
@@ -653,17 +646,18 @@ happens once enough staleness has piled up to be worth the one-time cache miss.
 
 ---
 
-### Token-budget-based tool-result window (`MaxToolResultTokens` / `InTurnToolWindow`)
+### Token-budget-based tool-result window (`maxToolResultTokens` / `inTurnToolWindow`)
 
-A complementary mechanism in `ContextBudget` applies a token-budget cap across all tool results in the context slice sent to the model on any single invocation — not just per agent-config:
+A complementary mechanism in `contextBudget` applies a token-budget cap across all tool results in the context slice sent to the model on any single invocation — not just per agent-config:
 
 ```yaml
-ContextBudget:
-  MaxToolResultTokens: 80000   # evict oldest tool results once total exceeds this
-  InTurnToolWindow:    20      # always retain at least the last 20 results verbatim
+advanced:
+  contextBudget:
+    maxToolResultTokens: 80000   # evict oldest tool results once total exceeds this
+    inTurnToolWindow:    20      # always retain at least the last 20 results verbatim
 ```
 
-When the cumulative estimated token cost of all tool-result messages in the context slice exceeds `MaxToolResultTokens`, the oldest results beyond the last `InTurnToolWindow` are replaced with enriched tombstones that include the tool name, a key argument label, and up to 300 characters of the original content as a preview:
+When the cumulative estimated token cost of all tool-result messages in the context slice exceeds `maxToolResultTokens`, the oldest results beyond the last `inTurnToolWindow` are replaced with enriched tombstones that include the tool name, a key argument label, and up to 300 characters of the original content as a preview:
 
 ```
 [tool result — evicted: read_file(src/LargeService.cs). Preview: "using System;…". Re-read with targeted ranges if needed.]
@@ -671,11 +665,11 @@ When the cumulative estimated token cost of all tool-result messages in the cont
 
 When evictions occur, a `[Context Manifest]` message is also appended at the end of the context slice listing active tool results still in context alongside the superseded (evicted) ones, so the agent knows which reads are still available and which must be re-issued with targeted ranges.
 
-**Key difference from `MaxInTurnToolPairs`:** `MaxInTurnToolPairs` is an agent-level count-based cap that engages once a turn crosses the size trigger described above (see [In-turn tool-result sliding window](#in-turn-tool-result-sliding-window)). `MaxToolResultTokens` is a session-level token-budget cap applied at the `ContextBudget` layer — it only fires when the total tool-result token footprint actually exceeds the threshold, preserving full context for turns with few or small results.
+**Key difference from `maxInTurnToolPairs`:** `maxInTurnToolPairs` is an agent-level count-based cap that engages once a turn crosses the size trigger described above (see [In-turn tool-result sliding window](#in-turn-tool-result-sliding-window)). `maxToolResultTokens` is a session-level token-budget cap applied at the `contextBudget` layer — it only fires when the total tool-result token footprint actually exceeds the threshold, preserving full context for turns with few or small results.
 
 **Audit trail:** the full tool results remain in the shared conversation history and on-disk artifacts. Only the slice passed to the model is trimmed — compaction and session replay are unaffected.
 
-**Recommended values:** set `MaxToolResultTokens` to 50–80% of your model's context window and `InTurnToolWindow` to 15–25 for action agents that call many tools per turn.
+**Recommended values:** set `maxToolResultTokens` to 50–80% of your model's context window and `inTurnToolWindow` to 15–25 for action agents that call many tools per turn.
 
 ---
 
@@ -703,7 +697,7 @@ The stub is actionable: it tells the agent what happened, which tool produced th
 
 **Threshold:** 40,000 characters (approximately 10,000 tokens at 4 chars/token). Results below this threshold are passed through unchanged.
 
-**Relationship to `MaxToolResultChars`:** these two mechanisms are complementary and both may be active simultaneously. Artifact offloading fires at production time — large results never enter history. `MaxToolResultChars` fires at replay time — medium-sized results already in history are truncated before being sent to the model. Together they form a two-stage defence against context inflation from tool outputs.
+**Relationship to `maxToolResultChars`:** these two mechanisms are complementary and both may be active simultaneously. Artifact offloading fires at production time — large results never enter history. `maxToolResultChars` fires at replay time — medium-sized results already in history are truncated before being sent to the model. Together they form a two-stage defence against context inflation from tool outputs.
 
 ---
 
@@ -757,7 +751,7 @@ Each change is reported once, by name only (up to 10 files). The notice carries 
 
 **Stale rewrites are refused.** `write_file` on a file that changed after the agent last read or wrote it fails with `WRITE BLOCKED`, because content built from its old copy would undo the change. Reading the file again (any range) lifts this. `patch_file` still works, since it only replaces text it finds in the file as it is now.
 
-**In orchestration**, a file a tool changed this way counts as written (or deleted) in the [change log](#change-log-grounding), so `RequireAllFilesWritten` and the other validators that read it see a `sed` edit like a `write_file`.
+**In orchestration**, a file a tool changed this way counts as written (or deleted) in the [change log](#change-log-grounding), so `filesWritten` and the other gates that read it see a `sed` edit like a `write_file`.
 
 **Network shares.** Every tracked file is looked up before and after each tool call, and on a network share each lookup is a round trip to the server. `fuseraft settings set files.trackedFiles <n>` changes how many files are tracked (default 50, in the REPL and in `fuseraft run`); `0` turns tracking off, along with the change notices and the stale-write refusal.
 
@@ -787,7 +781,7 @@ Each stage re-runs the pre-flight budget/payload checks on the trimmed context b
 calling the provider, so both fuseraft's own pre-flight throws and provider 400/413
 rejections recover automatically.
 
-**Streaming path:** when `MaxContextTokens` or `MaxPayloadBytes` is configured, fuseraft
+**Streaming path:** when `maxContextTokens` or `maxPayloadBytes` is configured, fuseraft
 proactively pre-trims before streaming begins (streaming cannot retry mid-response). Without
 explicit limits, provider errors on the streaming path surface normally.
 
@@ -820,11 +814,11 @@ Open the file in a browser. It requires internet access for the Chart.js CDN.
 
 - One line per agent — cumulative input tokens on the Y axis, turn number on the X axis.
 - **Compaction events** appear as vertical dashed grey lines labelled `⚡ compact`.
-- **`warn_at` threshold** appears as a horizontal dashed yellow line (when `ContextBudget.WarnAt` is set).
-- **`cutover_at` threshold** appears as a horizontal dashed red line (when `ContextBudget.CutoverAt` is set).
+- **`warn_at` threshold** appears as a horizontal dashed yellow line (when `contextBudget.warnAt` is set).
+- **`cutover_at` threshold** appears as a horizontal dashed red line (when `contextBudget.cutoverAt` is set).
 - Hovering a point shows the turn's per-turn input and output token counts alongside the cumulative total.
 
-**Why it's useful:** Visual inspection quickly reveals which agent is consuming the most context, whether compaction is firing at the right threshold, and whether any single turn caused a spike that warrants `TextOnly` or `MaxTurnAge` tuning on that agent.
+**Why it's useful:** Visual inspection quickly reveals which agent is consuming the most context, whether compaction is firing at the right threshold, and whether any single turn caused a spike that warrants `textOnly` or `maxTurnAge` tuning on that agent.
 
 ---
 
@@ -846,8 +840,8 @@ Here is the full sequence from session start through a long-running session:
    │     KnowledgeWeight.Default → all non-expired items (default)
    │     KnowledgeWeight.High    → Default + one-hop graph expansion on seed symbols
    ├─ System prompt      → instructions + memory block (unified)
-   ├─ HandoffContext injection (state machine only) → artifact block written into shared history when a transition fires
-   ├─ ContextWindow filter or Context: spec
+   ├─ Sees: handoff → task or handoff directive + Reads artifacts + own turns + Advanced.Context sources
+   ├─ Sees: conversation / fork → ContextWindow filter over the shared history
    │  ├─ TextOnly / ExcludeAgents strip tool noise
    │  ├─ MaxTurnAge semantic cut
    │  ├─ MaxTailMessages hard cap
@@ -890,79 +884,83 @@ Here is the full sequence from session start through a long-running session:
 
 ## Choosing a strategy
 
-**For most sessions with `ChangeTracking`:** use `intent` mode.
+**For most sessions:** use `intent` mode.
 
 ```yaml
-ChangeTracking:
-  Path: ~/.fuseraft/state/{project_slug}/changes.json
-
-Compaction:
-  TriggerTurnCount: 40
-  KeepRecentTurns: 8
-  Mode: intent
+advanced:
+  compaction:
+    triggerTurnCount: 40
+    keepRecentTurns: 8
+    mode: intent
 ```
 
-**For `statemachine` sessions with `EvidenceStore`:** use `lossless` or `hybrid`.
+**For `steps` flows:** use `lossless` or `hybrid`.
 
 ```yaml
-Compaction:
-  TriggerTurnCount: 50
-  KeepRecentTurns: 10
-  Mode: lossless   # or "hybrid" to add an LLM narrative on top
+advanced:
+  compaction:
+    triggerTurnCount: 50
+    keepRecentTurns: 10
+    mode: lossless   # or "hybrid" to add an LLM narrative on top
 ```
 
 **For exploratory / throw-away sessions:** use `window` to avoid any compaction cost.
 
 ```yaml
-Compaction:
-  Mode: window
-  TokenBudget: 60000
+advanced:
+  compaction:
+    mode: window
+    tokenBudget: 60000
 ```
 
-**For a judgment-independent agent (Reviewer, Tester, Critic, Auditor) in production:** use
-`Context:` spec (Layer 3a) — see below. It's the recommended default for these roles because
+**For a judgment-independent agent (Reviewer, Tester, Critic, Auditor) in production:** keep
+the default `sees: handoff` (Layer 3a) — see below. It's the recommended default for these roles because
 it assembles from durable artifacts rather than replayed chat, so the agent can't mistake an
-earlier agent's unverified claim for a fact. The remaining examples below (`ContextWindow`
+earlier agent's unverified claim for a fact. The remaining examples below (`contextWindow`
 filtering of shared history) are the lighter/compatibility path — reach for them when you're
 prototyping a new pipeline and haven't yet worked out which artifacts a role needs, or for
 roles that are meant to see prior claims (see the exception noted in Layer 3a above).
 
-**For a downstream agent still on shared history that just needs less of it:** use `ContextWindow`.
+**For a downstream agent still on shared history that just needs less of it:** use `contextWindow`.
 
 ```yaml
-Agents:
-  - Name: Reviewer
-    ContextWindow:
-      TextOnly: true
-      MaxTurnAge: 3
+agents:
+  Reviewer:
+    sees: conversation
+    advanced:
+      contextWindow:
+        textOnly: true
+        maxTurnAge: 3
 ```
 
 **For an agent that should know nothing about earlier phases but is still on shared history:**
-combine `ExcludeAgents` with `MaxTailMessages` so it only sees the final handoff.
+combine `excludeAgents` with `maxTailMessages` so it only sees the final handoff.
 
 ```yaml
-Agents:
-  - Name: Auditor
-    ContextWindow:
-      ExcludeAgents:
-        - Developer
-        - Tester
-      MaxTailMessages: 20
+agents:
+  Auditor:
+    sees: conversation
+    advanced:
+      contextWindow:
+        excludeAgents:
+          - Developer
+          - Tester
+        maxTailMessages: 20
 ```
 
 **For sessions where turns vary wildly in token size** (e.g. a Developer that runs large shell
-commands or reads big files), add `ContextBudget` so compaction tracks actual context pressure
+commands or reads big files), add `contextBudget` so compaction tracks actual context pressure
 rather than a coarse turn count:
 
 ```yaml
-ContextBudget:
-  WarnAt: 80000
-  CutoverAt: 120000
-
-Compaction:
-  TriggerTurnCount: 40
-  KeepRecentTurns: 8
-  Mode: intent
+advanced:
+  contextBudget:
+    warnAt: 80000
+    cutoverAt: 120000
+  compaction:
+    triggerTurnCount: 40
+    keepRecentTurns: 8
+    mode: intent
 ```
 
 Both triggers are active simultaneously — whichever fires first wins.
@@ -970,24 +968,26 @@ Both triggers are active simultaneously — whichever fires first wins.
 **For an agent that should see NO cross-agent history — only artifacts and its own work:**
 
 ```yaml
-Agents:
-  - Name: Tester
-    Context:
-      - Source: session_context
-      - Source: changes_recent:5
-      - Source: brief_field:test_targets
-      - Source: own_history:4
-        MaxChars: 8000
+agents:
+  Tester:
+    advanced:
+      context:
+        - source: session_context
+        - source: changes_recent:5
+        - source: brief_field:test_targets
+        - source: own_history:4
+          maxChars: 8000
 ```
 
 **For action agents that make many sequential tool calls** (Developer, Tester, Operator), set
-`MaxInTurnToolPairs` to keep within-turn context cost at O(N) regardless of how many tool
+`maxInTurnToolPairs` to keep within-turn context cost at O(N) regardless of how many tool
 calls the agent makes in a single turn:
 
 ```yaml
-Agents:
-  - Name: Developer
-    MaxInTurnToolPairs: 12
+agents:
+  Developer:
+    advanced:
+      maxInTurnToolPairs: 12
 ```
 
-Combine with `ContextBudget` to protect against both within-turn spikes and across-turn accumulation.
+Combine with `contextBudget` to protect against both within-turn spikes and across-turn accumulation.

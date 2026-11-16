@@ -183,41 +183,34 @@ public sealed class EvalCommandTests
         Assert.False(result.Passed);
     }
 
-    // ── Score — termination-agent scoping ─────────────────────────────────────
-    // Regression coverage for: a periodic/auxiliary agent (e.g. a Verifier) speaking
-    // *after* the approving agent's turn must not shadow that agent's actual approval,
-    // matching RegexTerminationCondition's own agent-filtered backward scan.
+    // ── Score — the finishing message ─────────────────────────────────────────
+    // A periodic agent (e.g. a Verifier) speaking after the agent that handed off to "end"
+    // must not shadow the finishing message.
 
     [Fact]
-    public void Score_TerminationAgentScoped_FindsApprovalBehindLaterUnrelatedAgent()
+    public void Score_UsesTheMessageThatHandedOffToEnd()
     {
         var messages = new List<AgentMessage>
         {
-            new() { AgentName = "Reviewer", Content = "Looks good. APPROVED", Role = "assistant" },
+            new()
+            {
+                AgentName = "Reviewer", Content = "Looks good. APPROVED", Role = "assistant",
+                ToolCalls = [new ToolCallRecord("handoff", "route_keyword=end", true)],
+            },
             new() { AgentName = "Verifier", Content = "Evidence verified — no inconsistencies found.", Role = "assistant" },
         };
         var sessionResult = new SessionResult(true, null, messages, TimeSpan.FromMilliseconds(500));
-        var termination = new TerminationStrategyConfig
-        {
-            Type       = "composite",
-            Strategies =
-            [
-                new TerminationStrategyConfig { Type = "regex", Pattern = @"\bAPPROVED\b", AgentNames = ["Reviewer"] },
-                new TerminationStrategyConfig { Type = "maxiterations", MaxIterations = 60 },
-            ],
-        };
 
         var result = EvalCommand.Score(
             new EvalCase { Id = "t1", ExpectRegex = [@"\bAPPROVED\b"] },
             sessionResult,
-            "sid1",
-            termination);
+            "sid1");
 
         Assert.True(result.Passed);
     }
 
     [Fact]
-    public void Score_NoTerminationConfig_FallsBackToLastAssistantMessage()
+    public void Score_NoHandoffToEnd_FallsBackToLastAssistantMessage()
     {
         var messages = new List<AgentMessage>
         {

@@ -24,7 +24,7 @@ Each agent turn
   ContextAssemblyPipeline → inject as [Pipeline Knowledge] user message
 ```
 
-Knowledge retrieval is **always on** — no per-agent config is required. Use `KnowledgeWeight`
+Knowledge retrieval is **always on** — no per-agent config is required. Use `knowledgeWeight`
 on an agent config to control retrieval depth:
 
 | Value | Behaviour |
@@ -160,21 +160,6 @@ fuseraft arch check          # exits 0 if clean, 1 if violations found
 ```
 
 Violations are also emitted as `Violation` nodes in the evidence graph so they carry provenance and are queryable.
-
----
-
-### Dependency Planner
-
-When agents declare `Produces` and `Requires` tokens in their `AgentConfig`, the `DependencyPlanner` builds an execution DAG, detects cycles (reported as config errors at startup), and schedules agents in parallel whenever their dependencies are already fulfilled. This is activated automatically when any agent in the config declares `Produces` or `Requires`.
-
-```yaml
-Produces:
-  - artifact:session-persistence
-  - file:src/SessionManager.cs
-Requires:
-  - symbol:ISessionStore
-  - artifact:repository-graph
-```
 
 ---
 

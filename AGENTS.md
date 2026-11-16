@@ -24,7 +24,7 @@ src/
   Cli/              Commands/, DevUI/, Tui/ (full-screen REPL), OrchestratorBuilder.cs, SessionRunner.cs
   Core/             Interfaces/, Models/, Exceptions/
   Infrastructure/   AgentFactory.cs, ChatClientFactory.cs, Plugins/, ...
-  Orchestration/    Orchestrators, strategies, validators, contracts, compaction, Saga/
+  Orchestration/    Orchestrators, the state machine, validators, contracts, compaction
   Resources/        FUSERAFT.md (base agent system prompt injected at runtime)
 
 tests/
@@ -45,7 +45,7 @@ A **turn** is one complete invocation of a single agent, including:
 - all tool calls and their results
 - the final assistant text message
 
-A turn ends only after the agent produces a final text response. This definition is load-bearing: `ChangeTracker` records evidence per turn, validators check "the current turn", and termination is evaluated after each turn completes.
+A turn ends only after the agent produces a final text response. This definition is load-bearing: `ChangeTracker` records evidence per turn, gates check "the current turn", and the next edge is chosen only after each turn completes.
 
 ---
 
@@ -53,11 +53,9 @@ A turn ends only after the agent produces a final text response. This definition
 
 | Interface | What it does | Implementations |
 |-----------|-------------|-----------------|
-| `IAgentSelector` | Picks the next agent each turn | `KeywordSelectionStrategy`, `StateMachineSelectionStrategy`, `LlmSelectionStrategy`, `SequentialAgentSelector`, `RoundRobinAgentSelector`, `StructuredSelectionStrategy` |
-| `ITerminationCondition` | Decides when the session ends | `RegexTerminationCondition`, `MaxIterationsTerminationCondition`, `CompositeTerminationCondition` |
-| `IRoutingValidator` | Blocks a handoff unless evidence is present | `RequireBriefValidator`, `HandoffToTesterValidator`, `HandoffToReviewerValidator`, `RequireShellPassValidator`, `RequireAllFilesWrittenValidator`, `RequireReviewJudgementValidator` |
-| `IOrchestrator` | Drives the agent loop | `AgentOrchestrator`, `GraphOrchestrator`, `WorkflowOrchestrator`, `MagenticOrchestrator`, `AdversarialOrchestrator`, `MapReduceOrchestrator`, `ScatterGatherOrchestrator`, `SagaOrchestrator` (compensating rollback wrapper) |
-| `ICompensatingAgent` | Rolls back an agent's work when the saga aborts | Provided by callers; none built-in |
+| `IAgentSelector` | Picks the next agent each turn of a Steps flow, and ends the run at `end` | `StateMachineSelectionStrategy` |
+| `IRoutingValidator` | History-based gate checks, run through `ContractEngine` as `Validator` predicates | `AnyFileWrittenValidator`, `RequireReviewJudgementValidator`, `RequireAcceptanceCriteriaPassedValidator`, `ConsecutiveShellFailValidator`, `RequireSessionContextWriteValidator`, `ArchitectureValidator` |
+| `IOrchestrator` | Drives the agent loop | `AgentOrchestrator` (Steps flows), `MagenticOrchestrator`, `AdversarialOrchestrator`, `MapReduceOrchestrator`, `ScatterGatherOrchestrator` (patterns) |
 | `ISessionStore` | Saves/loads checkpoints | `JsonSessionStore`, `InMemorySessionStore` |
 
 ---
@@ -66,19 +64,19 @@ A turn ends only after the agent produces a final text response. This definition
 
 For every agent turn, control layers are evaluated in the following fixed order:
 
-1. **Selection** — `IAgentSelector.SelectAsync` determines the candidate route
-2. **Validation** — validators gate the route; failure injects a correction and re-invokes the source agent
-3. **Failure handling** — `FailureHandlingConfig` policy applies if validation fails (correction, recovery agent, or escalation)
-4. **Termination** — `ITerminationCondition.ShouldTerminateAsync` is evaluated only after a successful turn completes
-5. **Iteration cap** — `MaxIterations` hard stop fires unconditionally
+1. **Selection** — `IAgentSelector.SelectAsync` reads the handoff and finds the candidate edge
+2. **Validation** — the edge's gates (its contract) run; failure injects a correction and re-invokes the source agent
+3. **Failure handling** — `FailureHandlingConfig` policy applies if validation fails (correction, `OnStuck` agent, or escalation)
+4. **Completion** — only an edge to `end` whose gates passed ends the run (the selector returns `null`)
+5. **Turn cap** — `MaxTurns` hard stop fires unconditionally
 
-**This ordering must not change.** Validators always gate routing before termination is considered. Any code that evaluates termination before validators, or that routes without running validators, violates this invariant.
+**This ordering must not change.** Gates always run before a handoff — including the one to `end` — takes effect. Any code that ends a run or routes without running the edge's gates violates this invariant.
 
 ---
 
 ## Routing validators
 
-Validators read disk artifacts or conversation history — they do not call the LLM. Full list and config keys: `docs/validators.md`.
+Validators read disk artifacts or conversation history — they do not call the LLM. Users reach them as gate checks (`requires:` on a flow edge); see `docs/validators.md`.
 
 All validators must be:
 
@@ -98,7 +96,7 @@ A validator failure injects a `ChatRole.User` correction message and re-invokes 
 
 Files a tool changed without naming them (a `sed` run through `shell_run`, say) reach it through `FileLedger`: the tool-calling setup checks the files the agent has seen around every call, and `FlushTurnAsync` adds the ones that changed during a call to `FilesWritten`/`FilesDeleted`. Only files the agent has read or written are tracked.
 
-`RequireAllFilesWrittenValidator` and `HandoffToReviewerValidator` cross-reference this log. `RequireShellPassValidator` uses it as a fallback when the history scan finds no matching tool result.
+Gate checks (`FilesWritten`, `CommandSucceeded`, `TestReport`, `AcceptanceCriteriaPassed`, …) read this log and the evidence graph; the history-based validators use it as a fallback when the history scan finds no matching tool result.
 
 **All tools that modify external state (files, shell, git) must be wrapped by `ChangeTracker`.** A tool that bypasses `ChangeTracker` will silently break validators — they will see no evidence of the tool's actions and block routes that should pass. New tools that write files, run commands, or commit to git are invalid unless `ChangeTracker` records them.
 
@@ -147,25 +145,32 @@ Strings injected into conversation history as `ChatRole.User` messages are the p
 - **Actionable** — include numbered steps the agent can follow immediately
 - **Compact** — no verbose boilerplate; agents have limited context windows
 
-The canonical style is already established in `KeywordSelectionStrategy.BuildCorrectionMessage` and `StateMachineSelectionStrategy.BuildTransitionCorrectionMessage`. Match it when adding new correction paths.
+The canonical style is already established in `StateMachineSelectionStrategy.BuildTransitionCorrectionMessage`. Match it when adding new correction paths.
 
 ---
 
 ## Configuration schema
 
-Config is bound via `OrchestratorBuilder.BindConfig` from `OrchestrationConfig`. The top-level key is `Orchestration`. Both JSON and YAML are supported.
+Users write **team files**: a top-level `team:` key, then `models`, `artifacts`, `agents` (a map keyed by name), `flow` (`start` + `steps`, or a `pattern`), `limits`, `security`, `mcpServers` and `advanced`. Keys are camelCase in everything we ship (examples, templates, docs, `migrate` output); the loader matches them case-insensitively and rejects a field written twice in different cases. Gate names are camelCase too (`filesWritten`), so an artifact can't share a gate's name. The format is documented in `docs/configuration.md`.
 
-**AgentFile**: Agents may be declared inline or loaded from a standalone YAML file via `AgentFile: path/to/agent.yaml`. Inline fields override the file at load time. `OrchestratorBuilder.ResolveAgentFiles` merges them before agents are built.
+- `src/Core/Models/Team/TeamConfig.cs` — the user-facing records.
+- `src/Cli/Team/TeamConfigLoader.cs` — strict loading: unknown fields are errors; `AgentFile` merging; old `Orchestration:` files are rejected with a pointer to `fuseraft migrate`.
+- `src/Cli/Team/TeamCompiler.cs` — compiles a team into the runtime `OrchestrationConfig`. `steps` always compile to the state machine; every edge's `requires:` becomes one contract; an edge to `end` targets an agentless terminal state that ends the run.
+- `src/Cli/Team/TeamChecks.cs` — the gate vocabulary. Each check compiles to contract predicates; history-based checks compile to a `Validator` predicate that runs the routing validator through `ContractEngine`.
+- `src/Cli/Team/TeamPrompt.cs` — the generated "Team protocol" section (artifacts, routes, gates) appended to each agent's instructions.
+- `src/Cli/Team/LegacyConfigConverter.cs` — `fuseraft migrate`: old `Orchestration:` files to team files.
 
-**ContractPredicate format**: Predicates in `Contracts[].Requires[]` must use the flat `Type:` field (`Type: FileExists`, `Type: FilesWritten`, etc.) — not the object-key style (`FileExists: {Path: ...}`), which does not bind to `ContractPredicate.Type`.
+`OrchestrationConfig` and its records are now an internal compile target. Every user-visible fact (a path, a route, an end condition) must have exactly one home in the team file; don't add a team field that duplicates one, and don't add a field that is ignored in some mode — make it a load error instead.
 
-`config/examples/` contains runnable examples. **Keep these in sync** when adding new config fields — they are the primary reference for users. No test loads them, so run `fuseraft validate` on each one after a schema change.
+When adding a gate check, add it to `TeamChecks` (name, options, compiled predicates, the sentence agents are told), to the table in `docs/configuration.md#gates`, and to `docs/validators.md`.
+
+`config/examples/` contains runnable examples and `fuseraft init` templates live in `src/Cli/Commands/InitTemplates*.cs`. `InitTemplatesTests` compiles every example and every template, and checks that no agent's instructions name a route it doesn't have. Keep them passing when the schema changes.
 
 When adding a new `FailureAction` or `FailureType` value, update:
 - `FailureHandlingConfig.cs` (enum + default config + `GetConfig` switch)
 - `FailureClassifier.cs` (classification logic)
 - Both strategy `HandleXxxFailure` methods
-- `config/examples/` files that declare `FailureHandling`
+- `config/examples/` files that declare `advanced.failureHandling`
 - `docs/configuration.md` (actions table)
 
 ---
@@ -194,19 +199,17 @@ When adding a new `FailureAction` or `FailureType` value, update:
 
 | Question | Where to look |
 |----------|--------------|
-| How is the next agent selected? | `src/Orchestration/Strategies/KeywordSelectionStrategy.cs`, `StateMachineSelectionStrategy.cs`, `SequentialAgentSelector.cs`, `RoundRobinAgentSelector.cs` |
-| How does graph orchestration work? | `src/Orchestration/GraphOrchestrator.cs`, `src/Core/Models/Orchestration/GraphConfig.cs` |
-| How does the cycle-native workflow orchestrator work? | `src/Orchestration/WorkflowOrchestrator.cs` — reuses `GraphConfig`; see its class doc comment for what's deliberately not implemented |
-| How do sub-graph nodes work? | `src/Orchestration/GraphOrchestrator.cs` → `BuildExecutorBindings`, `RunSubGraphNodeAsync`; `src/Core/Models/Orchestration/GraphConfig.cs` → `SubGraphs`, `SubGraphId` |
+| How is the next agent selected? | `Steps` flows run on `src/Orchestration/Strategies/StateMachineSelectionStrategy.cs`; patterns on their own orchestrators (see `docs/strategies.md`) |
+| How is a team file loaded and compiled? | `src/Cli/Team/` (`TeamConfigLoader`, `TeamCompiler`, `TeamChecks`, `TeamPrompt`) |
 | How does map-reduce work? | `src/Orchestration/MapReduceOrchestrator.cs`, `src/Core/Models/Orchestration/MapReduceConfig.cs` |
 | How does scatter-gather work? | `src/Orchestration/ScatterGatherOrchestrator.cs`, `src/Core/Models/Orchestration/ScatterGatherConfig.cs` |
 | How does adversarial orchestration work? | `src/Orchestration/AdversarialOrchestrator.cs` |
-| Which orchestrator/selection strategy to use, and how each one behaves in depth | `docs/strategies.md` |
+| Which flow to use, and how each one behaves in depth | `docs/strategies.md` |
 | How do validators work? | `src/Orchestration/Validation/`, full list and config keys in `docs/validators.md` |
 | How are contracts evaluated? | `src/Orchestration/Contracts/ContractEngine.cs` |
 | What tools do agents have? | `src/Infrastructure/Plugins/` |
-| How is the config schema defined? | `src/Core/Models/OrchestrationConfig.cs`, `StrategyConfig.cs`, `StateMachineConfig.cs`, `GraphConfig.cs`, `MapReduceConfig.cs`, `ScatterGatherConfig.cs` |
-| How does AgentFile loading work? | `src/Cli/OrchestratorBuilder.cs` → `ResolveAgentFiles` |
+| How is the config schema defined? | User-facing: `src/Core/Models/Team/TeamConfig.cs`. Runtime compile target: `src/Core/Models/Orchestration/OrchestrationConfig.cs` and friends |
+| How does AgentFile loading work? | `src/Cli/Team/TeamConfigLoader.cs` → `MergeAgentFile` |
 | How does compaction work? | `src/Orchestration/ConversationCompactor.cs` |
 | How does change tracking work? | `src/Orchestration/ChangeTracker.cs` |
 | How is agent context assembled? | `src/Orchestration/ContextAssemblyPipeline.cs` (main entry point, stages 1–6); `src/Orchestration/ContextAssembler.cs` (per-agent assembled contexts) |

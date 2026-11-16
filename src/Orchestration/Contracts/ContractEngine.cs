@@ -1,7 +1,9 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.AI;
 using fuseraft.Core;
+using fuseraft.Core.Interfaces;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration.Validation;
@@ -37,6 +39,7 @@ public sealed class ContractEngine
     private readonly TestSelectorConfig? _testSelector;
     private readonly string? _sandboxRoot;
     private readonly string _sessionId;
+    private readonly Func<ContractPredicate, IRoutingValidator?>? _validatorFactory;
 
     private static readonly JsonSerializerOptions JsonOpts =
         new() { PropertyNameCaseInsensitive = true };
@@ -47,8 +50,10 @@ public sealed class ContractEngine
         EvidenceStore? evidenceStore = null,
         TestSelectorConfig? testSelector = null,
         string? sandboxRoot = null,
-        string? sessionId = null)
+        string? sessionId = null,
+        Func<ContractPredicate, IRoutingValidator?>? validatorFactory = null)
     {
+        _validatorFactory = validatorFactory;
         _contracts        = contracts.ToDictionary(
             c => c.Name,
             c => c,
@@ -74,17 +79,24 @@ public sealed class ContractEngine
     /// <c>(false, errorMessage)</c> with a human-readable explanation of the first
     /// failing predicate.
     /// </summary>
+    public Task<(bool Satisfied, string? ErrorMessage)> EvaluateAsync(
+        string contractName,
+        CancellationToken cancellationToken = default)
+        => EvaluateAsync(contractName, history: null, cancellationToken);
+
+    /// <summary>Evaluates the named contract; <paramref name="history"/> feeds <c>Validator</c> predicates.</summary>
     public async Task<(bool Satisfied, string? ErrorMessage)> EvaluateAsync(
         string contractName,
+        IList<ChatMessage>? history,
         CancellationToken cancellationToken = default)
     {
         if (!_contracts.TryGetValue(contractName, out var contract))
             return (false,
-                $"Contract error: unknown contract '{contractName}'. Verify it is declared under 'Orchestration.Contracts'.");
+                $"Contract error: unknown contract '{contractName}'. Contracts come from each edge's requires: list; this is a compiler bug, please report it.");
 
         foreach (var predicate in contract.Requires)
         {
-            var (ok, msg) = await EvaluatePredicateAsync(predicate, contractName, cancellationToken);
+            var (ok, msg) = await EvaluatePredicateAsync(predicate, contractName, history, cancellationToken);
             if (!ok)
                 return (false, msg);
         }
@@ -96,17 +108,20 @@ public sealed class ContractEngine
     private async Task<(bool Ok, string? Error)> EvaluatePredicateAsync(
         ContractPredicate pred,
         string contractName,
+        IList<ChatMessage>? history,
         CancellationToken cancellationToken)
     {
         return pred.Type.ToLowerInvariant() switch
         {
+            "shape"              => await EvaluateShapeAsync(pred, contractName, cancellationToken),
+            "validator"          => await EvaluateValidatorAsync(pred, contractName, history, cancellationToken),
             "fileswritten"       => await EvaluateFilesWrittenAsync(pred, contractName, cancellationToken),
             "checklistcomplete"  => await EvaluateChecklistCompleteAsync(pred, contractName, cancellationToken),
             "commandsucceeded"   => await EvaluateCommandSucceededAsync(pred, contractName, cancellationToken),
             "fileexists"         => EvaluateFileExists(pred, contractName),
             "testreport"         => await EvaluateTestReportAsync(pred, contractName, cancellationToken),
             "relatedtestspass"   => await EvaluateRelatedTestsPassAsync(contractName, cancellationToken),
-            _ => (false, $"Contract '{contractName}' error: unknown predicate type '{pred.Type}'. Valid: FilesWritten, ChecklistComplete, CommandSucceeded, FileExists, TestReport, RelatedTestsPass.")
+            _ => (false, $"Contract '{contractName}' error: unknown predicate type '{pred.Type}'. Valid: FilesWritten, ChecklistComplete, CommandSucceeded, FileExists, TestReport, RelatedTestsPass, Shape, Validator.")
         };
     }
 
@@ -377,6 +392,51 @@ public sealed class ContractEngine
     }
 
     // FileExists
+
+    private async Task<(bool, string?)> EvaluateShapeAsync(
+        ContractPredicate pred,
+        string contractName,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(pred.Path) || string.IsNullOrWhiteSpace(pred.Shape))
+            return (false, $"Contract '{contractName}' config error: Shape requires 'Path' and 'Shape'.");
+
+        var path = Expand(pred.Path);
+        if (!File.Exists(path))
+            return (false, $"Contract '{contractName}' failed: '{path}' does not exist. Write it with write_file before handing off.");
+
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(TryUnwrapDoubleSerializedJson(await File.ReadAllTextAsync(path, ct))); }
+        catch (JsonException ex)
+        {
+            return (false, $"Contract '{contractName}' failed: '{path}' is not valid JSON ({ex.Message}). Rewrite it as JSON.");
+        }
+
+        using (doc)
+        using (var shapeDoc = JsonDocument.Parse(pred.Shape))
+        {
+            var errors = ArtifactShape.Check(doc.RootElement, shapeDoc.RootElement);
+            if (errors.Count == 0) return (true, null);
+            return (false,
+                $"Contract '{contractName}' failed: '{path}' doesn't match its declared shape.\n" +
+                string.Join("\n", errors.Take(10).Select(e => $"  - {e}")) +
+                "\nFix the file with write_file, then hand off again.");
+        }
+    }
+
+    private async Task<(bool, string?)> EvaluateValidatorAsync(
+        ContractPredicate pred,
+        string contractName,
+        IList<ChatMessage>? history,
+        CancellationToken ct)
+    {
+        var validator = _validatorFactory?.Invoke(pred);
+        if (validator is null)
+            return (false, $"Contract '{contractName}' config error: validator '{pred.Validator}' is not available.");
+
+        var result = await validator.ValidateAsync(history ?? [], ct);
+        return result.IsValid ? (true, null) : (false, result.ErrorMessage);
+    }
 
     private (bool, string?) EvaluateFileExists(ContractPredicate pred, string contractName)
     {

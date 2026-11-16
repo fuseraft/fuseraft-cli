@@ -139,8 +139,6 @@ public record ContextSource
     public string? Label { get; init; }
 }
 
-/// <summary>Alias kept for backward YAML compatibility — same as <see cref="ContextSource"/>.</summary>
-public record HandoffContextSource : ContextSource;
 
 /// <summary>
 /// A directed edge in the state graph. Fires when the current state's agent emits
@@ -208,25 +206,9 @@ public record TransitionConfig
     public string? Signal { get; init; }
 
     /// <summary>
-    /// Single contract name that must be satisfied for this transition to fire.
-    /// Shorthand for <see cref="Contracts"/> when only one contract is needed.
+    /// The contract (the edge's compiled gates) that must be satisfied for this transition to fire.
     /// </summary>
     public string? Contract { get; init; }
-
-    /// <summary>
-    /// Names of contracts that must ALL be satisfied for this transition to fire (AND
-    /// semantics). Evaluated after <see cref="Signal"/> presence is confirmed. If any
-    /// contract fails, the transition is blocked and the source agent is re-invoked
-    /// with the contract's error message.
-    /// </summary>
-    public List<string>? Contracts { get; init; }
-
-    /// <summary>
-    /// Optional list of agent names permitted to emit this transition's signal.
-    /// When set, the signal is only accepted when the emitting agent is in this list.
-    /// When null or empty, any agent may trigger the transition.
-    /// </summary>
-    public List<string>? SourceAgents { get; init; }
 
     /// <summary>
     /// Optional agent to invoke when this transition's contract fails repeatedly.
@@ -236,29 +218,6 @@ public record TransitionConfig
     /// state/transition pair to prevent infinite recovery loops.
     /// </summary>
     public string? RecoveryAgent { get; init; }
-
-    /// <summary>
-    /// Targeted artifact sources to inject as context for the receiving agent when this
-    /// transition fires. When set, the orchestrator reads each source from durable disk
-    /// artifacts and injects a compact block into history immediately after the turn-boundary
-    /// marker. The receiving agent sees relevant facts without the full session transcript.
-    ///
-    /// <para>
-    /// Example YAML:
-    /// <code>
-    /// - To: Testing
-    ///   Signal: "HANDOFF TO TESTER"
-    ///   Contract: ImplementationComplete
-    ///   HandoffContext:
-    ///     - Source: session_context
-    ///     - Source: changes_recent
-    ///     - Source: brief_field:test_targets
-    ///     - Source: file:.fuseraft/artifacts/test-report.json
-    ///       MaxChars: 2000
-    /// </code>
-    /// </para>
-    /// </summary>
-    public List<ContextSource>? HandoffContext { get; init; }
 
     /// <summary>
     /// Maximum times this transition may fire as a back-edge (i.e. routing back to a state
@@ -287,18 +246,9 @@ public record TransitionConfig
     /// </summary>
     public string? ReviewArtifactPath { get; init; }
 
-    /// <summary>Returns all contract names declared on this transition (Contract + Contracts merged).</summary>
-    internal IReadOnlyList<string> AllContracts
-    {
-        get
-        {
-            if (Contract is null && (Contracts is null or { Count: 0 }))
-                return [];
+    /// <summary>When true, a person approves this transition after its contract passes; a refusal sends the work back.</summary>
+    public bool RequireHumanApproval { get; init; }
 
-            var list = new List<string>();
-            if (Contract is not null) list.Add(Contract);
-            if (Contracts is not null) list.AddRange(Contracts);
-            return list;
-        }
-    }
+    /// <summary>The contract names on this transition: none, or the edge's one compiled contract.</summary>
+    internal IReadOnlyList<string> AllContracts => Contract is null ? [] : [Contract];
 }

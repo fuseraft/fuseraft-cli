@@ -167,8 +167,8 @@ public sealed class ShowConfigCommand : Command<ShowConfigSettings>
         AnsiConsole.WriteLine();
 
         // Strategy panel
-        var selLine = $"[bold]Selection:[/]  {Markup.Escape(config.Selection.Type)}";
-        var termLine = $"[bold]Termination:[/] {(config.Termination is not null ? DescribeTermination(config.Termination) : "default")}";
+        var selLine = $"[bold]Flow:[/]      {Markup.Escape(config.Selection.Type == "statemachine" ? "steps" : config.Selection.Type)}";
+        var termLine = $"[bold]Max turns:[/] {(config.MaxTurns > 0 ? config.MaxTurns.ToString() : "none")}";
 
         AnsiConsole.Write(new Panel($"{selLine}\n{termLine}")
         {
@@ -180,33 +180,5 @@ public sealed class ShowConfigCommand : Command<ShowConfigSettings>
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[dim]{path}[/]");
         return 0;
-    }
-
-    private static string DescribeTermination(TerminationStrategyConfig t)
-    {
-        var type = t.Type.ToLowerInvariant();
-        var agents = t.AgentNames is { Length: > 0 }
-            ? $" [dim](agents: {string.Join(", ", t.AgentNames)})[/]"
-            : string.Empty;
-
-        return type switch
-        {
-            "regex"         => $"regex [aqua]{Markup.Escape(t.Pattern ?? "?")}[/]{agents}  max={t.MaxIterations}",
-            "structured"    => $"structured [aqua]{Markup.Escape(DescribeCondition(t.Condition))}[/]{agents}  max={t.MaxIterations}",
-            "tokenbudget"   => $"tokenbudget [aqua]{t.MaxTokens} tokens[/]  max={t.MaxIterations}",
-            "maxiterations" => $"max {t.MaxIterations} turns",
-            "composite"     => $"composite ({t.Strategies?.Count ?? 0} rules)  max={t.MaxIterations}",
-            _               => Markup.Escape(t.Type)
-        };
-    }
-
-    private static string DescribeCondition(StructuredCondition? c)
-    {
-        if (c is null) return "?";
-        if (c.Is is not null)       return $"{c.Field} == {c.Is}";
-        if (c.IsNot is not null)    return $"{c.Field} != {c.IsNot}";
-        if (c.Contains is not null) return $"{c.Field} contains {c.Contains}";
-        if (c.Exists is not null)   return $"{c.Field} {(c.Exists.Value ? "exists" : "absent")}";
-        return c.Field;
     }
 }

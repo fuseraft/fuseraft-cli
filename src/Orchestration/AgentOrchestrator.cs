@@ -31,7 +31,6 @@ public sealed class AgentOrchestrator(
     GovernanceKernel? governanceKernel = null,
     fuseraft.Infrastructure.Memory.MemoryManager? memoryManager = null,
     ContextAssembler? contextAssembler = null,
-    DependencyPlanner? dependencyPlanner = null,
     fuseraft.Core.Interfaces.IContextAssemblyPipeline? contextPipeline = null,
     fuseraft.Infrastructure.Repository.RepositoryKnowledgeStore? repositoryKnowledgeStore = null) : IOrchestrator
 {
@@ -203,9 +202,8 @@ public sealed class AgentOrchestrator(
             .ToList();
         if (!string.IsNullOrEmpty(_sessionId))
             strategyFactory.SetSessionId(_sessionId);
-        var selection = strategyFactory.CreateSelection(config.Selection, agents, config.Validation, config.FailureHandling, config.Contracts, config.Verifier);
+        var selection = strategyFactory.CreateSelection(config.Selection, config.Validation, config.FailureHandling, config.Contracts, config.Verifier);
         session.Snapshotter = selection as fuseraft.Core.Interfaces.IContextSnapshotter;
-        var termination = strategyFactory.CreateTermination(config.Termination ?? new(), agents, config.Validation);
 
         // Resolve the optional verifier agent once per session.
         AIAgent? verifierAgent = config.Verifier?.AgentName is { Length: > 0 } verifierName
@@ -226,20 +224,9 @@ public sealed class AgentOrchestrator(
                 new ValidationDiagnosticHook(ctCfg.Path, msg => _activeSession?.History.Add(msg)));
         }
 
-        // Give selection and termination strategies a reference to the shared history
-        // so they can inject correction messages when routing validators block a handoff.
-        if (selection is KeywordSelectionStrategy kss)
-        {
-            kss.SetHistory(history);
-            if (!string.IsNullOrEmpty(_sessionId))
-                kss.SetSessionId(_sessionId);
-            kss.SetDidResolver(agentFactory.GetDid);
-        }
-        else if (selection is StructuredSelectionStrategy sss)
-        {
-            sss.SetHistory(history);
-        }
-        else if (selection is StateMachineSelectionStrategy smss)
+        // Give the state machine the shared history so it can inject corrections when a gate
+        // blocks a handoff, and restore its position after compaction.
+        if (selection is StateMachineSelectionStrategy smss)
         {
             smss.SetHistory(history);
             if (!string.IsNullOrEmpty(_sessionId))
@@ -254,10 +241,6 @@ public sealed class AgentOrchestrator(
             // the REPLAN BLOCKED guard survive across compaction cycles.
             smss.RestoreFromSnapshot(session.ResumeSnapshot);
         }
-        WireHistory(termination, history);
-        if (!string.IsNullOrEmpty(_sessionId))
-            WireSessionId(termination, _sessionId);
-        WireDidResolver(termination, agentFactory.GetDid);
 
         // Inject the initial user task, optionally preceded by a structured task model
         // block so agents know the goal, constraints, and active file targets up front.
@@ -340,40 +323,10 @@ public sealed class AgentOrchestrator(
         int cumulativeTokens = priorHistory?
             .Sum(m => m.Usage?.TotalTokens ?? 0) ?? 0;
 
-        // ChatMessage carries no per-message usage, so a tokenbudget termination condition
-        // can't compute its own total from history the way regex/structured do — wire in a
-        // live reader over this closure-captured counter instead.
-        WireTokenBudget(termination, () => cumulativeTokens);
-
-        // True only for the very first pass through the loop below, for this StreamAsync call.
-        bool isFirstLoopIteration = true;
-
         while (true)
         {
-            // Resuming with priorHistory (e.g. SessionRunner restarting the stream right after
-            // a mid-session compaction interrupt, or a literal --resume of an already-complete
-            // checkpoint) re-injects that history above before this loop starts. Without this
-            // check, a fresh StreamAsync call always runs at least one more agent turn before it
-            // can notice the injected history already satisfies termination — normally harmless
-            // because a completed session isn't resumed, but SessionRunner's compaction-needed
-            // interrupt (RunStreamCoreAsync breaking the moment RecordMessageAsync flags
-            // compaction, even if the just-yielded message was also the terminal one) can hand
-            // back priorHistory that already ends in a satisfied termination condition — the
-            // post-turn check below never got to run for it, since the stream was torn down
-            // before this iterator resumed. Left unchecked, the agent gets invoked again, and
-            // again, never actually stopping until MaxIterations.
-            if (isFirstLoopIteration && priorHistory is { Count: > 0 }
-                && await termination.ShouldTerminateAsync(history, cancellationToken))
-            {
-                if (eventEmitter is not null)
-                    _ = eventEmitter.EmitAsync(EventTypes.TerminationSatisfied,
-                        payload: new { turn, reason = "already_satisfied_on_resume" });
-                break;
-            }
-            isFirstLoopIteration = false;
-
-            // Hard iteration cap — takes effect regardless of the termination strategy.
-            if (config.Termination?.ResolveMaxIterations() is > 0 and var maxIter && turn >= maxIter)
+            // Hard turn cap.
+            if (config.MaxTurns is > 0 and var maxIter && turn >= maxIter)
             {
                 if (eventEmitter is not null)
                 {
@@ -551,9 +504,6 @@ public sealed class AgentOrchestrator(
                     if (config.MaxTotalTokens is { } pLimit && cumulativeTokens > pLimit)
                         throw new BudgetExceededException(cumulativeTokens, pLimit);
 
-                    if (await termination.ShouldTerminateAsync(history, cancellationToken))
-                        break;
-
                     continue;
                 }
             }
@@ -564,33 +514,20 @@ public sealed class AgentOrchestrator(
             int preSelectCount = history.Count;
             var agent = await selection.SelectAsync(agents, history, cancellationToken);
             int postSelectCount = history.Count;
-            if (agent is null) break;
+            if (agent is null)
+            {
+                // The flow reached its end state.
+                if (eventEmitter is not null)
+                    _ = eventEmitter.EmitAsync(EventTypes.TerminationSatisfied,
+                        payload: new { turn, reason = "flow_complete" });
+                break;
+            }
 
             if (eventEmitter is not null)
                 _ = eventEmitter.EmitAsync(EventTypes.SelectionEvaluated,
                     agent: agent.Name ?? "Unknown",
                     turn:  turn,
                     payload: new { selected = agent.Name, strategy = selection.GetType().Name });
-
-            // Prerequisite enforcement: if DependencyPlanner is active and the selected agent
-            // has unmet Requires tokens, inject a blocker message into history so the selector
-            // knows to route elsewhere, then skip this turn.
-            if (dependencyPlanner is { HasDependencies: true } &&
-                !dependencyPlanner.CanExecute(agent.Name ?? string.Empty))
-            {
-                var unmet = dependencyPlanner.GetUnmetRequirements(agent.Name ?? string.Empty);
-                var blockerText =
-                    $"[DependencyPlanner] Agent '{agent.Name}' is blocked — waiting for prerequisites: " +
-                    string.Join(", ", unmet.Select(t => $"'{t}'")) + ". " +
-                    "Route to an agent that can produce these tokens first.";
-
-                logger.LogInformation(
-                    "[Orchestrator] Prerequisite block: agent '{Agent}' waiting for [{Tokens}].",
-                    agent.Name, string.Join(", ", unmet));
-
-                history.Add(new ChatMessage(ChatRole.User, blockerText));
-                continue;
-            }
 
             logger.LogDebug(
                 "[Orchestrator] Turn {Turn}: selected agent '{Agent}' (Name property='{NameProp}') | history={HistCount} msgs",
@@ -685,9 +622,6 @@ public sealed class AgentOrchestrator(
 
             eventEmitter?.SetTurn(agentMessage.TurnIndex);
 
-            // Fulfill this agent's produced tokens now that its turn is complete.
-            dependencyPlanner?.Fulfill(agent.Name ?? string.Empty);
-
             cumulativeTokens += agentMessage.Usage?.TotalTokens ?? 0;
 
             logger.LogDebug(
@@ -739,17 +673,6 @@ public sealed class AgentOrchestrator(
 
                 if (config.MaxTotalTokens is { } vLimit && cumulativeTokens > vLimit)
                     throw new BudgetExceededException(cumulativeTokens, vLimit);
-            }
-
-            // Check whether any termination condition has been satisfied.
-            if (await termination.ShouldTerminateAsync(history, cancellationToken))
-            {
-                if (eventEmitter is not null)
-                    _ = eventEmitter.EmitAsync(EventTypes.TerminationSatisfied,
-                        agent: agentMessage.AgentName,
-                        turn:  agentMessage.TurnIndex,
-                        payload: new { turn });
-                break;
             }
         }
     }
@@ -809,66 +732,6 @@ public sealed class AgentOrchestrator(
                 tool_schema_est_tokens   = toolCount * AvgToolSchemaTokens,
             });
 
-    /// <summary>
-    /// Recursively walks the termination strategy tree and calls
-    /// <see cref="ValidatedTerminationStrategy.SetHistory"/> on each node that needs it.
-    /// </summary>
-    private static void WireHistory(ITerminationCondition condition, IList<ChatMessage> history)
-    {
-        if (condition is ValidatedTerminationStrategy vts)
-            vts.SetHistory(history);
-
-        if (condition is CompositeTerminationStrategy composite)
-            foreach (var child in composite.Strategies)
-                WireHistory(child, history);
-    }
-
-    /// <summary>
-    /// Recursively walks the termination strategy tree and calls
-    /// <see cref="ValidatedTerminationStrategy.SetSessionId"/> on each node that needs it.
-    /// </summary>
-    private static void WireSessionId(ITerminationCondition condition, string sessionId)
-    {
-        if (condition is ValidatedTerminationStrategy vts)
-            vts.SetSessionId(sessionId);
-
-        if (condition is CompositeTerminationStrategy composite)
-            foreach (var child in composite.Strategies)
-                WireSessionId(child, sessionId);
-    }
-
-    /// <summary>
-    /// Recursively walks the termination strategy tree and calls
-    /// <see cref="ValidatedTerminationStrategy.SetDidResolver"/> on each node that needs it.
-    /// </summary>
-    private static void WireDidResolver(ITerminationCondition condition, Func<string, string> resolver)
-    {
-        if (condition is ValidatedTerminationStrategy vts)
-            vts.SetDidResolver(resolver);
-
-        if (condition is CompositeTerminationStrategy composite)
-            foreach (var child in composite.Strategies)
-                WireDidResolver(child, resolver);
-    }
-
-    /// <summary>
-    /// Recursively walks the termination strategy tree and calls
-    /// <see cref="TokenBudgetTerminationCondition.SetTokenReader"/> on each node that needs it.
-    /// </summary>
-    private static void WireTokenBudget(ITerminationCondition condition, Func<int> tokenReader)
-    {
-        if (condition is TokenBudgetTerminationCondition tbc)
-            tbc.SetTokenReader(tokenReader);
-
-        if (condition is CompositeTerminationStrategy composite)
-            foreach (var child in composite.Strategies)
-                WireTokenBudget(child, tokenReader);
-
-        // A tokenbudget node with its own Validators is wrapped in ValidatedTerminationStrategy
-        // (see StrategyFactory.CreateTermination) — unwrap it to reach the decorated condition.
-        if (condition is ValidatedTerminationStrategy vts)
-            WireTokenBudget(vts.Inner, tokenReader);
-    }
 
     private IReadOnlyList<ToolCallRecord>? ExtractToolCalls(IList<ChatMessage> messages, string agentName = AgentNames.Unknown)
         => OrchestratorHelpers.ExtractToolCalls(messages, logger, agentName);
@@ -883,9 +746,7 @@ public sealed class AgentOrchestrator(
             var msg = history[i];
             if (msg.Role != ChatRole.User) continue;
             var text = msg.Text ?? string.Empty;
-            if (text.StartsWith("NO TOOL CALLS",         StringComparison.Ordinal) ||
-                text.StartsWith("CRITICAL:",              StringComparison.Ordinal) ||
-                text.Contains("EVIDENCE INCONSISTENCY",  StringComparison.Ordinal) ||
+            if (text.StartsWith("CRITICAL:",              StringComparison.Ordinal) ||
                 text.Contains("EVIDENCE AUDIT REQUIRED", StringComparison.Ordinal))
                 return true;
         }

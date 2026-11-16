@@ -1,1319 +1,237 @@
 ---
-title: "Strategies"
-description: "Strategies control two things: which agent speaks next (selection) and when the run ends (termination)."
+title: "Flows"
+description: "A team's Flow decides who works next. Steps draw the flow yourself, with gated handoffs; patterns give you built-in control logic for dynamic coordination and parallel work."
 ---
 
-Strategies control two things: which agent speaks next (selection) and when the run ends (termination).
+A team's `flow` decides who works next. It takes one of two forms:
 
----
+- **Steps**: you draw the flow. Each agent lists the edges it may take, and gates on each edge block a handoff until the evidence exists. Use this for any pipeline you can sketch on a whiteboard.
+- **Patterns**: built-in control logic for shapes a fixed diagram can't express: a manager that decides who works each round (`magentic`), fan-out over a list of items (`mapreduce`), parallel experts (`scattergather`), and generate-and-critique loops (`adversarial`).
 
-## Selection strategies
-
-Configured under `Selection.Type`.
-
-### sequential
-
-Agents execute in the order they are declared in `Agents`, one pass from first to last. When the last agent finishes its turn the session ends (subject to `Termination` strategies).
-
-```yaml
-Selection:
-  Type: sequential
-```
-
-Use this for simple linear pipelines where every agent runs exactly once, in order. For pipelines that cycle indefinitely use `roundrobin`.
+Field references for both are in [Configuration → Flow](configuration.md#flow).
 
 ---
 
-### roundrobin
-
-Agents take turns in the order they are declared in `Agents`, cycling back to the first after the last. The session runs until a `Termination` strategy fires.
+## Steps
 
 ```yaml
-Selection:
-  Type: roundrobin
+flow:
+  start: Planner
+  steps:
+    Planner:
+      - to: Developer
+        requires: [brief]
+    Developer:
+      - to: Tester
+        requires:
+          - filesWritten: brief.files_to_change
+          - commandSucceeded: brief.verify_command
+      - to: Planner
+        when: the plan needs rethinking
+    Tester:
+      - to: Reviewer
+        when: every criterion passes
+        requires:
+          - testReport: testResults
+        onStuck: Developer
+      - to: Developer
+        when: a criterion fails
+    Reviewer:
+      - to: end
+        when: the work is approved
+        requires: [reviewJudgement]
+      - to: Developer
+        when: the code needs fixing
+      - to: Planner
+        when: the plan is fundamentally wrong
 ```
 
-Use this when every agent should participate in every round and the pipeline loops until an external condition stops it (e.g. a `maxiterations` cap or a `regex` termination pattern).
+```
+Planner ──[brief]──▶ Developer ──[files written, verify passed]──▶ Tester ──[report]──▶ Reviewer ──[judgement]──▶ end
+   ▲                   │  ▲                                          │                     │
+   └───── replan ──────┘  └──────────── a criterion fails ───────────┘                     │
+   ▲                      ▲                                                                │
+   └──────────────────────┴──────────────── needs fixing / replan ─────────────────────────┘
+```
 
-### keyword
+### How a run moves
 
-An agent's message is scanned for routing keywords to determine who speaks next. If no keyword matches, the `DefaultAgent` is selected (falls back to the first agent if `DefaultAgent` is not set).
+1. The `start` agent runs first, with the task.
+2. When it finishes its work, it calls `handoff` with one of its step's routes. The tool only accepts those routes, each described by its edge's `when`.
+3. fuseraft runs the gates on that edge. If they all pass, the target agent runs next and receives the `goal`, `background` and `constraints` the agent passed to `handoff`.
+4. If a gate fails, the same agent runs again with a correction naming what's missing.
+5. If an agent finishes a turn without handing off, it runs again with a reminder listing its routes.
+6. An edge to `end` finishes the run as soon as its gates pass.
+
+Agents never pick a route that doesn't exist, and never skip a gate: the routing, not the model, decides what happens next. fuseraft writes the routes and their gates into each agent's prompt, so instructions only need to describe the work.
+
+### Loops and escalation
+
+Back-edges, such as `Tester → Developer` or `Reviewer → Planner`, are ordinary edges. Two fields keep loops honest:
+
+- **`onStuck`** on an edge calls in a named agent after its gates fail twice in a row. A Tester that can't produce a passing report because the code is broken gets the Developer, not another retry.
+- **`maxRevisits`** on a back-edge caps how often it may fire. After that, the earlier agent is told how many times it has received the same critique and shown the outstanding objections, taken from the first artifact the reviewing agent `writes`. After a further two escalations the run stops.
 
 ```yaml
-Selection:
-  Type: keyword
-  DefaultAgent: Planner
-  Routes:
-    - Keyword: "HANDOFF TO DEVELOPER"
-      Agent: Developer
-      Validator: RequireBrief
-      SourceAgents:
-        - Planner
-    - Keyword: "HANDOFF TO TESTER"
-      Agent: Tester
-      Validators:
-        - RequireWriteFile
-        - RequireShellPass
-      RequiredCommandPattern: "go build|go test"
-      SourceAgents:
-        - Developer
-    - Keyword: "HANDOFF TO REVIEWER"
-      Agent: Reviewer
-      Validator: TestReportValid
-      SourceAgents:
-        - Tester
-    - Keyword: BUGS FOUND
-      Agent: Developer
-      SourceAgents:
-        - Tester
-    - Keyword: REVISION REQUIRED
-      Agent: Developer
-      SourceAgents:
-        - Reviewer
-    - Keyword: REPLAN REQUIRED
-      Agent: Planner
-      SourceAgents:
-        - Reviewer
-    - Keyword: APPROVED
-      Agent: Reviewer
-      Validators:
-        - RequireShellPass
-        - RequireReviewJudgement
-      SourceAgents:
-        - Reviewer
+PlannerCritic:
+  - to: Developer
+    when: the brief is approved
+    requires: [brief]
+  - to: Planner
+    when: the brief has blocking problems
+    maxRevisits: 3
 ```
 
-**How routing works**
+### Human approval
 
-1. **Tool-call routing (preferred):** If the agent calls `handoff(route_keyword: "...")` via the `Handoff` plugin, the argument is used directly as the routing keyword — no text scanning occurs. This is the most reliable signal because it is a typed function argument, not free text. fuseraft also terminates the agent's tool loop immediately when `handoff` is called, so the agent cannot accidentally call other tools after signalling completion. Add `- Handoff` to an agent's `Plugins` list and instruct it to `call handoff(route_keyword: "KEYWORD")` instead of emitting the keyword as text.
-2. **Text scanning (fallback):** If no `handoff` tool call is present, the response text is scanned for every keyword configured in `Routes`.
-3. **Line matching** — a text keyword matches when it appears **alone on its own line** (exact match) or at the **start of a line followed by whitespace or punctuation** (e.g. `BUGS FOUND: all issues fixed`), after stripping markdown formatting characters `*` and `_`. A keyword embedded mid-sentence does not match. This prevents accidental routing when agents reference another role's keyword in their output.
-4. If **multiple** text keywords appear on their own lines in the same response, the response is rejected as ambiguous and a correction is injected asking the agent to use exactly one keyword. This prevents silent first-match bias from config ordering.
-5. The **single** matched keyword is checked against `SourceAgents` — the route only fires if the message author is in that list (or if `SourceAgents` is omitted).
-6. If a route has validators (`Validator` or `Validators`), they run before the route fires. If validation fails, the source agent is re-invoked with an error message injected.
-7. If the route has `RequireHumanApproval: true`, the operator is prompted to approve before the route fires. If rejected, the source agent is re-invoked with a "route blocked" message.
-8. If no keyword matches, `DefaultAgent` handles the next turn.
-
-**Phase-break keywords**
-
-Some keywords end the current pipeline phase and restart from a different agent (`BUGS FOUND`, `REVISION REQUIRED`, `REPLAN REQUIRED`). Others terminate the session (`APPROVED`). These are called *phase-break keywords* and are identified by the self-routing convention: when a route's `SourceAgents` list includes the same agent as `Agent`, it is treated as a terminal route (session ends when the keyword is emitted).
+`approve: true` on an edge puts a person in the loop. Once the edge's gates pass, fuseraft asks before the handoff goes through; a refusal sends the work back to the agent with a note to keep working. Use it on the edge to `end`, or before a step that publishes or deploys, instead of approving every turn with `--hitl`.
 
 ```yaml
-- Keyword: APPROVED
-  Agent: Reviewer
-  SourceAgents:
-    - Reviewer
-  Validators:
-    - RequireShellPass
-    - RequireReviewJudgement
+Reviewer:
+  - to: end
+    requires: [reviewJudgement]
+    approve: true
 ```
 
-Here `Agent: Reviewer` and `SourceAgents: [Reviewer]` — the agent routes to itself — which signals termination. All other phase-break routes (BUGS FOUND → Developer, REVISION REQUIRED → Developer, REPLAN REQUIRED → Planner) use different source and target agents and trigger a phase restart rather than session end.
-
-Phase-break keywords must be declared in `Selection.Routes` even if they are also referenced in `Termination.Strategies`. The routing engine reads agent ownership from `Selection.Routes` exclusively — a keyword absent from there will not be recognized when an agent emits it.
-
-**Route fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Keyword` | string | — | Case-insensitive. Must appear alone on its own line in the response to match — not as part of a sentence or section header. |
-| `Agent` | string | — | Agent to activate when the keyword fires. When `Agent` matches one of the `SourceAgents`, the route is terminal (session ends). |
-| `Validator` | string | — | Optional. Single validator name. Blocks the route until validation passes. |
-| `Validators` | array | — | Optional. Multiple validators (AND semantics — all must pass). Use instead of `Validator` when multiple checks are needed. |
-| `SourceAgents` | array | any | Optional. If set, the route only fires when the message author is in this list. Use to prevent agents from triggering routes intended for other roles. |
-| `RequiredCommandPattern` | string | — | Optional. When `Validator` is `RequireShellPass`, the passing command must contain at least one of these pipe-separated substrings. |
-| `RequireHumanApproval` | bool | `false` | Optional. When `true`, the operator must explicitly approve (`y`) before the route fires. If rejected, the source agent is re-invoked. Works independently of `--hitl` — approval gates fire in normal mode too. |
-
-**Built-in validators**
-
-| Validator | What it checks |
-|-----------|---------------|
-| `RequireBrief` | Blocks unless `brief.json` exists on disk with a non-empty `goal`, `files_to_change`, and `acceptance_criteria`. Ensures the Planner did its job before the Developer starts. |
-| `RequireWriteFile` | Blocks unless the current agent called `write_file` this turn. Prevents fabricated "I wrote the file" claims. |
-| `RequireAllFilesWritten` | Blocks unless every file in `brief.json`'s `files_to_change` has been written — in the current turn or in a prior turn recorded in `changes.json`. Prevents partial implementations from passing handoff. |
-| `RequireShellPass` | Blocks unless a shell command exited 0 this turn (optionally matching `RequiredCommandPattern`). |
-| `TestReportValid` | Blocks unless a valid `test-report.json` exists and passes all structural checks. |
-
-See [Validators](validators.md) for details.
-
-### structured
-
-Routes the next agent based on JSON field conditions evaluated against the last agent's response. Use this when agents produce structured output and routing depends on the *content* of that output rather than a fixed keyword.
+### Parallel branches
 
 ```yaml
-Selection:
-  Type: structured
-  DefaultAgent: Drafter
-  StructuredRoutes:
-    - Agent: Reviewer
-      Condition:
-        Field: draft_content
-        Exists: true
-      SourceAgents:
-        - Drafter
-    - Agent: Publisher
-      Condition:
-        Field: review_result
-        Is: "Yes"
-      SourceAgents:
-        - Reviewer
-    - Agent: Drafter
-      Condition:
-        Field: review_result
-        Is: "No"
-      SourceAgents:
-        - Reviewer
+Architect:
+  - to: [Backend, Frontend, Migrations]
+    join: Integrator
+    merge: { strategy: union }
 ```
 
-**How routing works**
+Each branch agent runs one turn at the same time, with its own snapshot of the history. Their outputs are merged, then the `join` agent runs. Branch agents don't need their own `steps` entry.
 
-1. After each agent turn, the strategy locates the most recent assistant text message.
-2. It tries to extract a JSON object from the text (raw JSON, a ` ```json ` code fence, or the first `{`…last `}` substring — whichever parses first).
-3. Each route is evaluated in order. The first route whose `Condition` evaluates to `true` **and** whose `SourceAgents` restriction is satisfied fires. The matched agent handles the next turn.
-4. If the response is not valid JSON, or no condition matches, the strategy re-invokes the last agent with a correction message naming the required field(s). After 3 consecutive failures a `ValidatorStuckException` is thrown and the session stops.
-5. If no route has fired yet (the very first turn), `DefaultAgent` starts.
+### When an agent gets stuck
 
-**Condition operators**
+Gate failures are classified and escalate per kind (missing evidence, conflicting evidence, no progress) after a threshold, 3 by default and 2 for conflicting evidence. The run stops with a stuck error rather than looping forever. See [Gates → When an agent gets stuck](validators.md#when-an-agent-gets-stuck) and [Failure handling](configuration.md#failure-handling).
 
-Exactly one operator should be set per condition. Evaluated in the order listed:
+### Designing a step flow
 
-| Operator | YAML | Evaluates to true when… |
-|----------|------|--------------------------|
-| `Is` | `Is: "value"` | The field's string value equals `value` (case-insensitive). |
-| `IsNot` | `IsNot: "value"` | The field's string value does NOT equal `value` (case-insensitive). |
-| `Contains` | `Contains: "text"` | The field's string value contains `text` as a substring (case-insensitive). |
-| `Exists` | `Exists: true` | The field is present and non-null. |
-| `Exists` | `Exists: false` | The field is absent or null. |
-
-**Field paths**
-
-`Field` supports dot-notation for nested objects. For example, `Field: data.status` navigates `{"data": {"status": "ok"}}`.
-
-**StructuredRoute fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Agent` | string | — | Agent to route to when the condition is true. |
-| `Condition` | object | — | Condition to evaluate against the parsed JSON. |
-| `SourceAgents` | array | any | Optional. Route only fires when the message author is in this list. |
-
-**Termination with structured routing**
-
-Structured routing has no built-in terminal convention (unlike keyword routing's self-routing `APPROVED`). Session end is always handled by `Termination` strategies. A typical pattern is a `regex` strategy on the last agent in the pipeline:
-
-```yaml
-Termination:
-  Type: composite
-  Strategies:
-    - Type: regex
-      Pattern: PUBLISHED
-      AgentNames:
-        - Publisher
-    - Type: maxiterations
-      MaxIterations: 15
-```
-
-**Agent instructions for structured routing**
-
-Agents in a structured workflow should be instructed to return JSON. The routing is invisible to them — they just need to know what fields to include:
-
-```
-You are a content reviewer. Evaluate the draft and return your decision as a JSON object:
-{"review_result": "Yes", "reason": "..."} if the draft meets requirements, or
-{"review_result": "No", "reason": "..."} if it needs revision.
-Your entire response must be valid JSON.
-```
+- **Name the artifacts first.** Ask what each agent must leave behind for the next one, declare it under `artifacts` with a `shape`, and gate the handoff on it.
+- **Gate on evidence, not on claims.** `commandSucceeded` and `testReport` check what actually ran. "Tests pass" in a reply is not a gate.
+- **Give every loop a way out.** Use `onStuck` where a different agent can fix the problem, and `maxRevisits` where two agents can disagree forever.
+- **Keep agents on `sees: handoff`** unless one genuinely needs the discussion. Artifacts carry the facts; the handoff carries the instructions.
 
 ---
 
-### statemachine
+## Patterns
 
-An explicit state graph where agent sequencing is driven by declared transitions rather than keyword scanning. Agents emit signals, but the state machine — not the agent — resolves transitions. This eliminates an entire class of routing hallucinations because agents cannot route themselves to arbitrary states by emitting unexpected text.
-
-```yaml
-Selection:
-  Type: statemachine
-  StateMachine:
-    Initial: Planning
-
-    States:
-      Planning:
-        Agent: Planner
-        Transitions:
-          - To: Implementation
-            Signal: "HANDOFF TO DEVELOPER"
-            Contract: BriefExists
-
-      Implementation:
-        Agent: Developer
-        Transitions:
-          - To: Testing
-            Signal: "HANDOFF TO TESTER"
-            Contract: ImplementationComplete
-
-      Testing:
-        Agent: Tester
-        Transitions:
-          - To: Review
-            Signal: "HANDOFF TO REVIEWER"
-            Contract: TestsValid
-          - To: Implementation
-            Signal: BUGS FOUND
-
-      Review:
-        Agent: Reviewer
-        Transitions:
-          - To: Done
-            Signal: APPROVED
-          - To: Implementation
-            Signal: REVISION REQUIRED
-
-      Done:
-        Agent: Reviewer
-        Terminal: true
-```
-
-**How it works**
-
-1. The machine starts in `Initial`. The agent assigned to that state runs first.
-2. After each agent turn, the strategy scans the last few messages for signals matching the current state's outgoing transitions.
-3. A transition fires when its `Signal` is detected **and** all declared `Contract`/`Contracts` pass.
-4. On a successful transition the machine advances to the new state and returns its agent.
-5. If a signal is detected but a contract fails, a targeted correction is injected (using the `FailureHandling` policy) and the current state's agent is re-invoked.
-6. If no signal is detected, the current state's agent is re-invoked with a nudge listing the available signals.
-7. A `Terminal: true` state re-invokes its agent every turn until the `Termination` strategy fires — it has no outgoing transitions.
-
-**Signal detection rules** are the same as keyword routing: the signal must appear alone on its own line or at the start of a line followed by whitespace or punctuation (after stripping `*`/`_` markdown). Agents may also use the `Handoff` plugin (`handoff(route_keyword: "SIGNAL")`) for typed, unambiguous signalling.
-
-**`StateMachineConfig` fields**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `Initial` | string | yes | Name of the starting state. Must exist in `States`. |
-| `States` | object | yes | Map of state name → `StateConfig`. At least one state required. |
-
-**`StateConfig` fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Agent` | string | — | Agent to invoke while in this state. Must match an agent name in `Agents`. |
-| `Transitions` | array | `[]` | Outgoing transitions. Empty means terminal (agent runs until termination fires). |
-| `Terminal` | bool | `false` | Marks the state as explicitly terminal. Equivalent to having no transitions but makes intent clear. |
-
-**`TransitionConfig` fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `To` | string | — | Target state name. For sequential transitions: the state to enter. For parallel transitions: the **join state** entered after all branches finish and outputs are merged. Must exist in `States`. |
-| `Signal` | string | — | Signal the current agent must emit to trigger this transition. When omitted, the transition fires automatically (no signal required) — useful for unconditional handoffs. |
-| `Contract` | string | — | Single named contract that must pass. Referenced by name from `Orchestration.Contracts`. |
-| `Contracts` | array | — | Multiple named contracts (AND semantics — all must pass). Use instead of or together with `Contract`. |
-| `SourceAgents` | array | any | Optional. Restrict this transition to messages authored by agents in this list. |
-| `MaxRevisits` | int | `0` | Maximum times this back-edge may fire before an escalation message is injected. When exceeded the agent is re-invoked with a message listing the outstanding objections from `ReviewArtifactPath` rather than force-approving — preserving the reviewer's quality guarantee while breaking the loop. `0` disables the cap. |
-| `ReviewArtifactPath` | string | — | Path (relative to the sandbox root) to the artifact containing reviewer objections. Injected into the escalation message when `MaxRevisits` is exceeded. When omitted the escalation message is generic. Only meaningful when `MaxRevisits > 0`. |
-| `HandoffContext` | array | — | Context sources to inject for the receiving agent when this transition fires. Each entry has `Source` (required) and optional `MaxChars` / `Label`. Supported sources: `session_context`, `changes_recent[:N]`, `brief_field:FIELD`, `file:PATH`. |
-| `RecoveryAgent` | string | — | Agent to invoke when this transition's contract fails repeatedly. Fires at most once per state/transition pair. |
-| `Parallel` | bool | `false` | When `true`, fans out to all states listed in `Targets` concurrently instead of routing to a single state. Each branch runs one agent turn with an isolated history snapshot. Outputs are merged via `Merge` before control advances to the join state in `To`. |
-| `Targets` | array | — | Branch state names for parallel fan-out. Required when `Parallel: true`. Each must exist in `States`. |
-| `Merge` | object | — | Merge strategy for parallel fan-out. See `MergeConfig` below. Ignored when `Parallel` is `false`. |
-
-**Contracts on transitions**
-
-Transition contracts are evaluated in the same order as `Contracts` (then `Contract`). All must pass for the transition to fire. Contract definitions live in `Orchestration.Contracts`. See [Evidence contracts](configuration.md#evidence-contracts).
-
-```yaml
-Orchestration:
-  Contracts:
-    - Name: ImplementationComplete
-      Requires:
-        - FilesWritten:
-            Source: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
-            Field: files_to_change
-        - CommandSucceeded:
-            PatternField: "verify_command"   # reads the verify command from brief.json
-
-  Selection:
-    Type: statemachine
-    StateMachine:
-      Initial: Implementation
-      States:
-        Implementation:
-          Agent: Developer
-          Transitions:
-            - To: Testing
-              Signal: "HANDOFF TO TESTER"
-              Contract: ImplementationComplete
-```
-
-**Stuck detection and escalation**
-
-When a contract fails consecutively, the `FailureHandling` policy for the classified failure type determines the response (correction injection, audit request, HITL escalation). See [Failure handling](configuration.md#failure-handling).
-
-The `Verifier` agent integrates directly with the state machine: on `ConflictingEvidence` or `NoProgress` failures, the state machine selects the verifier for one audit turn before re-invoking the primary agent. See [Verifier](configuration.md#verifier).
-
-**Parallel fan-out / fan-in**
-
-A transition can fan out to multiple agents running concurrently by setting `Parallel: true` and listing branch states in `Targets`. Each branch agent gets one turn with an isolated copy of the shared history. After all branches complete, their outputs are merged and control advances to the join state (`To`).
-
-```yaml
-Selection:
-  Type: statemachine
-  StateMachine:
-    Initial: Planning
-
-    States:
-      Planning:
-        Agent: Planner
-        Transitions:
-          - To: Integration          # join state — entered after all branches finish
-            Targets:                 # branch states — run concurrently
-              - BackendWork
-              - FrontendWork
-              - MigrationWork
-            Parallel: true
-            Signal: "IMPLEMENT"
-            Merge:
-              Strategy: union        # concatenate outputs in declaration order
-
-      BackendWork:
-        Agent: BackendDev
-        # No transitions — branch agents run one turn; signals are not evaluated.
-
-      FrontendWork:
-        Agent: FrontendDev
-
-      MigrationWork:
-        Agent: MigrationDev
-
-      Integration:
-        Agent: Integrator
-        Transitions:
-          - To: Done
-            Signal: APPROVED
-
-      Done:
-        Agent: Integrator
-        Terminal: true
-```
-
-**How parallel fan-out works**
-
-1. When the triggering signal is detected in the current state, the strategy resolves all `Targets` states and their agents.
-2. All branch agents run concurrently (`Task.WhenAll`), each with an isolated snapshot of the shared history at the moment of fan-out. Branches cannot see each other's in-progress work.
-3. All branch outputs are merged according to `Merge.Strategy` and the result is injected into the shared history as a single block.
-4. The machine transitions to the join state (`To`). The join state's agent then runs as normal with the merged output visible in history.
-5. Branch agents' own `Transitions` are **not** evaluated — they run for exactly one turn. Do not instruct branch agents to emit a handoff signal.
-
-**`MergeConfig` fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Strategy` | string | `union` | How to combine branch outputs. See merge strategies below. |
-| `Agent` | string | — | Agent name used for `ranked` and `semantic_diff` strategies. Must be declared in `Agents`. |
-| `ConflictResolution` | array | — | Fallback strategy names tried in order when the primary cannot reach a decision. |
-
-**Merge strategies**
-
-| Strategy | Behaviour | `Merge.Agent` required? |
-|---|---|---|
-| `union` | Concatenate all branch outputs in declaration order. | No |
-| `consensus` | Pass through if all branches agree on their final statement; fall back to union on disagreement. | No |
-| `vote` | Pick the output agreed by the most branches (majority); fall back to union on a tie. | No |
-| `ranked` | Scoring agent receives all branch outputs and selects or synthesises the best result. | Yes |
-| `semantic_diff` | Resolver agent identifies agreements, resolves conflicts, and produces a single reconciled output. | Yes |
-
-For `ranked` and `semantic_diff`, the merge agent receives the branch outputs as context and returns its result as plain text. It does not need any special plugins.
-
-**Parallel fan-out rules and constraints**
-
-- `Targets` must be non-empty when `Parallel: true`.
-- Every entry in `Targets` and the join state `To` must be declared states.
-- `To` (join state) must be distinct from all `Targets` entries.
-- Branch agents do not need the `Handoff` plugin and should not be instructed to emit signals.
-- Evidence contracts (`Contract`/`Contracts`) are not evaluated on parallel transitions — add contracts to the transition that leaves the join state if post-merge evidence is needed.
-- `RecoveryAgent` on a parallel transition is ignored.
-
-**HandoffContext — targeted artifact injection on transition**
-
-`HandoffContext` on a `TransitionConfig` injects a compact artifact block into shared history at the moment the transition fires. The receiving agent sees the block as the most recent history entry before its first turn.
-
-```yaml
-Implementation:
-  Agent: Developer
-  Transitions:
-    - To: Testing
-      Signal: "HANDOFF TO TESTER"
-      Contract: ImplementationComplete
-      HandoffContext:                   # inject targeted artifacts when transition fires
-        - Source: session_context
-        - Source: changes_recent
-        - Source: brief_field:test_targets
-```
-
-**Supported source types:**
-
-| Source | Description |
-|--------|-------------|
-| `session_context` | Handoff summary from `session_context_write` |
-| `changes_recent[:N]` | Last N entries from `changes.json` |
-| `brief_field:FIELD` | A named field from `brief.json` |
-| `file:PATH` | Raw contents of an artifact file |
-
-`own_history` is not supported in `HandoffContext` — it is only available in `AgentConfig.Context`.
-
-**HandoffContext vs. Context spec:**
-
-- `HandoffContext` injects content *into shared history*. Any agent in subsequent turns — including those without a `Context` spec — sees the injected block.
-- `AgentConfig.Context` assembles context from disk artifacts at invocation time and does not touch shared history. The receiving agent sees only the declared artifact sources and its own prior turns.
-
-**Recommended usage:** use `HandoffContext` on transitions when the receiving agent uses standard `ContextWindow` filtering; use `AgentConfig.Context` on the receiving agent when it should receive no cross-agent history at all. Both can be used together — `HandoffContext` on the transition provides a snapshot for routing/termination agents that read shared history, while the `Context` spec controls exactly what the model receives.
-
----
-
-### graph
-
-A declarative directed graph where each agent is bound to a named node and edges carry routing keywords. Forward edges (to nodes in later BFS layers) activate the target agent in the current phase. Back-edges (to nodes in equal or earlier BFS layers) break the current phase and restart execution from the target node. Loop-back paths — revision cycles, bug-fix loops, replanning triggers — are explicit in the topology rather than encoded as implicit keyword conventions.
-
-```yaml
-Selection:
-  Type: graph
-  Graph:
-    EntryNode: planner
-    Nodes:
-      - Id: planner
-        Agent: Planner
-      - Id: developer
-        Agent: Developer
-      - Id: tester
-        Agent: Tester
-      - Id: reviewer
-        Agent: Reviewer
-      - Id: approved
-        Agent: Reviewer
-        Terminal: true
-    Edges:
-      - From: planner
-        To: developer
-        Keyword: "HANDOFF TO DEVELOPER"
-        Validators:
-          - RequireBrief
-      - From: developer
-        To: tester
-        Keyword: "HANDOFF TO TESTER"
-        Validators:
-          - RequireWriteFile
-          - RequireShellPass
-      - From: developer
-        To: planner
-        Keyword: REPLAN REQUIRED
-      - From: tester
-        To: reviewer
-        Keyword: "HANDOFF TO REVIEWER"
-        Validators:
-          - TestReportValid
-      - From: tester
-        To: developer
-        Keyword: BUGS FOUND
-      - From: reviewer
-        To: approved
-        Keyword: APPROVED
-        Validators:
-          - RequireReviewJudgement
-      - From: reviewer
-        To: developer
-        Keyword: REVISION REQUIRED
-```
-
-**How it works**
-
-1. **BFS layer assignment:** at startup, fuseraft computes a BFS layer for every node from the entry node following only forward edges. Edges are classified as *forward* (target layer > source layer) or *back-edges* (target layer ≤ source layer).
-2. **Forward edges** activate the target agent in the current multi-agent phase via normal framework messaging.
-3. **Back-edges** break the current phase. When a back-edge keyword is detected and all validators pass, the orchestrator terminates the active phase and restarts execution from the target node.
-4. **Keyword detection** uses strict line matching: the keyword must appear **alone on its own line** with no trailing text (after stripping `*`/`_` markdown), or be emitted via the `Handoff` plugin (`handoff(route_keyword: "KEYWORD")`). This is stricter than keyword routing — a keyword at the start of a line followed by punctuation (e.g. `APPROVED: see notes`) does not match in graph mode. Only the current node's outgoing edges are checked — keywords that belong to other nodes are ignored.
-5. **Terminal nodes** (`Terminal: true`) invoke the termination check before keyword detection. Back-edges on a terminal node are unreachable — if you need a terminal outcome with evidence gating, use a routing node whose forward edge points to a separate terminal node with validators on that edge.
-6. **Unconditional edges** (no `Keyword`) fire automatically after the agent's turn without keyword scanning. Unconditional forward edges hand off immediately; unconditional back-edges break the phase immediately.
-
-**Multi-target back-edges**
-
-A single node may declare back-edges to different target nodes — the key differentiator from keyword routing's loop-back conventions. In the example below the `reviewer` node routes back to two different targets depending on which keyword fires:
-
-```yaml
-Nodes:
-  - Id: reviewer
-    Agent: Reviewer
-  - Id: approved
-    Agent: Reviewer
-    Terminal: true
-Edges:
-  - From: reviewer
-    To: approved
-    Keyword: APPROVED
-    Validators:
-      - RequireReviewJudgement
-  - From: reviewer
-    To: developer
-    Keyword: REVISION REQUIRED     # back-edge → developer
-  - From: reviewer
-    To: planner
-    Keyword: REPLAN REQUIRED       # back-edge → planner (different target)
-```
-
-In keyword routing this pattern requires two separate loop-back routes and depends on keyword scanning order. In graph routing the topology is explicit: each edge has a distinct target.
-
-**Hierarchical sub-graphs**
-
-A graph node can run a nested orchestrator instead of a single agent by setting `SubGraphId` instead of `Agent`. Each entry in `SubGraphs` is a `SubGraphSpec` with exactly one of `Graph` (runs a nested `GraphOrchestrator`) or `MapReduce` (runs a nested `MapReduceOrchestrator`). The sub-orchestrator executes as a self-contained pipeline: all its messages are streamed to the parent session, and its terminal output is injected into the parent's shared history so keyword detection and edge routing work exactly as they would for a single agent turn.
-
-**Graph sub-graph:**
-
-```yaml
-Selection:
-  Type: graph
-  Graph:
-    EntryNode: research_phase
-    Nodes:
-      - Id: research_phase
-        SubGraphId: research_team    # runs a nested GraphOrchestrator
-      - Id: writer
-        Agent: Writer
-        Terminal: true
-    Edges:
-      - From: research_phase
-        To: writer
-        Keyword: "RESEARCH COMPLETE"
-    SubGraphs:
-      research_team:
-        Graph:                       # <-- "Graph:" wraps the GraphConfig
-          EntryNode: gatherer
-          Nodes:
-            - Id: gatherer
-              Agent: DataGatherer
-            - Id: analyst
-              Agent: Analyst
-              Terminal: true
-          Edges:
-            - From: gatherer
-              To: analyst
-              Keyword: "DATA READY"
-```
-
-**Map-reduce sub-graph:**
-
-```yaml
-Selection:
-  Type: graph
-  Graph:
-    EntryNode: parallel_analysis
-    Nodes:
-      - Id: parallel_analysis
-        SubGraphId: item_processor   # runs a nested MapReduceOrchestrator
-      - Id: writer
-        Agent: Writer
-        Terminal: true
-    Edges:
-      - From: parallel_analysis
-        To: writer
-        Keyword: "ANALYSIS COMPLETE"
-    SubGraphs:
-      item_processor:
-        MapReduce:                   # <-- "MapReduce:" wraps the MapReduceConfig
-          Splitter: TaskSplitter
-          Mapper: Analyst
-          Reducer: Synthesizer
-          ItemsJsonPath: tasks
-          MaxConcurrency: 4
-```
-
-**Scatter-gather sub-graph:**
-
-```yaml
-Selection:
-  Type: graph
-  Graph:
-    EntryNode: expert_review
-    Nodes:
-      - Id: expert_review
-        SubGraphId: multi_expert      # runs a nested ScatterGatherOrchestrator
-      - Id: writer
-        Agent: Writer
-        Terminal: true
-    Edges:
-      - From: expert_review
-        To: writer
-        Keyword: "REVIEW COMPLETE"
-    SubGraphs:
-      multi_expert:
-        ScatterGather:               # <-- "ScatterGather:" wraps the ScatterGatherConfig
-          Participants:
-            - LegalReviewer
-            - TechnicalReviewer
-            - BusinessReviewer
-          Synthesizer: LeadReviewer
-```
-
-All agents referenced inside any sub-graph must be declared in the top-level `Orchestration.Agents` list. Sub-graphs share all services with the parent (change tracker, governance kernel, event emitter) but run with an isolated orchestrator instance.
-
-**`GraphConfig` fields**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `EntryNode` | string | no | Node ID of the first node to execute. Defaults to the first node when omitted. |
-| `Nodes` | array | yes | Node definitions. Each binds an agent role (or sub-graph) to a named position in the graph. |
-| `Edges` | array | yes | Directed edges. Evaluated in declaration order — the first matching edge fires. |
-| `MaxRetries` | int | `4` | Maximum consecutive correction attempts per node before a `ValidatorStuckException` is thrown. |
-| `SubGraphs` | object | no | Named sub-graph specs referenced by nodes via `SubGraphId`. Keys are sub-graph IDs; values are `SubGraphSpec` objects — set exactly one of `Graph` (nested `GraphOrchestrator`), `MapReduce` (nested `MapReduceOrchestrator`), or `ScatterGather` (nested `ScatterGatherOrchestrator`). All agents must be in the top-level `Orchestration.Agents` list. |
-
-**`GraphNodeConfig` fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Id` | string | — | Unique node identifier. Referenced by `EntryNode` and by edges' `From`/`To` fields. |
-| `Agent` | string | — | Agent name from the `Agents` list to invoke at this node. Multiple nodes may share the same agent. Must be empty when `SubGraphId` is set. |
-| `SubGraphId` | string | — | When set, this node runs the named sub-graph spec (declared in `GraphConfig.SubGraphs`) as a black-box step. `Graph` spawns a nested `GraphOrchestrator`; `MapReduce` spawns a nested `MapReduceOrchestrator`; `ScatterGather` spawns a nested `ScatterGatherOrchestrator`. The sub-orchestrator's terminal output is injected into the parent's shared history for keyword detection and edge routing. `Agent` must be empty when this is set. |
-| `Terminal` | bool | `false` | When `true`, the session terminates after the agent (or sub-graph) executes once. Outgoing edges are not evaluated. |
-| `Parallel` | bool | `false` | When `true`, the node participates in a parallel fan-out group — runs concurrently with other `Parallel` nodes sharing the same triggering keyword. |
-| `Validators` | array | — | Validators that must all pass before a `Terminal` node ends the session. Ignored on non-terminal nodes. |
-
-**`GraphEdgeConfig` fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `From` | string | — | Source node ID. Must match a `GraphNodeConfig.Id`. |
-| `To` | string | — | Target node ID. Must match a `GraphNodeConfig.Id`. Forward vs. back-edge classification is computed automatically via a DFS from the entry node (an edge is a back-edge only when its target is a real ancestor of the source). |
-| `Keyword` | string | — | Routing keyword. Must appear alone on its own line. When omitted, the edge is *unconditional* — it fires after the agent's turn without keyword scanning. |
-| `Validator` | string | — | Optional single validator. Blocks the edge until validation passes. |
-| `Validators` | array | — | Optional multiple validators (AND semantics). Takes precedence over `Validator` when both are set. |
-| `SourceAgents` | array | any | Optional. Edge only fires when the message author is in this list. |
-| `RequiredCommandPattern` | string | — | Used with `RequireShellPass`. The passing command must contain at least one pipe-separated substring. |
-| `ShellFallbackPattern` | string | — | Used with `RequireWriteFile`. A shell command matching this pattern is accepted in lieu of `write_file`. |
-| `RequireHumanApproval` | bool | `false` | When `true`, the operator must explicitly approve (`y`) before this edge fires. If rejected, the source agent is re-invoked with a "route blocked" message. Applies to both forward edges and back-edges. |
-| `RecoveryAgent` | string | — | Optional. Agent to invoke for one intervention turn when a validator has failed two or more consecutive times on this edge. The recovery agent receives a diagnostic message and may fix the blocking issue. Activates at most once per edge per session. |
-
----
-
-### workflow
-
-A cycle-native sibling of `graph`. It reads the **same** `Selection.Graph` block — switching
-`Selection.Type` from `graph` to `workflow` on an existing config is close to a drop-in engine
-swap (subject to the v1 limitations below, including every node's agent needing the `Handoff`
-plugin enabled — already true of the shipped `graph` template's agents, so usually a no-op in
-practice). The difference is internal: `graph`
-compiles forward edges into a Microsoft Agent Framework (MAF) workflow per "phase" and restarts
-that phase when a back-edge fires; `workflow` compiles the *entire* graph — cyclic edges included
-— into one persistent MAF workflow built once per session. There is no forward/back-edge
-distinction at all: every edge, looping or not, is an ordinary keyword-gated route.
-
-```yaml
-Selection:
-  Type: workflow
-  Graph:
-    EntryNode: planner
-    Nodes:
-      - Id: planner
-        Agent: Planner
-      - Id: developer
-        Agent: Developer
-      - Id: tester
-        Agent: Tester
-      - Id: approved
-        Agent: Tester
-        Terminal: true
-    Edges:
-      - From: planner
-        To: developer
-        Keyword: "HANDOFF TO DEVELOPER"
-        Validators:
-          - RequireBrief
-      - From: developer
-        To: tester
-        Keyword: "HANDOFF TO TESTER"
-        Validators:
-          - RequireWriteFile
-      - From: tester
-        To: developer
-        Keyword: BUGS FOUND      # a cycle — just an ordinary edge here, nothing special
-      - From: tester
-        To: approved
-        Keyword: APPROVED
-```
-
-**v1 limitations** — config validation rejects these rather than silently ignoring them; use
-`graph` instead if you need them:
-
-- `Parallel: true` nodes and `SubGraphId` (sub-graph) nodes are not supported.
-- `RequireHumanApproval` and `RecoveryAgent` on edges are not supported.
-- Every edge must declare a `Keyword` — unconditional (no-keyword) edges are not supported.
-- Routing is **tool-call-only**: every node's agent must declare `Handoff` in its `Plugins` list
-  (config validation rejects the config otherwise) and must route by calling
-  `handoff(route_keyword: "KEYWORD")`. Unlike `graph`, there is no fallback that scans the
-  agent's free-text response for the keyword on its own line — this matches how MAF's own native
-  handoff pattern routes (real tool calls, not text scanning), and removes a class of correction
-  retries caused by text-parsing fragility (markdown-wrapped keywords, keywords embedded in
-  prose, etc.).
-
-Other differences from `graph`, not config-rejected but worth knowing:
-
-- Governance (circuit breaker, per-validator-failure audit/rate-limit, SLO recording) and the
-  unified context-assembly pipeline are wired identically to `graph`. There is still no
-  human-approval gate or recovery-agent invocation — those are the config-rejected fields above,
-  so there is nothing to wire. There is also no repository-knowledge-store observation
-  extraction (unlike `graph`/`magentic`).
-- Sessions always start from `EntryNode`; there is no resume-from-the-interrupted-node support
-  after compaction (`graph` resumes from wherever it left off — `workflow` restarts the whole
-  pipeline). For long, compaction-prone sessions this is a real usability gap to weigh against
-  the simpler cycle handling.
-- The iteration cap (`Termination.MaxIterations`) counts total node executions across the whole
-  session, not "phases" (since there are no phases) — size it accordingly.
-
-All `GraphConfig`/`GraphNodeConfig`/`GraphEdgeConfig` fields are identical to `graph` (see the
-tables above) except that the v1-rejected fields, when set under `Selection.Type: workflow`,
-fail config validation at startup with a message pointing at `graph` as the alternative.
-
----
-
-### scattergather
-
-A two-phase broadcast orchestration: all **participant** agents receive the same task in parallel (each in an isolated context window), and a **synthesizer** agent aggregates their independent responses into a single final answer.
-
-```yaml
-Selection:
-  Type: scattergather
-  ScatterGather:
-    Participants:
-      - LegalReviewer
-      - TechnicalReviewer
-      - BusinessReviewer
-    Synthesizer: LeadReviewer
-    MaxConcurrency: 0          # 0 = unlimited; all participants run simultaneously
-```
-
-**How it works**
-
-1. **Scatter phase:** every agent in `Participants` is invoked in parallel with the same task. Each participant runs in an isolated snapshot of the conversation history — they cannot see each other's in-progress work. Concurrency is bounded by `MaxConcurrency` (0 = unlimited).
-2. **Gather phase:** the `Synthesizer` agent receives the original task history plus every participant's labeled output (prefixed `[Participant: AgentName]`), then produces the single terminal response. The synthesizer may vote, merge, rank, or reconcile — depending on how it is instructed.
-
-**When to use scatter-gather**
-
-- **Multi-expert review** — legal, technical, and business reviewers each assess the same document independently; a lead reviewer synthesises their findings into a unified verdict
-- **Ensemble generation** — multiple agents each produce a solution; a voting agent picks the best or reconciles differences
-- **Diversity sampling** — run the same prompt against agents with different personas, temperatures, or system instructions; the synthesizer distils the best ideas from all of them
-- **Redundancy checking** — several agents independently verify the same artifact; the synthesizer flags any disagreements
-
-**Key differences from similar modes**
-
-| | Scatter-gather | Map-reduce | Graph parallel fan-out |
-|---|---|---|---|
-| All agents receive | Same task | One item each (split by Splitter) | Same turn context |
-| Trigger | Unconditional | After splitter emits array | Keyword from coordinator node |
-| Agent diversity | Different agents per participant slot | Same mapper agent for all items | Different agents per parallel node |
-| Synthesizer | Declared in config | Reducer agent | Merge-target node |
-
-**`ScatterGatherConfig` fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Participants` | array | — | **Required.** Agent names to broadcast to, in parallel. Each must match a name in `Agents`. At least one required. |
-| `Synthesizer` | string | — | **Required.** Agent that aggregates all participant outputs into the final answer. Must match a name in `Agents`. |
-| `MaxConcurrency` | int | `0` | Maximum concurrent participant invocations. `0` means unlimited. |
-
-**`Termination` for scatter-gather**
-
-`ScatterGatherOrchestrator` terminates automatically after the gather phase completes. `Termination` strategies are not evaluated.
-
----
-
-### mapreduce
-
-A three-phase data-parallel orchestration: a **splitter** agent decomposes the input into discrete items, a **mapper** agent processes each item independently (in parallel), and a **reducer** agent synthesises the mapper outputs into a final result.
-
-```yaml
-Selection:
-  Type: mapreduce
-  MapReduce:
-    Splitter: Splitter
-    Mapper: Mapper
-    Reducer: Reducer
-    ItemsJsonPath: items          # dot-path to the array inside the splitter's JSON response
-    MaxConcurrency: 4             # 0 = unlimited
-    MaxSplitterRetries: 3
-```
-
-**How it works**
-
-1. **Split phase:** the Splitter agent is invoked with the original task. Its response must contain a JSON object with an array at `ItemsJsonPath` (dot-notation supported). fuseraft extracts that array as the work list. If the splitter does not return parseable JSON with the expected path, it is retried up to `MaxSplitterRetries` times before the session stops with an error.
-2. **Map phase:** the Mapper agent is invoked once per item, receiving the item content as the task. When `MaxConcurrency` is 0 all mapper calls run concurrently (`Task.WhenAll`). When `MaxConcurrency > 0` a semaphore limits the number of concurrent mapper invocations. Results are collected in item-index order.
-3. **Reduce phase:** the Reducer agent is invoked with the concatenated mapper outputs as context. Its final response is the session's terminal output.
-
-**Agent instructions for map-reduce**
-
-- **Splitter:** instruct it to return a JSON object with the array at the key named by `ItemsJsonPath`. Example: `{"items": ["item 1", "item 2", "item 3"]}`.
-- **Mapper:** instruct it to process one item at a time. It receives each item as a standalone task with no shared cross-item history.
-- **Reducer:** instruct it to synthesise or aggregate. It receives all mapper outputs as prior context before its turn.
-
-**`MapReduceConfig` fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Splitter` | string | — | **Required.** Agent that decomposes the input. Must match a name in `Agents`. |
-| `Mapper` | string | — | **Required.** Agent that processes each item. Must match a name in `Agents`. |
-| `Reducer` | string | — | **Required.** Agent that synthesises mapper outputs. Must match a name in `Agents`. |
-| `ItemsJsonPath` | string | `"items"` | Dot-notation path to the array in the splitter's JSON response. Example: `results.items`. |
-| `MaxConcurrency` | int | `0` | Maximum concurrent mapper invocations. `0` means unlimited. |
-| `MaxSplitterRetries` | int | `3` | Maximum retries before the split phase fails. Must be ≥ 1. |
-
-**`Termination` for map-reduce**
-
-The reducer's final response is the session's terminal message. `Termination` strategies are not evaluated — `MapReduceOrchestrator` terminates automatically after the reduce phase completes.
-
----
-
-### llm
-
-An LLM call picks the next agent each turn based on the conversation history. Useful when routing logic is too complex to express as keywords, or when the handoff decision should be context-sensitive.
-
-```yaml
-Selection:
-  Type: llm
-  Model:
-    ModelId: gpt-4o-mini
-  Prompt: |
-    You are an orchestrator. Given the agents: {{$agents}}
-    And the conversation:
-    {{$history}}
-    Which agent should respond next? Reply with only the agent name.
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `Model` | yes | The model used for the selection call. Can be a lightweight/fast model since the task is just picking a name. |
-| `Prompt` | no | Custom prompt. Available placeholders: `{{$agents}}` (list of agent names and descriptions), `{{$history}}` (recent conversation). Defaults to a built-in prompt if omitted. |
-
----
+Patterns end on their own. `limits` still applies.
 
 ### magentic
 
-A two-level orchestration loop driven by a dedicated manager LLM. The manager gathers facts about the task, creates a plan, and then coordinates participant agents round by round — selecting the right agent each turn, detecting stalls, and replanning when progress stops. No routing keywords or JSON conditions are required; the manager reasons about the conversation history to decide what happens next.
+A manager model plans the work, then coordinates the team round by round: it picks who works next, gives them a concrete instruction, detects stalls, and replans when progress stops. Agents just do the work; they never call `handoff`.
 
 ```yaml
-Selection:
-  Type: magentic
-  Magentic:
-    Model:
-      ModelId: gpt-4o
-    MaxRoundCount: 20
-    MaxStallCount: 3
-    MaxResetCount: 2
-    EnablePlanReview: false
+flow:
+  pattern: magentic
+  model: reasoning
+  maxRoundCount: 20
+  maxStallCount: 3
+  maxResetCount: 2
+  enablePlanReview: false
 ```
 
-**How it works**
+1. **Orientation, once:** the manager summarizes the task, the known facts, an initial plan and the first step.
+2. **Each round:** the manager updates its progress ledger (is the task done? is the team stalling?), selects the best participant, and invokes it with a focused instruction.
+3. **Stalls:** after `maxStallCount` rounds without progress the manager replans; after `maxResetCount` replans the run ends with a stall message.
+4. **Completion:** the run ends when the ledger marks the task complete, or after `maxRoundCount` rounds.
 
-1. **Orientation (outer loop — once):** before the first inner-loop round the manager reads the conversation history and calls `magentic_orientation` to produce a brief: a task summary, known facts, an initial plan, an immediate next step, and an initial completion check.
-2. **Coordination (inner loop — each round):** the manager:
-   - Calls `magentic_ledger_update` to assess progress: checks whether the task is complete, whether the team is stalling, and which facts have been established.
-   - Selects the best participant for the next step via `magentic_select_speaker`.
-   - Invokes the selected participant with a focused, concrete instruction.
-   - Detects stalls: if `MaxStallCount` consecutive rounds make no forward progress, a replan is triggered. After `MaxResetCount` replans the session ends with a stall message.
-   - Detects completion: if the ledger update sets `task_complete: true`, the session ends cleanly.
+| Field | Default | Description |
+|-------|---------|-------------|
+| `model` | — | Required. The manager's model; a reasoning-capable one is strongly recommended. |
+| `instructions` | built-in | Custom manager instructions. |
+| `maxRoundCount` | `20` | Cap on coordination rounds. |
+| `maxStallCount` | `3` | Rounds without progress before a replan. |
+| `maxResetCount` | `2` | Replans before the run ends. |
+| `enablePlanReview` | `false` | Pause after the initial plan for human review. |
 
-**Agent instructions**
+Every agent sees the shared conversation, since the manager's loop depends on it.
 
-Unlike keyword or structured strategies, Magentic participants do not need to emit special keywords or JSON objects — they just do the work. The manager reads their output and decides what happens next. Keep agent instructions focused on capabilities and behavior, not on routing signals.
+### mapreduce
 
-**`Termination` is ignored**
+A splitter breaks the input into items, a mapper processes each item in parallel, and a reducer combines the results.
 
-For `Selection.Type: magentic`, the entire `Termination` section is ignored. Session end is controlled exclusively by `MaxRoundCount`, `MaxStallCount`, and `MaxResetCount` in the `Magentic` block. A `Termination` section may be present in the config (e.g. to satisfy tooling or document intent) but has no effect. `fuseraft validate` emits a warning if it finds a non-default `Termination` config alongside a Magentic selection.
+```yaml
+flow:
+  pattern: mapreduce
+  splitter: Splitter
+  mapper: Mapper
+  reducer: Reducer
+  itemsJsonPath: items
+  maxConcurrency: 4
+  maxSplitterRetries: 3
+```
 
-**`MagenticManagerConfig` fields**
+1. **Split:** the splitter's reply must contain a JSON object with an array at `itemsJsonPath` (dot paths allowed), e.g. `{"items": ["a", "b"]}`. It is retried up to `maxSplitterRetries` times.
+2. **Map:** the mapper runs once per item, with the item as its task and no history shared between items. `maxConcurrency` caps parallel runs; `0` means unlimited.
+3. **Reduce:** the reducer gets every mapper output and writes the final answer.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Model` | string or object | — | **Required.** Model for the manager LLM. A reasoning-capable model (`o3`, `claude-opus-4-6`, `gemini-2.5-pro`) is strongly recommended — the manager drives all planning and evaluation. |
-| `Instructions` | string | built-in | Optional system instructions for the manager. A well-tested default prompt is used when omitted. |
-| `MaxRoundCount` | int | `20` | Hard cap on inner-loop coordination rounds before the session terminates. |
-| `MaxStallCount` | int | `3` | Consecutive rounds without forward progress before a replan is triggered. |
-| `MaxResetCount` | int | `2` | Maximum number of replanning cycles. After this limit the session terminates with a stall message rather than looping indefinitely. |
-| `EnablePlanReview` | bool | `false` | When `true`, the session pauses after the initial plan is generated and waits for HITL review before proceeding to the coordination loop. |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `splitter`, `mapper`, `reducer` | — | Required agent names. |
+| `itemsJsonPath` | `items` | Path to the array in the splitter's JSON. |
+| `maxConcurrency` | `0` | Parallel mapper cap; `0` is unlimited. |
+| `maxSplitterRetries` | `3` | Split attempts before the run fails. |
 
----
+### scattergather
+
+Every participant gets the same task in parallel, each with its own context; a synthesizer combines their independent answers.
+
+```yaml
+flow:
+  pattern: scattergather
+  participants: [LegalReviewer, TechnicalReviewer, BusinessReviewer]
+  synthesizer: LeadReviewer
+  maxConcurrency: 0
+```
+
+Use it for multi-expert review, ensembles (several solutions, one picks or reconciles), diversity sampling and redundancy checks. The synthesizer receives each output labeled `[Participant: Name]`.
+
+| | scattergather | mapreduce | parallel Steps edge |
+|---|---|---|---|
+| Each agent receives | the same task | one item | the same handoff |
+| Agents | different per participant | one mapper for all items | different per branch |
+| Combined by | the synthesizer | the reducer | the `join` agent |
 
 ### adversarial
 
-A GAN-inspired pipeline where generator agents produce artifacts and critic agents review them in fully isolated context windows. Each stage runs a tight generate → critique → revise loop before the approved artifact is passed to the next stage.
-
-The defining property is the **context firewall**: the critic never sees the generator's reasoning chain, prior shared history, or any other session state. It receives only its own system instructions and the artifact under review. This produces independent feedback rather than rubber-stamping — the same mechanism that makes a fresh code reviewer more effective than an author self-reviewing their own work.
+Generators produce artifacts; critics review them in a fully isolated context, seeing only their instructions and the artifact, never the generator's reasoning. Each stage loops generate, critique, revise, then hands its approved artifact to the next stage.
 
 ```yaml
-Selection:
-  Type: adversarial
-  Adversarial:
-    Rounds: 3          # critique rounds per stage (generator gets Rounds-1 revision opportunities)
-    PassKeyword: "APPROVED"
-    Stages:
-      - Generator: Planner
-        Critic: PlanReviewer
-        Label: Planning
-
-      - Generator: Developer
-        Critic: CodeReviewer
-        Label: Implementation
+flow:
+  pattern: adversarial
+  rounds: 3
+  passKeyword: APPROVED
+  stages:
+    - { generator: Planner,   critic: PlanReviewer, label: Planning }
+    - { generator: Developer, critic: CodeReviewer, label: Implementation }
 ```
 
-**How it works**
+1. The generator produces an artifact from the task and any earlier stages' artifacts.
+2. The critic reviews it with a fresh context. Writing `passKeyword` on its own line approves it and ends the stage.
+3. Otherwise the generator revises with the critique, up to `Rounds - 1` times. If no round approves, the last reviewed artifact moves on, with a warning event, so the pipeline never stalls.
 
-1. **Stage loop:** stages execute sequentially. The approved artifact from each stage is appended to a shared history that subsequent generators receive as prior context. Critics never see this history.
-2. **Initial generation:** the generator is invoked with its system instructions, any prior-stage artifacts, and the original task.
-3. **Critique round:** the critic is invoked with a fresh context — only its system instructions and the artifact. No shared history, no generator reasoning.
-4. **Pass check:** if the critic emits `PassKeyword` (default `APPROVED`) on its own line, the stage exits early and the artifact is promoted.
-5. **Revision:** if the critic rejects and rounds remain, the generator is re-invoked with its previous artifact and the critique injected as a user message. A new critique round follows.
-6. **Exhaustion:** if all `Rounds` are consumed without approval, the last reviewed artifact is promoted anyway (with a warning log and event) so the pipeline does not stall.
+Instruct critics to either write the pass keyword or list specific, actionable defects, and nothing in between.
 
-**Rounds semantics**
-
-`Rounds` is the number of critique rounds per stage. With `Rounds: 3`:
-
-- Round 1 → critique → revise (round 1 < 3)
-- Round 2 → critique → revise (round 2 < 3)
-- Round 3 → critique → **no revision** (final round — the last critiqued artifact is promoted)
-
-The generator receives `Rounds - 1` revision opportunities. The promoted artifact is always the most recent one that was actually reviewed — not an unreviewed revision.
-
-**Agent instructions**
-
-Critic agents should be instructed to either approve or provide specific, actionable feedback — and nothing in between. The default template ships critics with instructions like:
-
-```
-If the artifact meets all requirements, respond with exactly:
-APPROVED
-
-Otherwise, list specific, actionable defects. Be precise — describe what is wrong and why.
-```
-
-Generator agents work as normal. On revision turns the orchestrator injects the critique as a user message so the generator knows exactly what to address.
-
-**`AdversarialConfig` fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Stages` | array | — | **Required.** Ordered list of generator/critic stage pairs. |
-| `Rounds` | int | `3` | Maximum critique rounds per stage. Generator gets `Rounds - 1` revision opportunities. Must be ≥ 1. |
-| `PassKeyword` | string | `"APPROVED"` | Keyword the critic emits on its own line to approve the artifact and exit the stage early. Case-insensitive. |
-
-**`AdversarialStageConfig` fields**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Generator` | string | — | **Required.** Name of the agent that produces and revises artifacts. Must match an agent name in `Agents`. |
-| `Critic` | string | — | **Required.** Name of the agent that reviews with a fresh context window. Must match an agent name in `Agents`. Must be distinct from `Generator`. |
-| `Label` | string | `"{Generator} → {Critic}"` | Human-readable label shown in event logs and message tags. |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `stages` | — | Required. Ordered `generator`/`critic` pairs, each with an optional `label`. |
+| `rounds` | `3` | Critique rounds per stage. |
+| `passKeyword` | `APPROVED` | What a critic writes on its own line to approve. |
 
 ---
 
-## Termination strategies
-
-Configured under `Termination.Type`. The run stops when any enabled strategy fires.
-
-### regex
-
-Stops when a message content matches a regular expression.
-
-```yaml
-Termination:
-  Type: regex
-  Pattern: \bAPPROVED\b
-  AgentNames:
-    - Reviewer
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `Pattern` | yes | .NET regex pattern applied to message content. |
-| `AgentNames` | no | If set, only messages from these agents are evaluated. Useful to restrict the termination check to a specific role (e.g. only the Reviewer can approve). |
-
-**Common patterns**
-
-| Pattern | Matches |
-|---------|---------|
-| `\bAPPROVED\b` | Word "APPROVED" (whole word) |
-| `TASK COMPLETE` | Literal substring |
-| `\b(DONE\|COMPLETE\|FINISHED)\b` | Any of three words |
-
-### structured
-
-Stops when the last agent message contains a JSON object satisfying a field condition, instead of requiring a specific keyword in plain text.
-
-```yaml
-Termination:
-  Type: structured
-  Condition:
-    Field: status
-    Is: done
-  AgentNames:
-    - Reviewer
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `Condition` | yes | A `StructuredCondition` block (`Field` plus one of `Is`, `IsNot`, `Contains`, `Exists`) evaluated against the JSON object found in the message — as an object literal, a fenced ```` ```json ```` block, or the first balanced `{...}` substring. |
-| `AgentNames` | no | If set, only messages from these agents are evaluated. |
-
-Shares its condition evaluator with the `structured` selection strategy, so an agent that already emits `{"status": "done"}` for routing can use the same field to end the session — no separate keyword needed.
-
-### tokenbudget
-
-Stops once cumulative session token usage (input + output, summed across every turn) reaches a threshold — a graceful counterpart to the top-level `MaxTotalTokens` setting, which aborts the session outright with a `BudgetExceededException` when exceeded.
-
-```yaml
-MaxTotalTokens: 150000     # hard abort — last resort, throws
-
-Termination:
-  Type: composite
-  Strategies:
-    - Type: regex
-      Pattern: \bAPPROVED\b
-    - Type: tokenbudget
-      MaxTokens: 120000    # graceful stop — well under the hard cap above
-    - Type: maxiterations
-      MaxIterations: 40
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `MaxTokens` | yes | Cumulative token threshold, must be > 0. Give it a value lower than `MaxTotalTokens` so this strategy gets a chance to end the session normally — with the last agent's message standing as the final answer — before the hard abort fires. `fuseraft validate-config` warns if `MaxTokens >= MaxTotalTokens`. |
-
-`AgentNames` has no effect on this type — token usage is tracked across the whole session, not per agent or per message. `Validators`/`Validator` can still be attached, same as `regex` and `structured`.
-
-### maxiterations
-
-Stops after a fixed number of agent turns, regardless of content.
-
-```yaml
-Termination:
-  Type: maxiterations
-  MaxIterations: 20
-```
-
-All strategy types also respect `MaxIterations` as a hard safety cap. The `maxiterations` type only fires on that count; the others also respect it.
-
-### composite
-
-Stops when any child strategy fires. This is the recommended type for most configs because it combines a content-based check (the task is done) with a safety cap (prevent infinite loops).
-
-```yaml
-Termination:
-  Type: composite
-  MaxIterations: 40
-  Strategies:
-    - Type: regex
-      Pattern: \bAPPROVED\b
-      AgentNames:
-        - Reviewer
-    - Type: maxiterations
-      MaxIterations: 40
-```
-
-Child strategies can themselves be composite.
-
----
-
-## Choosing a strategy
-
-### Sequential
-
-Use sequential when every agent should run exactly once, in order, and the pipeline ends after the last agent completes. Good for single-agent configs and simple multi-step pipelines with no branching, no loops, and no conditional routing.
-
-Avoid it once you need any of: loops, early exit, conditional next-agent, or evidence-gated handoffs. For indefinite cycling use `roundrobin` instead.
-
-### Round-robin
-
-Use round-robin when every agent should participate in every round, indefinitely, until an external condition stops the session. The cycle repeats from the first agent after the last one finishes.
-
-Avoid it for fixed-length pipelines — use `sequential` when each agent should run once and stop.
-
-### State machine
-
-Use state machine for **explicit, deterministic pipelines** where the routing topology is known in advance, hallucination-resistant routing matters, and evidence contracts should gate transitions. State machine is a strict upgrade from keyword routing for complex, multi-phase workflows.
-
-Choose state machine over keyword when:
-
-- You want agents to be unable to route to an unexpected state — the state machine ignores signals that don't belong to the current state's transitions
-- You need evidence contracts on transitions (contracts are first-class in state machine; they require a workaround in keyword routing)
-- You want lossless compaction — state machine position and contract evaluations are durable state that `ContextRebuilder` can reconstruct verbatim
-- You want the `Verifier` meta-agent to audit automatically on suspicious transitions
-
-State machine and keyword routing handle signals the same way internally (keyword on own line, or `handoff()` plugin call). Migrating an existing keyword config to state machine requires mapping routes to states and transitions.
-
-### Keyword
-
-Use keyword for **role-based pipelines** where each agent has a defined phase and the handoff is a deliberate signal ("I am done, next phase"). The keyword is noise-free, unambiguous, and easy to enforce — it either appears on its own line or it doesn't.
-
-Keyword is the right default for development teams, review pipelines, and any workflow where:
-
-- The routing decision is predetermined ("when the Developer finishes, always go to Tester")
-- You need validators to gate handoffs with real evidence before the route fires
-- You want `SourceAgents` to enforce role boundaries mechanically
-- Loop-back paths exist (bugs found → developer, revision required → developer)
-- Stuck detection and HITL escalation matter
-
-The cost is that agents must be reliably instructed to emit the exact keyword. Models generally do this well — a keyword on its own line is a simpler constraint than producing valid structured JSON under pressure.
-
-### Structured
-
-Use structured when the **routing decision is a content decision** — when the agent's output itself carries the answer and routing is a consequence of what that answer says, not a side-channel signal added on top.
-
-Structured routing fits naturally when:
-
-- The agent already produces JSON for downstream use and the routing field is part of that output (e.g. a classifier returning `{"category": "billing"}`)
-- The next agent depends on a computed value, not a predetermined phase (e.g. route to an escalation agent when `confidence < 0.7`, route to different specialists based on `entity_type`)
-- Multiple conditions combine to determine the route (field A exists AND field B equals a value)
-- The workflow is a decision tree or triage pipeline, not a sequential team of roles
-
-**What structured routing trades away:** validators. Structured routes have no `Validator` field — there is no mechanism to block a route until evidence is present on disk. Enforcement must come entirely from agent instructions. For workflows where evidence gating matters (write a file, run a test, pass a build) keyword routing with validators is more reliable.
-
-**The ambiguity risk:** if an agent produces multiple JSON-looking blocks in a single response (tool call results, echoed file contents, intermediate data), the strategy takes the first parseable object. Keyword routing has no equivalent ambiguity — a keyword on its own line is unambiguous regardless of what else appears in the response.
-
-### LLM
-
-Use LLM selection when the routing logic is too complex or context-dependent to express statically. The orchestrator calls a separate model each turn to decide which agent speaks next, based on the conversation history.
-
-It is the most flexible strategy but also the least predictable and the most expensive — every agent turn incurs an additional LLM call. Use it when keyword or structured routing would require an unwieldy number of routes to cover all cases, or when the right next agent genuinely depends on nuanced conversation context that cannot be captured by a field value or keyword.
-
-### Magentic
-
-Use Magentic when you want a fully autonomous, self-directing team where the orchestrator — not the config — decides the plan and execution order. Rather than declaring routes or conditions, you describe the agents' capabilities and hand the task to the manager.
-
-Magentic fits naturally when:
-
-- The task is exploratory or open-ended and you cannot predict the right execution order in advance
-- You want the manager to adapt automatically when agents get stuck, rather than requiring you to encode every failure path as a loop-back route
-- Agents are specialists with distinct capabilities (researcher, developer, analyst) and the manager should choose the right one each round based on what has already been done
-- You want built-in replanning: if three consecutive rounds make no progress, the manager rethinks the plan rather than repeating the same stuck agent
-
-**What Magentic trades away:** the determinism and evidence-gating of keyword routing. There are no validators, no `SourceAgents` restrictions, no `RequireHumanApproval` on routes. The manager decides everything. If correctness gates matter (e.g. "the developer must actually run the build before handing off to the tester"), keyword routing with validators is more reliable.
-
-Magentic is also more expensive than keyword routing per round: each inner-loop iteration makes at least two manager LLM calls (`magentic_ledger_update` + `magentic_select_speaker`) in addition to the participant's call.
-
-### Adversarial
-
-Use adversarial when **output quality matters more than throughput** and you want independent review rather than self-review. The context firewall is the key mechanism — because the critic receives no shared history, it cannot be influenced by the generator's framing or reasoning, and it approaches the artifact the way a real independent reviewer would.
-
-Adversarial fits naturally when:
-
-- You have a linear pipeline where each phase produces a discrete artifact (plan, code, document) that should be verified before the next phase begins
-- You want to catch issues that single-pass generation consistently misses: phantom dependencies, incomplete error handling, architectural deviations, placeholder tests
-- The quality of later stages depends heavily on the quality of earlier stages — adversarial stages enforce that dependency by only promoting approved artifacts
-- You can afford the additional LLM calls (each stage uses at least 2 calls per round: one generate, one critique)
-
-**What adversarial trades away:** dynamic routing and self-correction. The pipeline is fixed at config time — stages always execute in order. There are no loop-back edges between stages, no validator-gated handoffs, and no mechanism for a stage to signal that a prior stage needs to restart. Each stage is isolated. If a critic's feedback reveals a fundamental problem with a previous stage's artifact, the orchestrator has no mechanism to restart that stage — it promotes the best artifact the current stage produced and continues.
-
-Adversarial is also not a substitute for running real tests. A critic LLM reviewing code is a heuristic check, not a compiler or test suite. Use it alongside `RequireShellPass` validators in a keyword or graph pipeline if you need evidence-gated progression.
-
-### Scatter-gather
-
-Use scatter-gather when the same task benefits from **multiple independent perspectives** rather than multiple independent work items. The defining property is broadcast: every participant receives the same input — you are not splitting work, you are asking different experts to evaluate the same thing simultaneously.
-
-Scatter-gather fits naturally when:
-
-- The value comes from diversity of viewpoint, not division of labour (different reviewer personas, different specialisms, different risk lenses)
-- You want N independent answers to the same question and a single reconciled conclusion
-- You want redundancy: multiple agents check the same artifact and a synthesizer flags disagreements
-
-**What scatter-gather trades away:** dynamic routing, loops, and evidence gating. The two-phase structure is fixed. If you need the synthesizer to send work back to participants, use graph or state machine instead.
-
-### Map-reduce
-
-Use map-reduce when the task can be decomposed into independent items that benefit from parallel processing. The pattern is: one agent splits the input, one agent processes each item (in parallel), and one agent synthesises the results.
-
-Map-reduce fits naturally when:
-
-- The input is a list of independent work items (documents, files, test cases, URLs, entities) that can be processed without shared state
-- Processing time is dominated by per-item LLM calls and parallel execution matters
-- The final output is a synthesis or aggregation of the per-item results
-
-**What map-reduce trades away:** dynamic routing, loops, and evidence gating. The three-phase structure is fixed — there are no validators, no loop-back edges, and no way for the reducer to send items back to the mapper. If per-item quality matters, run each item through an adversarial stage first, then feed the approved artifacts into map-reduce.
-
-### Graph
-
-Use graph when you need **explicit back-edge topology** — when different failure modes should route back to different prior nodes, or when you want the routing structure to be visible in the config rather than implied by keyword conventions.
-
-Graph fits naturally when:
-
-- A single agent can route backward to **different** targets depending on the outcome (e.g. a Reviewer that sends minor issues back to the Developer but sends scope changes back to the Planner)
-- You want loop-back paths to be unambiguous in the config, not inferred from keyword scan order
-- The pipeline is a directed graph, not a strict linear sequence — phases fan out or converge in ways that are cleaner to express as nodes and edges than as a flat route table
-- You still want validators on individual edges (graph edges support the full `Validators` / `RequiredCommandPattern` surface, the same as keyword routes)
-
-Graph and keyword routing use the same `handoff()` plugin for typed signalling, but their text-scan rules differ: keyword routing uses relaxed matching (keyword at start of line followed by whitespace or punctuation also fires), while graph uses strict matching (keyword must be alone on its own line, no trailing text). Migrating an existing keyword config to graph requires mapping agents to node IDs and routes to edges. The main addition is the explicit `EntryNode` and the flat `Edges` list with `From`/`To` fields.
-
-**What graph trades away:** lossless compaction and Verifier integration. For hallucination-resistant routing where agents cannot route themselves to an unexpected node, state machine remains the stronger choice.
-
-### Workflow
-
-Same topology model as graph — same config block, same back-edges-as-explicit-edges idea —
-but built on a single persistent MAF workflow instead of graph's per-cycle phase restart. Try
-`workflow` over `graph` when you want the simpler engine and don't need `Parallel`/`SubGraphId`/
-`RequireHumanApproval`/`RecoveryAgent` or resume-after-compaction from the interrupted node (see
-the v1 limitations under the `workflow` reference section above). Switching back to `graph` later
-is just changing `Selection.Type` back — the `Selection.Graph` block doesn't need to change.
-
----
-
-## Choosing between keyword, state machine, structured, graph, adversarial, scatter-gather, and map-reduce
-
-| | Keyword | State machine | Structured | Graph | Adversarial | Scatter-gather | Map-reduce |
-|---|---|---|---|---|---|---|---|
-| Handoff signal | Keyword on own line (relaxed) | Signal on own line (same as keyword) | JSON field value | Keyword alone on own line (strict) | PassKeyword from critic | N/A — phase-driven | N/A — phase-driven |
-| Evidence gating | Validators (per-route) | Contracts (per-transition, typed) | Instructions only | Validators (per-edge) | None (critic LLM only) | None | None |
-| Routing topology | All routes active at once | Only current state's transitions active | All routes active at once | Only current node's edges active | Fixed sequential stages | Fixed 2-phase: scatter → gather | Fixed 3-phase: split → map → reduce |
-| Ghost signals | Possible — any agent can emit any keyword | Impossible — wrong-state signals are ignored | N/A | Reduced — wrong-node keywords are ignored | N/A | N/A | N/A |
-| Multi-target back-edges | Implicit (keyword scan order) | N/A (no back-edges) | N/A | Explicit — each back-edge has a distinct target node | No back-edges between stages | No back-edges | No back-edges |
-| Parallel execution | No | Yes (fan-out transitions) | No | Yes (Parallel nodes) | No | Yes (all participants in parallel) | Yes (mapper runs in parallel) |
-| Agent diversity | N/A | N/A | N/A | Different agent per node | Generator vs. critic | **Different agent per participant slot** | Same mapper for all items |
-| What's broadcast | N/A | N/A | N/A | N/A | Artifact to critic | **Same task to all** | One item each |
-| Critic context isolation | No | No | No | No | Yes — critics receive no shared history | No | No |
-| Lossless compaction | No | Yes (requires EvidenceStore) | No | No | No | No | No |
-| Verifier integration | No | Yes | No | No | No | No | No |
-| Failure classification | Yes | Yes | No | Yes | No | No | No |
-| Best for | Phased pipelines, dev teams | Same + hallucination-resistant routing | Classifiers, triage | Explicit multi-target loop-back topology | Quality gates on discrete artifacts | Multi-expert review, ensemble, redundancy | Independent parallel item processing |
-
-For a human-like team of roles (Planner, Developer, Tester, Reviewer):
-- Start with **keyword** if you want a simple, validator-gated pipeline quickly
-- Move to **state machine** when you need hallucination-resistant routing, contracts, lossless compaction, or the Verifier meta-agent
-- Choose **graph** when different failure outcomes must route back to different nodes and you want that topology explicit in the config
-
-For a pipeline where an agent computes a value and routing follows from it, prefer **structured**. The JSON is already the output — the routing field costs nothing to add.
-
-For a linear pipeline where each phase produces a discrete artifact (plan, code, document) and you want independent review between phases, prefer **adversarial**. The context firewall is the key mechanism — critics approach the artifact with no inherited assumptions from the generator.
-
-For the same task needing multiple independent expert perspectives simultaneously, prefer **scatter-gather**. Participants are different agents with different specialisms; the synthesizer reconciles their outputs. No work splitting, no keyword routing required.
-
-For tasks that decompose into independent items (documents, files, entities, test cases) where parallel processing matters, prefer **map-reduce**. The splitter defines the work list; the mapper processes items in parallel; the reducer synthesises. No routing logic required.
-
----
-
-## Designing agent handoff flows
-
-The combination of keyword routing, validators, and source-agent restrictions lets you build deterministic pipelines where agents can only advance when they have real evidence, and role boundaries are enforced mechanically.
-
-```
-User task
-    ↓
-Planner  ──HANDOFF TO DEVELOPER [RequireBrief]──→  Developer
-         ←──────────────REPLAN REQUIRED────────────────────────────────────┐
-                                                       │                   │
-                                          (RequireWriteFile + RequireShellPass)
-                                                       │                   │
-                                                    Tester  ←──BUGS FOUND──┐
-                                                       │                   │
-                                          (TestReportValid validator)      │
-                                                       │                   │
-                                                   Reviewer ──REVISION REQUIRED──┘
-                                                       │
-                                        (RequireShellPass + RequireReviewJudgement)
-                                                       │
-                                                   APPROVED → session ends
-```
-
-Each arrow is a keyword route. Guards in parentheses are validators that block the route until evidence is present. `SourceAgents` restrictions enforce role boundaries — for example, Developer cannot emit `BUGS FOUND` (only the Tester can), and the Tester cannot emit `REVISION REQUIRED` (only the Reviewer can).
-
-**Stuck detection** is built in, but the exact mechanism depends on `Selection.Type`. With `graph`, one counter covers no-keyword, foreign-keyword, multi-keyword, and validator-failure turns together, escalating at `Selection.Graph.MaxRetries` (default 4) — alternating failure modes are caught at the same threshold since the counter doesn't reset between different failure types. With `keyword`/`statemachine`, validator/contract failures escalate independently per failure-type threshold in `FailureHandlingConfig` (default 3, or 2 for `ConflictingEvidence`), while a bare no-keyword/no-signal turn isn't covered by that counter — it gets a periodic warning every 5 consecutive same-agent turns and is otherwise bounded only by `Termination.MaxIterations`. Either way, a `ValidatorStuckException` (or, for keyword/statemachine, the relevant threshold) ends the session with a descriptive error rather than looping forever. See [Validators — Stuck detection](validators.md#stuck-detection) for the full breakdown.
+## Choosing a flow
+
+| You want | Use |
+|----------|-----|
+| A pipeline you can draw, with evidence at each handoff | Steps |
+| One agent doing a task | Steps with a single `- to: end` |
+| A model to decide who works next, round by round | `magentic` |
+| The same work done over many items | `mapreduce` |
+| Several independent opinions on one question | `scattergather` |
+| Drafts that must survive an independent critic | `adversarial`, or Steps with a critic agent and `maxRevisits` |

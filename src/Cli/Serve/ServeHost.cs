@@ -497,7 +497,7 @@ public sealed class ServeHost(
             built.Orchestrator, built.Compactor, sessionStore, approvalService,
             built.EventEmitter, telemetry, modelIdByAgent,
             devUI: null, configPath: configPath,
-            maxIterations: built.Config.Termination?.ResolveMaxIterations() ?? 0,
+            maxIterations: built.Config.MaxTurns,
             contextBudget: built.Config.ContextBudget,
             quiet: true);
 

@@ -37,8 +37,8 @@ internal static class FanOutHelpers
     /// <summary>
     /// Assembles per-agent context through the unified <see cref="IContextAssemblyPipeline"/> when
     /// one is configured (memory augmentation, ADR/knowledge retrieval, per-agent <c>Context:</c>
-    /// spec — the same treatment <c>GraphOrchestrator</c>/<c>MagenticOrchestrator</c>/
-    /// <c>AgentOrchestrator</c> give their agents), falling back to the legacy raw
+    /// spec — the same treatment <c>MagenticOrchestrator</c> and <c>AgentOrchestrator</c>
+    /// give their agents), falling back to the legacy raw
     /// instructions+history via <see cref="BuildContext"/> when the pipeline is absent.
     /// </summary>
     public static async Task<IEnumerable<ChatMessage>> AssembleContextAsync(
@@ -94,7 +94,7 @@ internal static class FanOutHelpers
     /// <summary>
     /// Extracts entity-scoped findings from a turn's tool calls and persists them to
     /// <paramref name="repositoryKnowledgeStore"/> for future session retrieval — the same
-    /// post-turn observation capture <c>GraphOrchestrator</c>/<c>MagenticOrchestrator</c> perform.
+    /// post-turn observation capture <c>AgentOrchestrator</c>/<c>MagenticOrchestrator</c> perform.
     /// Best-effort: extraction/persistence failures are swallowed so they never fail the turn.
     /// </summary>
     public static async Task PersistObservationsAsync(

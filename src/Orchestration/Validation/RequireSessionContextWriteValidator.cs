@@ -50,6 +50,6 @@ public sealed class RequireSessionContextWriteValidator : IRoutingValidator
             "not see this conversation, only what you write to session_context_write.\n\n" +
             "  1. Call session_context_write(summary: \"...\") — what you accomplished, files " +
             "changed, and anything the next agent needs to know.\n" +
-            "  2. Emit the handoff keyword in the same response."));
+            "  2. Hand off again in the same response."));
     }
 }

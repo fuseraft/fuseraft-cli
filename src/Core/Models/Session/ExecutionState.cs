@@ -54,14 +54,3 @@ public sealed record FileChangeRecord
     public string Operation { get; init; } = string.Empty;
     public DateTimeOffset Timestamp { get; init; }
 }
-
-/// <summary>
-/// Written to execution-state.json alongside ExecutionState.
-/// Orchestrator integration deferred to Phase 2 — model declared here for Phase 1.
-/// </summary>
-public sealed record AgentRoutingState
-{
-    public string CurrentOwner { get; init; } = string.Empty;
-    public int ConsecutiveHandoffs { get; init; }
-    public int LastSuccessfulTurn { get; init; } = -1;
-}

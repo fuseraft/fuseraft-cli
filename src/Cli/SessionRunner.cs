@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using AgentGovernance.Sre;
 using Spectre.Console;
+using fuseraft.Cli.Commands.Repl;
 using fuseraft.Cli.DevUI;
 using fuseraft.Cli.Display;
 using fuseraft.Cli.Telemetry;
@@ -50,7 +51,7 @@ public sealed class SessionRunner(
     Action<AgentMessage, TimeSpan>? onMessage = null)
 {
     // Session-lifetime assistant-turn counter. Only ever increments — never reset after
-    // compaction. Used solely for the MaxIterations hard cap.
+    // compaction. Used solely for the Limits.MaxTurns hard cap.
     private int _totalAssistantTurnCount;
 
     private readonly ContextBudgetManager _budgetManager = new(contextBudget, contextWindowRecorder, eventEmitter);
@@ -268,9 +269,9 @@ public sealed class SessionRunner(
                     await eventEmitter.EmitAsync(EventTypes.MaxTurnsExceeded,
                         payload: new { turns = _totalAssistantTurnCount, max = maxIterations });
                 succeeded    = false;
-                errorMessage = $"Session exceeded MaxIterations limit of {maxIterations} agent turns.";
+                errorMessage = $"Session exceeded the limits.maxTurns limit of {maxIterations} agent turns.";
                 AnsiConsole.MarkupLine(
-                    $"\n[yellow]⚠ MaxIterations ({maxIterations}) reached — session terminated.[/]\n" +
+                    $"\n[yellow]⚠ limits.maxTurns ({maxIterations}) reached — session terminated.[/]\n" +
                     $"  Resume with: [dim]{Markup.Escape(ResumeHint(checkpoint.SessionId))}[/]");
                 break;
             }
@@ -491,9 +492,9 @@ public sealed class SessionRunner(
 
             // This cycle never reaches RecordMessageAsync (no message was produced — the whole
             // agent invocation threw), so _totalAssistantTurnCount would never advance and
-            // MaxIterations could never trip, however many times this repeats. Count the cycle
+            // MaxTurns could never trip, however many times this repeats. Count the cycle
             // here instead so a config whose budget can't fit even a single compacted round trip
-            // still terminates via MaxIterations rather than retrying indefinitely.
+            // still terminates via Limits.MaxTurns rather than retrying indefinitely.
             _totalAssistantTurnCount++;
 
             return new HandlerOutcome(ShouldBreak: false, ShouldContinue: false, CompactionNeeded: true,
@@ -723,15 +724,23 @@ public sealed class SessionRunner(
         }
         else
         {
-            await AnsiConsole.Status()
-                .Spinner(OperatingSystem.IsWindows() ? Spinner.Known.Line : Spinner.Known.Dots2)
-                .SpinnerStyle(Style.Parse("dim"))
-                .StartAsync("[dim]Starting orchestration...[/]", async ctx =>
-                {
-                    compactionNeeded = await RunStreamCoreAsync(
-                        task, checkpoint, messages, turnClock, showTools,
-                        statusUpdate: s => ctx.Status(s), cancellationToken);
-                });
+            // Not Spectre's Status: a live display can't be paused, so a route or tool approval
+            // asked mid-turn would be drawn over. This spinner stops while a prompt is up.
+            var label = "Starting orchestration...";
+            using var spinCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var spinner = ReplConsole.RunSpinnerAsync(() => Volatile.Read(ref label), spinCts.Token);
+            try
+            {
+                compactionNeeded = await RunStreamCoreAsync(
+                    task, checkpoint, messages, turnClock, showTools,
+                    statusUpdate: s => Volatile.Write(ref label, Markup.Remove(s)), cancellationToken);
+            }
+            finally
+            {
+                spinCts.Cancel();
+                await spinner;
+                ReplConsole.ClearSpinnerLine();
+            }
         }
 
         return compactionNeeded;
@@ -782,6 +791,7 @@ public sealed class SessionRunner(
         {
             if (statusUpdate is not null)
             {
+                using var _ = ReplConsole.SuspendSpinner();
                 AnsiConsole.MarkupLine(
                     $"[yellow]  ⚠ {Markup.Escape(agent)} used {inputTokens:N0} input tokens this turn " +
                     $"(warning threshold: {threshold:N0}).[/]");
@@ -801,6 +811,7 @@ public sealed class SessionRunner(
             {
                 var elapsed = turnClock.Elapsed;
                 turnClock.Restart();
+                using var quiet = ReplConsole.SuspendSpinner();
 
                 // Orchestrator-injected correction messages (AgentName="Orchestrator", Role="user")
                 // are persisted to checkpoint for resume but should not update the status spinner
@@ -862,7 +873,6 @@ public sealed class SessionRunner(
         if (postmortemWriter is not null)
             try { await postmortemWriter.RecordTurnAsync(msg); } catch { }
         if (orchestrator is MagenticOrchestrator mo) checkpoint.MagenticState = mo.CurrentState;
-        if (orchestrator is GraphOrchestrator go) checkpoint.StateHistory = [..go.StateHistory];
         try
         {
             await sessionStore.SaveAsync(checkpoint, ct);

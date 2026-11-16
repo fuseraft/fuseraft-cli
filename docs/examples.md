@@ -1,1181 +1,414 @@
 ---
 title: "Examples"
-description: "Ready-to-use orchestration configs for common team structures."
+description: "Ready-to-run team files for common structures, each validated by the test suite."
 ---
 
-Ready-to-use orchestration configs for common team structures.
+Ready-to-run team files for common structures. The complete files live in [`config/examples/`](https://github.com/fuseraft/fuseraft-cli/tree/main/config/examples); the test suite loads every one of them, so they always match the current format. Copy one into `.fuseraft/config/` and edit it, or start from a template with `fuseraft init`.
+
+```bash
+fuseraft run --config config/examples/orchestration.yaml "Add pagination to the users API"
+```
 
 ---
 
 ## Software development team
 
-A four-agent pipeline (Planner → Developer → Tester → Reviewer) using state machine routing with evidence contracts, failure handling, self-verification, and lossless compaction. Copy this as a starting point for any software development task.
+**File:** `config/examples/orchestration.yaml`
 
-**Key features:**
-- `statemachine` routing — agents can only advance to the next state; signals from the wrong state are ignored
-- Evidence contracts on every forward transition — contract failures inject targeted corrections instead of a generic retry
-- `EvidenceStore` records every `write_file`, shell run, and git commit as a typed node
-- `Verifier` meta-agent runs every 5 turns and on suspicious transitions to catch hallucinated progress
-- Lossless compaction reconstructs context from the evidence graph — no LLM call at compaction time, no hallucination risk
-- `ContextWindow.TextOnly` on the Reviewer strips tool frames from its context window (90%+ token reduction)
+Planner scopes the work, Developer implements it, Tester verifies it, Reviewer approves it. Every handoff is gated on evidence on disk.
+
+- The brief and the test report are artifacts with shapes, so each agent is told exactly what to write and a malformed file is caught at the handoff.
+- The Developer can't hand off until the brief's `verify_command` ran and passed.
+- The Tester can't hand off until the report has no failures and every PASS names a command that actually ran; after two failed attempts the Developer is called in.
+- A Verifier audits claims against the change log every five turns.
 
 ```yaml
-Orchestration:
-  Name: SoftwareTeam
-  Description: >
-    Production-grade software development team. State machine routing ensures
-    agents can only advance when evidence contracts are satisfied.
-
-  EvidenceStore:
-    Path: ~/.fuseraft/state/{project_slug}/evidence.json
-
-  ChangeTracking:
-    Path: ~/.fuseraft/state/{project_slug}/changes.json
-
-  Validation:
-    BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
-    TestReportPath: .fuseraft/artifacts/test-report.json
-    ChangeLogPath: ~/.fuseraft/state/{project_slug}/changes.json
-
-  Contracts:
-    - Name: BriefExists
-      Requires:
-        - FileExists:
-            Path: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
-
-    - Name: ImplementationComplete
-      Requires:
-        - FilesWritten:
-            Source: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
-            Field: files_to_change
-        - CommandSucceeded:
-            PatternField: "verify_command"   # reads the verify command from brief.json
-
-    - Name: TestsValid
-      Requires:
-        - FileExists:
-            Path: .fuseraft/artifacts/test-report.json
-        - TestReport:
-            NoFailures: true
-            HasAssertions: true
-
-  FailureHandling:
-    MissingEvidence:
-      Action: Reinstruct
-      Threshold: 3
-    ConflictingEvidence:
-      Action: Reinstruct
-      Threshold: 2
-    NoProgress:
-      Action: Abort
-      Threshold: 3
-
-  Verifier:
-    AgentName: Verifier
-    EveryNTurns: 5
-    TriggerOnSuspiciousTransition: true
-    FindingsKeyword: INCONSISTENCY
-
-  Compaction:
-    TriggerTurnCount: 30
-    KeepRecentTurns: 8
-    Mode: lossless
-
-  Agents:
-    - Name: Planner
-      Description: Analyses the task and writes a structured brief.
-      Instructions: |
-        You are a software planner. Analyse the task and write ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json:
-          { "goal": "...", "files_to_change": [{"path": "src/a.go", "reason": "..."}], "acceptance_criteria": [...], "implementation": [{"action": "write", "path": "src/a.go", "description": "..."}] }
-        When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
-      Model:
-        ModelId: gpt-4o
-      Plugins:
-        - FileSystem
-        - Handoff
-      FunctionChoice: required
-
-    - Name: Developer
-      Description: Implements the changes described in the brief.
-      Instructions: |
-        You are a software developer. Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json and implement every
-        listed file using write_file. Run the build with shell_run to confirm it
-        compiles. When done, call handoff(route_keyword: "HANDOFF TO TESTER").
-        If you need a clearer plan, call handoff(route_keyword: "REPLAN REQUIRED").
-      Model:
-        ModelId: gpt-4o
-      Plugins:
-        - FileSystem
-        - Shell
-        - Git
-        - Changes
-        - Handoff
-      FunctionChoice: required
-
-    - Name: Tester
-      Description: Writes and runs tests, produces a structured report.
-      Instructions: |
-        You are a software tester. Write tests covering the acceptance criteria in
-        ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json. Run them with shell_run. Write results to
-        .fuseraft/artifacts/test-report.json:
-          { "passed": true, "results": [{ "name": "TestFoo", "status": "PASS" }] }
-        If tests fail, call handoff(route_keyword: "BUGS FOUND").
-        When all pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
-      Model:
-        ModelId: gpt-4o
-      Plugins:
-        - FileSystem
-        - Shell
-        - Changes
-        - Handoff
-      FunctionChoice: required
-
-    - Name: Reviewer
-      Description: Reviews implementation and test results.
-      Instructions: |
-        You are a code reviewer. Read the implementation and .fuseraft/artifacts/test-report.json.
-        If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
-        If changes are needed, call handoff(route_keyword: "REVISION REQUIRED") and
-        explain exactly what to fix.
-      Model:
-        ModelId: gpt-4o
-      Plugins:
-        - FileSystem
-        - Shell
-        - Changes
-        - Handoff
-      FunctionChoice: auto
-      ContextWindow:
-        TextOnly: true
-
-    - Name: Verifier
-      Description: Audits the evidence graph for inconsistencies.
-      Instructions: |
-        You are an evidence auditor. Detect inconsistencies between agent claims and
-        recorded evidence.
-
-        1. Call changes_read_latest to see what was actually done.
-        2. Compare recorded writes, commands, and exit codes against conversation claims.
-        3. If everything is consistent: "Evidence verified — no inconsistencies found."
-        4. If you find a discrepancy: "INCONSISTENCY DETECTED: <claimed vs evidence>"
-      Model:
-        ModelId: gpt-4o-mini
-      Plugins:
-        - Changes
-      FunctionChoice: required
-
-  Selection:
-    Type: statemachine
-    StateMachine:
-      Initial: Planning
-
-      States:
-        Planning:
-          Agent: Planner
-          Transitions:
-            - To: Implementation
-              Signal: "HANDOFF TO DEVELOPER"
-              Contract: BriefExists
-
-        Implementation:
-          Agent: Developer
-          Transitions:
-            - To: Testing
-              Signal: "HANDOFF TO TESTER"
-              Contract: ImplementationComplete
-            - To: Planning
-              Signal: "REPLAN REQUIRED"
-
-        Testing:
-          Agent: Tester
-          Transitions:
-            - To: Review
-              Signal: "HANDOFF TO REVIEWER"
-              Contract: TestsValid
-            - To: Implementation
-              Signal: "BUGS FOUND"
-
-        Review:
-          Agent: Reviewer
-          Transitions:
-            - To: Done
-              Signal: APPROVED
-            - To: Implementation
-              Signal: "REVISION REQUIRED"
-
-        Done:
-          Agent: Reviewer
-          Terminal: true
-
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: \bAPPROVED\b
-        AgentNames:
-          - Reviewer
-      - Type: maxiterations
-        MaxIterations: 60
-
-  MaxTotalTokens: 500000
+flow:
+  start: Planner
+  steps:
+    Planner:
+      - to: Developer
+        requires: [brief]
+    Developer:
+      - to: Tester
+        requires:
+          - commandSucceeded: brief.verify_command
+            fallback: build|compile|test|check
+      - to: Planner
+        when: the plan needs rethinking
+    Tester:
+      - to: Reviewer
+        when: every criterion passes
+        requires:
+          - testReport: testResults
+        onStuck: Developer
+      - to: Developer
+        when: a criterion fails
+    Reviewer:
+      - to: end
+        when: every criterion is verified
+      - to: Developer
+        when: the code or tests need fixing
+      - to: Planner
+        when: the plan is fundamentally wrong
 ```
 
-A complete runnable version of this config is in `config/examples/orchestration.yaml`.
+`config/examples/dev-team-structured.yaml` is the same team with a stricter Tester and a Reviewer that writes a structured JSON verdict. `config/examples/open-webui.yaml` runs it against an organization's Open WebUI instance.
 
 ---
 
 ## Brownfield pipeline
 
-A five-agent pipeline designed for large existing codebases where agents must understand existing conventions, limit their write surface to the task scope, and run targeted tests rather than the full suite.
+**File:** `config/examples/brownfield.yaml`
 
-**Key features:**
-- `Archaeologist` agent runs first — surveys the codebase from declared entry points, writes a discovery brief (`brief.brownfield.json`) and a convention profile (`conventions.json`)
-- `ReconComplete` contract blocks the handoff to Planning until both files exist on disk
-- Change envelope seeded automatically from the discovery brief's `in_scope_files` list — the Developer cannot write files outside that list (`[DENIED]` tool result with governance event)
-- Convention profile injected into every agent's system prompt at session startup — no re-derivation needed on subsequent runs
-- Fragility signals in the discovery brief inform the Planner and Developer to handle high-churn files conservatively
-- `TestSelector.FindRelatedCommand` guides the Tester to run only the tests covering changed files
-- State machine routing ensures agents can only advance when evidence contracts are satisfied
+For large existing codebases. An Archaeologist surveys the code once, writing a discovery brief and a convention profile; every later agent reads those instead of re-exploring. Writes outside the discovered scope are blocked, and the Developer can't hand off until the tests related to its changes pass.
 
 ```yaml
-Orchestration:
-  Name: BrownfieldPipeline
-
-  Brownfield:
-    EntryPoints:
-      - src/main.go
-    DiscoveryBriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json
-    ConventionProfilePath: ~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json
-    SeedEnvelopeFromBrief: true
-
-  TestSelector:
-    FindRelatedCommand: "go test -list . $(go list -f '{{.Dir}}' {file}) 2>/dev/null | head -40"
-    FullSuiteCommand: "go test ./..."
-
-  Security:
-    FileSystemSandboxPath: .
-
-  EvidenceStore:
-    Path: ~/.fuseraft/state/{project_slug}/evidence.json
-
-  ChangeTracking:
-    Path: ~/.fuseraft/state/{project_slug}/changes.json
-
-  Contracts:
-    - Name: ReconComplete
-      Requires:
-        - FileExists:
-            Path: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json
-        - FileExists:
-            Path: ~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json
-
-    - Name: BriefExists
-      Requires:
-        - FileExists:
-            Path: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
-
-    - Name: ImplementationComplete
-      Requires:
-        - FilesWritten:
-            Source: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
-            Field: files_to_change
-        - CommandSucceeded:
-            PatternField: "verify_command"   # reads the verify command from brief.json
-
-    - Name: TestsValid
-      Requires:
-        - FileExists:
-            Path: .fuseraft/artifacts/test-report.json
-        - TestReport:
-            NoFailures: true
-            HasAssertions: true
-
-  Selection:
-    Type: statemachine
-    StateMachine:
-      Initial: Recon
-      States:
-        Recon:
-          Agent: Archaeologist
-          Transitions:
-            - To: Planning
-              Signal: "RECON COMPLETE"
-              Contract: ReconComplete
-        Planning:
-          Agent: Planner
-          Transitions:
-            - To: Implementation
-              Signal: "HANDOFF TO DEVELOPER"
-              Contract: BriefExists
-        Implementation:
-          Agent: Developer
-          Transitions:
-            - To: Testing
-              Signal: "HANDOFF TO TESTER"
-              Contract: ImplementationComplete
-            - To: Planning
-              Signal: "REPLAN REQUIRED"
-        Testing:
-          Agent: Tester
-          Transitions:
-            - To: Review
-              Signal: "HANDOFF TO REVIEWER"
-              Contract: TestsValid
-              RecoveryAgent: Developer
-            - To: Implementation
-              Signal: "BUGS FOUND"
-        Review:
-          Agent: Reviewer
-          Transitions:
-            - To: Done
-              Signal: APPROVED
-            - To: Implementation
-              Signal: "REVISION REQUIRED"
-            - To: Planning
-              Signal: "REPLAN REQUIRED"
-        Done:
-          Agent: Reviewer
-          Terminal: true
-
-  Termination:
-    Type: composite
-    MaxIterations: 50
-    Strategies:
-      - Type: regex
-        Pattern: "(?m)^\\s*APPROVED\\s*$"
-        AgentNames:
-          - Reviewer
+    Developer:
+      - to: Tester
+        requires:
+          - filesWritten: brief.files_to_change
+          - commandSucceeded: brief.verify_command
+          - relatedTestsPass
 ```
 
-A complete runnable version with full agent instructions (including the Archaeologist's step-by-step recon procedure) is in `config/examples/brownfield.yaml`.
-
-**How the envelope is enforced**
-
-On the first run, the Archaeologist writes `brief.brownfield.json` containing `in_scope_files`. On every subsequent run (and after the first recon completes), the orchestrator reads that file at startup and merges `in_scope_files` into `Security.ChangeEnvelope`. The `SandboxEnforcementFilter` then blocks any `write_file`, `patch_file`, or `delete_file` call that does not match the envelope globs:
-
-```
-[DENIED] Path 'src/auth/token.go' is outside the configured change envelope.
-Only files matching the declared envelope globs may be written in this session.
-Ask the Planner to expand the scope if this file needs to change.
-```
-
-The Developer's instructions direct it to call `REPLAN REQUIRED` when this happens, routing back to the Planner to formally expand the scope.
-
-**How the convention profile is injected**
-
-Once `conventions.json` exists (written by the Archaeologist), the orchestrator formats it into a `PROJECT CONVENTIONS` block and appends it to every agent's system prompt:
-
-```
-PROJECT CONVENTIONS (detected by Archaeologist — follow these in all code you write):
-  Language/ecosystem: go
-  Build command: go build ./...
-  Test command:  go test ./...
-  Naming:       test files match *_test.go
-  Error handling: wrap errors with fmt.Errorf("%w", err)
-  Forbidden:    no panic() outside main
-  Tests:        table-driven tests with testify/require
-```
+See [Brownfield mode](configuration.md#brownfield-mode).
 
 ---
 
-## Single agent (minimal)
+## Single agent
 
-A single agent with filesystem access — good for quick tasks or as a starting point.
+The smallest useful team: one agent that finishes when the task is done.
 
 ```yaml
-Orchestration:
-  Name: Assistant
-  Agents:
-    - Name: Assistant
-      Instructions: >-
-        You are a helpful software assistant. Use the tools available to read and write
-        files, run shell commands, and complete the user's task. When you are done,
-        say TASK COMPLETE.
-      Model:
-        ModelId: gpt-4o
-      Plugins:
-        - FileSystem
-        - Shell
-        - Search
-      FunctionChoice: auto
-  Selection:
-    Type: sequential
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: TASK COMPLETE
-      - Type: maxiterations
-        MaxIterations: 20
-  MaxTotalTokens: 100000
+team: Solo
+agents:
+  Assistant:
+    tools: [FileSystem, Shell]
+    instructions: |
+      You are a careful assistant. Break the task into steps and complete them.
+      If an action fails, try a different approach instead of repeating it.
+flow:
+  start: Assistant
+  steps:
+    Assistant:
+      - to: end
+limits:
+  maxTurns: 20
 ```
 
 ---
 
 ## Research team
 
-Two agents: a Researcher who gathers information via web requests and a Writer who synthesises it into a document. The `ResearchComplete` contract ensures the Researcher writes structured findings to disk before handing off — the Writer cannot start from an empty context.
+**File:** `config/examples/research-team.yaml`
+
+A Researcher gathers sources and writes structured findings to disk; a Writer turns them into a report. The Writer can't start until the findings exist.
+
+---
+
+## Review loop with shaped artifacts
+
+**File:** `config/examples/article-review-pipeline.yaml`
+
+A Writer drafts, an Editor approves or sends it back, a Publisher saves the result. The draft and the review are artifacts with shapes, so a handoff is blocked until each file parses into the expected fields, and the Editor's verdict can only be `approved` or `revision_needed`.
 
 ```yaml
-Orchestration:
-  Name: ResearchTeam
+artifacts:
+  draft:
+    path: .fuseraft/artifacts/draft.json
+    shape: { title: string, content: string, word_count: int }
+  review:
+    path: .fuseraft/artifacts/review.json
+    shape: { verdict: approved|revision_needed, feedback: string }
 
-  EvidenceStore:
-    Path: ~/.fuseraft/state/{project_slug}/evidence.json
-
-  Contracts:
-    - Name: ResearchComplete
-      Requires:
-        - FileExists:
-            Path: .fuseraft/research-findings.md
-
-  Agents:
-    - Name: Researcher
-      Description: Gathers information from the web and structures findings.
-      Instructions: |
-        You are a research assistant. Use http_get to fetch content from provided URLs.
-        Summarise your findings in structured form and write them to
-        .fuseraft/research-findings.md. When done, call handoff(route_keyword: "HANDOFF TO WRITER").
-      Model:
-        ModelId: gpt-4o
-      Plugins:
-        - Http
-        - Json
-        - FileSystem
-        - Handoff
-      FunctionChoice: required
-
-    - Name: Writer
-      Description: Synthesises research into a polished document.
-      Instructions: |
-        You are a technical writer. Read .fuseraft/research-findings.md and write a
-        clear, well-structured document. Save the final document using write_file.
-        When done, call handoff(route_keyword: "DOCUMENT COMPLETE").
-      Model:
-        ModelId: gpt-4o
-      Plugins:
-        - FileSystem
-        - Handoff
-      FunctionChoice: required
-
-  Selection:
-    Type: statemachine
-    StateMachine:
-      Initial: Research
-      States:
-        Research:
-          Agent: Researcher
-          Transitions:
-            - To: Writing
-              Signal: "HANDOFF TO WRITER"
-              Contract: ResearchComplete
-
-        Writing:
-          Agent: Writer
-          Transitions:
-            - To: Done
-              Signal: "DOCUMENT COMPLETE"
-
-        Done:
-          Agent: Writer
-          Terminal: true
-
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: DOCUMENT COMPLETE
-        AgentNames:
-          - Writer
-      - Type: maxiterations
-        MaxIterations: 15
-
-  MaxTotalTokens: 150000
+flow:
+  start: Writer
+  steps:
+    Writer:
+      - to: Editor
+        requires: [draft]
+    Editor:
+      - to: Publisher
+        when: the verdict is approved
+        requires: [review]
+      - to: Writer
+        when: the verdict is revision_needed
+        requires: [review]
+    Publisher:
+      - to: end
+        requires:
+          - fileExists: output/article.md
 ```
 
 ---
 
-## Local model team (Ollama)
+## Local models (Ollama)
 
-Two agents running entirely on local models via Ollama. No API keys required.
+Two agents running entirely on local models. No API keys required.
 
 ```yaml
-Orchestration:
-  Name: LocalTeam
-  Models:
-    local-fast:
-      ModelId: llama3.2
-      MaxTokens: 4096
-    local-coder:
-      ModelId: qwen2.5-coder:7b
-      MaxTokens: 8192
-  Agents:
-    - Name: Planner
-      Instructions: >-
-        You are a planner. Analyse the task and write a clear plan with numbered steps.
-        When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
-      Model:
-        ModelId: local-fast
-      Plugins:
-        - Handoff
-      FunctionChoice: auto
-    - Name: Developer
-      Instructions: >-
-        You are a developer. Follow the plan provided and implement the changes using
-        the tools available. When done, call handoff(route_keyword: "TASK COMPLETE").
-      Model:
-        ModelId: local-coder
-      Plugins:
-        - FileSystem
-        - Shell
-        - Handoff
-      FunctionChoice: auto
-  Selection:
-    Type: keyword
-    DefaultAgent: Planner
-    Routes:
-      - Keyword: "HANDOFF TO DEVELOPER"
-        Agent: Developer
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: TASK COMPLETE
-      - Type: maxiterations
-        MaxIterations: 20
+team: LocalTeam
+models:
+  planner: { modelId: "llama3.2", maxTokens: 4096 }
+  coder:   { modelId: "qwen2.5-coder:7b", maxTokens: 8192 }
+agents:
+  Planner:
+    model: planner
+    instructions: Analyse the task and write a clear plan with numbered steps.
+  Developer:
+    model: coder
+    tools: [FileSystem, Shell]
+    instructions: Follow the plan from the Planner and implement it with the tools available.
+flow:
+  start: Planner
+  steps:
+    Planner:
+      - to: Developer
+    Developer:
+      - to: end
+limits:
+  maxTurns: 20
 ```
+
+The plan travels in the Planner's `handoff` goal. For more structure, declare a plan artifact and gate on it.
 
 ---
 
-## Mixed provider team
+## Mixed providers
 
-Different agents use different providers: GPT-4o for planning, Claude for implementation, a local Llama for review. State machine routing with contracts gates each handoff — the Developer cannot hand off until a build or test command succeeds, and the plan must exist on disk before work begins.
+Different agents on different providers: one model for planning, another for implementation, a local one for review.
 
 ```yaml
-Orchestration:
-  Name: MixedProviderTeam
-
-  Models:
-    planner-model:
-      ModelId: gpt-4o
-      MaxTokens: 4096
-    coder-model:
-      ModelId: claude-sonnet-4-6
-      MaxTokens: 16384
-    reviewer-model:
-      ModelId: llama3.2
-      MaxTokens: 4096
-
-  EvidenceStore:
-    Path: ~/.fuseraft/state/{project_slug}/evidence.json
-
-  Contracts:
-    - Name: PlanExists
-      Requires:
-        - FileExists:
-            Path: .fuseraft/plan.md
-
-    - Name: ImplementationComplete
-      Requires:
-        - CommandSucceeded:
-            Pattern: "build|compile|test|make"   # use PatternField: "verify_command" when a brief is available
-
-  FailureHandling:
-    MissingEvidence:
-      Action: Reinstruct
-      Threshold: 3
-    ConflictingEvidence:
-      Action: Reinstruct
-      Threshold: 2
-
-  Agents:
-    - Name: Planner
-      Instructions: |
-        Analyse the task and write a plan to .fuseraft/plan.md with numbered steps
-        and a list of files to change. When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
-      Model:
-        ModelId: planner-model
-      Plugins:
-        - FileSystem
-        - Search
-        - Handoff
-      FunctionChoice: required
-
-    - Name: Developer
-      Instructions: |
-        Read .fuseraft/plan.md and implement the changes. Run a build or test command
-        to verify your work. When done, call handoff(route_keyword: "HANDOFF TO REVIEWER").
-        If the plan is unclear, call handoff(route_keyword: "REPLAN REQUIRED").
-      Model:
-        ModelId: coder-model
-      Plugins:
-        - FileSystem
-        - Shell
-        - Git
-        - Handoff
-      FunctionChoice: required
-
-    - Name: Reviewer
-      Instructions: |
-        Review the implementation. If it meets requirements, call handoff(route_keyword: "APPROVED").
-        If not, call handoff(route_keyword: "REVISION REQUIRED") and describe what to fix.
-      Model:
-        ModelId: reviewer-model
-      Plugins:
-        - FileSystem
-        - Handoff
-      FunctionChoice: auto
-      ContextWindow:
-        TextOnly: true
-
-  Selection:
-    Type: statemachine
-    StateMachine:
-      Initial: Planning
-
-      States:
-        Planning:
-          Agent: Planner
-          Transitions:
-            - To: Implementation
-              Signal: "HANDOFF TO DEVELOPER"
-              Contract: PlanExists
-
-        Implementation:
-          Agent: Developer
-          Transitions:
-            - To: Review
-              Signal: "HANDOFF TO REVIEWER"
-              Contract: ImplementationComplete
-            - To: Planning
-              Signal: "REPLAN REQUIRED"
-
-        Review:
-          Agent: Reviewer
-          Transitions:
-            - To: Done
-              Signal: APPROVED
-            - To: Implementation
-              Signal: "REVISION REQUIRED"
-
-        Done:
-          Agent: Reviewer
-          Terminal: true
-
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: \bAPPROVED\b
-        AgentNames:
-          - Reviewer
-      - Type: maxiterations
-        MaxIterations: 30
-
-  MaxTotalTokens: 200000
+team: MixedProviderTeam
+models:
+  planner:  { modelId: gpt-4o, apiKeyEnvVar: OPENAI_API_KEY }
+  builder:  { modelId: claude-sonnet-4-6, apiKeyEnvVar: ANTHROPIC_API_KEY }
+  reviewer: { modelId: "llama3.1:70b" }
+artifacts:
+  brief:
+    path: .fuseraft/artifacts/brief.json
+    shape: { goal: string, files_to_change: [string], verify_command: string }
+agents:
+  Planner:  { model: planner,  tools: [FileSystem, Search], writes: [brief], instructions: Scope the task and write the brief. }
+  Developer: { model: builder, tools: [FileSystem, Shell, Git], reads: [brief], instructions: Implement the brief and run its verify_command. }
+  Reviewer: { model: reviewer, tools: [FileSystem, Changes], reads: [brief], instructions: Review the change against the brief. }
+flow:
+  start: Planner
+  steps:
+    Planner:
+      - to: Developer
+        requires: [brief]
+    Developer:
+      - to: Reviewer
+        requires:
+          - commandSucceeded: brief.verify_command
+    Reviewer:
+      - to: end
+        when: the change is correct
+      - to: Developer
+        when: the change needs fixing
 ```
+
+See [Models](models.md) for providers and endpoints.
 
 ---
 
 ## Magentic team
 
-A manager LLM plans the work and coordinates a Researcher and Developer dynamically each round. No routing keywords or conditions needed — the manager reasons about what has been done and picks the right agent next.
+**File:** `config/examples/magentic-team.yaml`
 
-A complete version of this config is in `config/examples/magentic-team.yaml`.
-
-**Key features:**
-- Manager LLM drives a two-level loop: orientation (once) then per-round ledger evaluation + speaker selection
-- Participant agents need no special routing keywords — they just do the work
-- Built-in stall detection: if `MaxStallCount` consecutive rounds make no progress, the manager replans
-- `Termination` section is ignored; session end is controlled by `MaxRoundCount`, `MaxStallCount`, and `MaxResetCount`
-- Named model aliases let you assign a stronger reasoning model to the manager and a faster model to workers
+A manager model plans the work and picks who works each round, replanning when progress stalls. Agents just do the work; there are no routes to declare.
 
 ```yaml
-Orchestration:
-  Name: Magentic Team
-  Description: >
-    AI-managed team orchestrated by Magentic. A manager LLM plans the work,
-    dynamically selects participants each round, and replans if progress stalls.
-
-  Models:
-    manager:
-      ModelId: gpt-4o          # upgrade to o3 or claude-opus-4-6 for complex tasks
-    worker:
-      ModelId: gpt-4o-mini
-
-  Agents:
-    - Name: Researcher
-      Description: Gathers information, searches, and produces sourced summaries.
-      Instructions: |
-        You are a Researcher. Find information, analyse it, and produce well-sourced
-        summaries. Use your tools to search and read content. Be thorough but concise.
-      Model:
-        ModelId: worker
-      Plugins:
-        - FileSystem
-        - Search
-        - Scratchpad
-
-    - Name: Developer
-      Description: Writes code, implements features, runs tests, and fixes bugs.
-      Instructions: |
-        You are a Developer. Write clean, working code that solves the problem.
-        Implement what is asked, verify with shell_run, and report results accurately.
-      Model:
-        ModelId: worker
-      Plugins:
-        - FileSystem
-        - Shell
-        - Git
-        - Scratchpad
-
-  Selection:
-    Type: magentic
-    Magentic:
-      Model:
-        ModelId: manager
-      MaxRoundCount: 20
-      MaxStallCount: 3
-      MaxResetCount: 2
-      EnablePlanReview: false
-
-  # NOTE: Termination is ignored for Selection.Type 'magentic'.
-  Termination:
-    Type: maxiterations
-    MaxIterations: 50
-
-  Compaction:
-    TriggerTurnCount: 50
-    KeepRecentTurns: 10
-
-  Checkpoint:
-    Mode: json
-    Path: .fuseraft/checkpoints
+flow:
+  pattern: magentic
+  model: manager
+  maxRoundCount: 20
+  maxStallCount: 3
+  maxResetCount: 2
 ```
 
-`fuseraft init --template magentic` generates a fuller version of this config, with five workers (Researcher, Planner, Developer, Tester, Critic).
+See [Flows → magentic](strategies.md#magentic).
 
 ---
 
 ## With MCP tools
 
-Adding an MCP server that provides browser automation tools alongside built-in plugins:
+An MCP server's tools, listed under `tools` by the server's name:
 
 ```yaml
-Orchestration:
-  Name: WebAgent
-  McpServers:
-    - Name: Browser
-      Transport: stdio
-      Command: npx
-      Args:
-        - "-y"
-        - "@modelcontextprotocol/server-puppeteer"
-  Agents:
-    - Name: WebScraper
-      Instructions: >-
-        You are a web scraping agent. Use the browser tools to navigate pages, extract
-        data, and save it to files. When done, say TASK COMPLETE.
-      Model:
-        ModelId: gpt-4o
-      Plugins:
-        - Browser
-        - FileSystem
-        - Json
-      FunctionChoice: auto
-  Selection:
-    Type: sequential
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: TASK COMPLETE
-      - Type: maxiterations
-        MaxIterations: 15
+team: WebAgent
+mcpServers:
+  - name: Browser
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-puppeteer"]
+agents:
+  WebScraper:
+    tools: [Browser, FileSystem, Json]
+    instructions: Navigate the pages in the task, extract the data, and save it to files.
+flow:
+  start: WebScraper
+  steps:
+    WebScraper:
+      - to: end
+limits:
+  maxTurns: 15
 ```
+
+`config/examples/playwright-mcp.yaml` drives a browser through the Playwright MCP server, and `config/examples/production-mcp-http.yaml` connects to an authenticated remote MCP server over HTTP. See [MCP](mcp.md).
 
 ---
 
-## With sandbox and cost cap
+## With a sandbox and a cost cap
 
-A config safe to run on untrusted tasks — file access restricted to a specific project, HTTP limited to known hosts, and a hard cost cap:
+Safe for untrusted tasks: file access restricted to one project, HTTP limited to known hosts, and a hard token cap.
 
 ```yaml
-Orchestration:
-  Name: SafeTeam
-  Agents: [ ... ]
-  Selection: { ... }
-  Termination: { ... }
-  Security:
-    FileSystemSandboxPath: /home/user/projects/sandboxed-project
-    HttpAllowedHosts:
-      - api.github.com
-      - pypi.org
-  MaxTotalTokens: 50000
+limits:
+  maxTurns: 30
+  maxTokens: 50000
+security:
+  fileSystemSandboxPath: /home/user/projects/sandboxed-project
+  httpAllowedHosts: [api.github.com, pypi.org]
 ```
 
 ---
 
 ## With compaction for long tasks
 
-For tasks that may run for many turns (e.g. large refactors, multi-file migrations). `hybrid` mode combines a deterministic evidence reconstruction with an LLM narrative summary — agents get authoritative ground-truth plus the narrative context of what happened.
+For tasks that run many turns, such as large refactors or migrations. `hybrid` mode combines a deterministic reconstruction from the evidence graph with an LLM narrative.
 
 ```yaml
-Orchestration:
-  Name: LongRunningTeam
-
-  EvidenceStore:
-    Path: ~/.fuseraft/state/{project_slug}/evidence.json
-
-  ChangeTracking:
-    Path: ~/.fuseraft/state/{project_slug}/changes.json
-
-  Compaction:
-    TriggerTurnCount: 40
-    KeepRecentTurns: 10
-    Mode: hybrid          # lossless reconstruction + LLM narrative
-
-  Agents: [ ... ]
-  Selection: { ... }
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: \bAPPROVED\b
-      - Type: maxiterations
-        MaxIterations: 100
+limits:
+  maxTurns: 100
+advanced:
+  compaction:
+    triggerTurnCount: 40
+    keepRecentTurns: 10
+    mode: hybrid
 ```
-
-**Choosing a compaction mode:**
 
 | Mode | When to use |
 |------|-------------|
-| `lossless` | `statemachine` + `EvidenceStore` configured. No LLM call at compaction time — state position and contract status are reconstructed verbatim from disk. |
-| `hybrid` | Same requirements as `lossless`, but also adds an LLM narrative. Agents get both authoritative facts and the story of what happened. |
-| `llm` | Any routing strategy. An LLM summarises the compacted turns. Falls back from `lossless`/`hybrid` automatically when no state machine is active. |
-
-When 40 messages have accumulated, the orchestrator compacts the oldest 30 turns into a single context message and continues with the 10 most recent turns verbatim. This can run indefinitely without hitting context limits.
+| `lossless` | Steps flows. No LLM call; the current step and gate status are rebuilt from disk. |
+| `hybrid` | Steps flows that also benefit from a narrative of what happened. |
+| `llm` | Any flow. An LLM summarizes the compacted turns. |
 
 ---
 
-## Structured routing — content review pipeline
+## Remote agent (A2A)
 
-Three agents use JSON output instead of routing keywords. The Reviewer returns `{"review_result": "Yes"}` or `{"review_result": "No"}` and the orchestrator routes based on that field value, with no keyword scanning involved.
+Two local agents work with a reviewer hosted as an independent A2A service. A remote agent hands off by writing a route name on its own line; fuseraft tells it which ones it has.
 
 ```yaml
-Orchestration:
-  Name: ContentPipeline
-  Agents:
-    - Name: Drafter
-      Instructions: >-
-        Write a draft based on the user's request. Return your response as a JSON
-        object: {"draft_content": "<your draft here>"}. Your entire response must
-        be valid JSON.
-      Model:
-        ModelId: gpt-4o
-      FunctionChoice: none
-    - Name: Reviewer
-      Instructions: >-
-        Review the draft in the conversation. Check that it is accurate and
-        well-written. Return your decision as a JSON object:
-        {"review_result": "Yes", "reason": "<explanation>"} if acceptable, or
-        {"review_result": "No", "reason": "<what to fix>"} if it needs revision.
-        Your entire response must be valid JSON.
-      Model:
-        ModelId: gpt-4o
-      FunctionChoice: none
-    - Name: Publisher
-      Instructions: >-
-        The draft has been approved. Format it as a final polished document and
-        print it. End your response with the word PUBLISHED on its own line.
-      Model:
-        ModelId: gpt-4o
-      FunctionChoice: none
-  Selection:
-    Type: structured
-    DefaultAgent: Drafter
-    StructuredRoutes:
-      - Agent: Reviewer
-        Condition:
-          Field: draft_content
-          Exists: true
-        SourceAgents:
-          - Drafter
-      - Agent: Publisher
-        Condition:
-          Field: review_result
-          Is: "Yes"
-        SourceAgents:
-          - Reviewer
-      - Agent: Drafter
-        Condition:
-          Field: review_result
-          Is: "No"
-        SourceAgents:
-          - Reviewer
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: PUBLISHED
-        AgentNames:
-          - Publisher
-      - Type: maxiterations
-        MaxIterations: 15
-  MaxTotalTokens: 100000
+team: FederatedReview
+agents:
+  Planner:
+    model: { modelId: gpt-4o-mini }
+    instructions: Break the task into clear steps for the Developer.
+  Developer:
+    model: { modelId: gpt-4o-mini }
+    tools: [FileSystem, Shell, Git]
+    instructions: Implement what the Planner specifies.
+  Reviewer:
+    instructions: Assess correctness, security and style. List specific changes if any are needed.
+    remoteAgent:
+      url: https://reviewer.internal
+      timeoutSeconds: 90
+flow:
+  start: Planner
+  steps:
+    Planner:
+      - to: Developer
+    Developer:
+      - to: Reviewer
+    Reviewer:
+      - to: end
+        when: the work is acceptable
+      - to: Developer
+        when: changes are needed
 ```
 
-**Key differences from keyword routing:**
-- Agents return JSON objects — routing happens on field values, not on specific text appearing in the response
-- No `APPROVED`/`REVISION REQUIRED` style keywords needed
-- Session end is handled by the `Termination` regex strategy rather than a self-routing route
-- The `--diagram` flag renders conditions as edge labels: `review_result = Yes`, `draft_content exists`
+The remote side can be another fuseraft team served with `fuseraft serve --a2a`. See [`remoteAgent`](configuration.md#remoteagent).
 
 ---
 
-## Remote agent (A2A federation)
+## Scatter-gather: multi-expert review
 
-Two local agents collaborate with a third agent hosted at a remote A2A endpoint. The remote agent participates identically to local agents — it receives conversation history, is selected by the routing strategy, and its replies are added to the shared history.
-
-**Key features:**
-- `RemoteAgent.Url` points to the base URL of the remote A2A service; the agent card is fetched from `{Url}/.well-known/agent-card.json` at session startup
-- `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored for remote agents — those are properties of the remote service
-- `Instructions`, `TrustScore`, and `ContextWindow` still apply: instructions are prepended to each call, trust score governs the governance ring assignment, and the context window filter controls what history the remote agent sees
-- `TimeoutSeconds` defaults to 120; increase it for remote agents with long turn times
+Three reviewers assess the same document independently and in parallel; a lead combines their findings.
 
 ```yaml
-Orchestration:
-  Name: Federated Review Team
-  Description: >
-    Local planner and developer hand off to a remote specialist reviewer
-    hosted as an independent A2A service.
-
-  Agents:
-    - Name: Planner
-      Instructions: |
-        You are a Planner. Break the task into clear steps and delegate
-        implementation to the Developer. When development is complete, route
-        to the Reviewer with: REVIEWER please review.
-      Model:
-        ModelId: gpt-4o-mini
-      Plugins:
-        - Scratchpad
-
-    - Name: Developer
-      Instructions: |
-        You are a Developer. Implement what the Planner specifies. When done,
-        reply: REVIEWER please review.
-      Model:
-        ModelId: gpt-4o-mini
-      FunctionChoice: required
-      Plugins:
-        - FileSystem
-        - Shell
-        - Git
-
-    - Name: Reviewer
-      Instructions: |
-        You are a code reviewer. Assess correctness, security, and style.
-        If the work is acceptable reply: DONE. Otherwise reply: REVISION REQUIRED
-        and list specific changes.
-      TrustScore: 0.65
-      RemoteAgent:
-        Url: https://reviewer.internal
-        TimeoutSeconds: 90
-
-  Selection:
-    Type: keyword
-    Routes:
-      - From: ["*"]
-        Keyword: "REVIEWER"
-        To: Reviewer
-      - From: ["*"]
-        Keyword: "REVISION REQUIRED"
-        To: Developer
-
-  Termination:
-    Type: keyword
-    Keyword: "^DONE$"
+team: ExpertReview
+agents:
+  LegalReviewer:     { tools: [FileSystem], instructions: Review the document for legal risk. }
+  TechnicalReviewer: { tools: [FileSystem], instructions: Review the document for technical accuracy. }
+  BusinessReviewer:  { tools: [FileSystem], instructions: Review the document for business impact. }
+  LeadReviewer:      { instructions: "Combine the three reviews into one verdict, noting disagreements." }
+flow:
+  pattern: scattergather
+  participants: [LegalReviewer, TechnicalReviewer, BusinessReviewer]
+  synthesizer: LeadReviewer
 ```
 
 ---
 
-## Scatter-gather — multi-expert review
+## Map-reduce: parallel document analysis
 
-Three specialist reviewers each assess the same document independently in parallel; a lead reviewer synthesises their findings into a single verdict. No routing keywords or shared context between reviewers — each produces an independent evaluation.
-
-**Key features:**
-- All participants receive the same task simultaneously in isolated history snapshots
-- Participants are different agents with different specialisms — diversity is the point
-- Synthesizer receives all labeled outputs and produces the final answer
-- `MaxConcurrency: 0` means all three run at the same time (unbounded parallelism)
+A splitter lists the documents, a mapper analyses each in parallel, a reducer writes the summary.
 
 ```yaml
-Orchestration:
-  Name: Multi-Expert Review
-  Description: >
-    Three specialist reviewers independently assess the same document.
-    A lead reviewer synthesises their findings into a unified verdict.
-
-  Agents:
-    - Name: LegalReviewer
-      Instructions: |
-        You are a legal reviewer. Assess the document for regulatory compliance,
-        liability exposure, and contractual risk. Be specific and cite exact clauses.
-        End your review with a clear APPROVE or REJECT verdict.
-
-    - Name: TechnicalReviewer
-      Instructions: |
-        You are a technical reviewer. Assess the document for technical accuracy,
-        feasibility, and implementation risk. Flag any unrealistic claims or
-        missing technical detail. End with APPROVE or REJECT.
-
-    - Name: BusinessReviewer
-      Instructions: |
-        You are a business reviewer. Assess the document for market viability,
-        commercial risk, and strategic alignment. End with APPROVE or REJECT.
-
-    - Name: LeadReviewer
-      Instructions: |
-        You are the lead reviewer. You will receive independent evaluations from
-        Legal, Technical, and Business reviewers. Synthesise their findings into
-        a single coherent verdict. Highlight consensus, note disagreements, and
-        provide a final recommendation with your reasoning.
-
-  Selection:
-    Type: scattergather
-    ScatterGather:
-      Participants:
-        - LegalReviewer
-        - TechnicalReviewer
-        - BusinessReviewer
-      Synthesizer: LeadReviewer
-      MaxConcurrency: 0    # all three run simultaneously
-```
-
----
-
-## Map-reduce — parallel document analysis
-
-A Planner breaks the task into a list of documents to analyse; an Analyst processes each document independently in parallel; a Synthesizer combines the findings into a final report.
-
-**Key features:**
-- Splitter emits a JSON object with an array at `ItemsJsonPath`; retried automatically on parse failure
-- Mapper is invoked once per item with an isolated context — no cross-item visibility
-- `MaxConcurrency: 4` caps parallel mapper calls to avoid rate limits
-- Reducer receives all mapper outputs and produces the terminal report
-
-```yaml
-Orchestration:
-  Name: Document Analysis Pipeline
-  Description: >
-    Decomposes a document set into individual files, analyses each in parallel,
-    then synthesises findings into a unified report.
-
-  Agents:
-    - Name: Planner
-      Instructions: |
-        You are a task planner. Given a description of documents to analyse,
-        produce a JSON object listing each document path as a separate work item.
-        Respond with ONLY valid JSON. Example:
-        {"documents": ["path/to/doc1.md", "path/to/doc2.md", "path/to/doc3.md"]}
-      Plugins:
-        - FileSystem
-
-    - Name: Analyst
-      Instructions: |
-        You are a document analyst. You will be given one document to analyse.
-        Read the document, identify key themes, risks, and recommendations.
-        Produce a concise structured analysis.
-      Plugins:
-        - FileSystem
-
-    - Name: Synthesizer
-      Instructions: |
-        You are a synthesis agent. You will receive individual analyses of multiple
-        documents. Produce a unified report that identifies cross-cutting themes,
-        aggregates risks, and provides consolidated recommendations.
-
-  Selection:
-    Type: mapreduce
-    MapReduce:
-      Splitter: Planner
-      Mapper: Analyst
-      Reducer: Synthesizer
-      ItemsJsonPath: documents   # path to the array in the Planner's JSON response
-      MaxConcurrency: 4
-      MaxSplitterRetries: 3
+team: DocAnalysis
+agents:
+  Splitter:
+    tools: [FileSystem]
+    instructions: 'List the documents to analyse. Reply with only {"items": ["path1", "path2"]}.'
+  Mapper:
+    tools: [FileSystem, Document]
+    instructions: Analyse the one document named in your task and report its key findings.
+  Reducer:
+    instructions: Combine the findings into one summary with the most important points first.
+flow:
+  pattern: mapreduce
+  splitter: Splitter
+  mapper: Mapper
+  reducer: Reducer
+  maxConcurrency: 4
 ```
 
 ---
 
 ## Event-driven ETL pipeline
 
-Two agents run at most once each — a linear pipeline, not an open-ended chat. Extractor reads and validates raw input; Transformer normalizes it, writes the result, and files a PASS/FAIL acceptance-criteria report. `Output.Json: true` means every invocation reports a single structured result instead of interactive output, and `ChangeEnvelope` restricts writes to the output directory since this is meant to run unattended, triggered by an external event rather than a person.
+**File:** `config/examples/etl-pipeline.yaml`
 
-```yaml
-Orchestration:
-  Name: EtlPipeline
-
-  Output:
-    Json: true
-
-  Selection:
-    Type: sequential
-
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: "PIPELINE_COMPLETE"
-      - Type: maxiterations
-        MaxIterations: 4
-
-  Validation:
-    TestReportPath: .fuseraft/artifacts/test-report.json
-
-  Security:
-    FileSystemSandboxPath: .
-    ChangeEnvelope:
-      - "output/**"
-      - ".fuseraft/artifacts/**"
-
-  Agents:
-    - Name: Extractor      # reads + validates input, never writes
-      Plugins: [FileSystem]
-      Capabilities:
-        FileSystem: [read]
-
-    - Name: Transformer     # normalizes, writes output, files the test report
-      Plugins: [FileSystem]
-```
-
-The full config (with complete agent instructions) is at `config/examples/etl-pipeline.yaml`, with bash and Python wrapper scripts in `scripts/` that build a task from an input/output path pair, invoke `fuseraft run --json --ci`, and exit with fuseraft's own exit code. See [Scripting & Automation](scripting.md) for the full walkthrough — the `--json` contract, wiring this to a webhook/queue/cron trigger, and using the Python wrapper as an importable library function.
+An Extractor validates raw input and a Transformer writes the output plus a machine-checkable test report, for runs started by a script, cron or webhook. `advanced.output.json` prints one JSON summary per run, and `--ci` exits non-zero on any FAIL in the report. See [Scripting & Automation](scripting.md).
 
 ---
 
-## Orchestration designer
+## Cross-system flow analysis
 
-A single-agent orchestration that helps you design, write, and validate fuseraft configs interactively. Describe your use case in plain language and the Designer generates a ready-to-run YAML config, writes it to disk, and runs `fuseraft validate` to confirm it is correct.
+**File:** `config/examples/cross-system-flow-analyzer.yaml`
 
+Seven specialists trace data across code, SQL, APIs and documents, then synthesize and diagram the result, ending with an output validator. A long linear flow on two model aliases (`heavy`, `scout`) with a context budget and intent-based compaction.
+
+---
+
+## DevOps team
+
+**File:** `config/examples/devops-team.yaml`
+
+Architect plans, Engineer implements and validates with real shell commands, Operator deploys or sends the work back.
+
+---
+
+## Team designer
+
+**File:** `config/examples/fuseraft-designer.yaml`
+
+A single agent that designs a team file for your use case, writes it and runs `fuseraft validate` until it passes.
+
+```bash
+fuseraft run -c config/examples/fuseraft-designer.yaml "a team that triages GitHub issues and drafts fixes"
 ```
-fuseraft run -c config/examples/fuseraft-designer.yaml "I need a two-agent pipeline: a Researcher that searches the web and a Writer that turns findings into a report."
-```
-
-**What the Designer knows:**
-- When to use each orchestrator type (`statemachine`, `magentic`, `roundrobin`, `keyword`, `llm`, …)
-- All plugins and their capabilities
-- All agent fields including `RemoteAgent` for A2A federation
-- Evidence contracts and failure handling patterns
-- Common agent role patterns (Planner, Developer, Tester, Reviewer, Researcher, Writer)
-
-**Key features:**
-- States its assumptions when the use case is ambiguous, rather than stopping to ask
-- Writes the config to the path you specify, defaults to `.fuseraft/config/orchestration.yaml`
-- Runs `fuseraft validate <path>` after every write — you never get a broken config
-- Keeps going until the config validates, then ends with `CONFIG_READY`
-- To iterate, run it again with a follow-up task: "add a Reviewer to .fuseraft/config/orchestration.yaml"
-
-The config lives at `config/examples/fuseraft-designer.yaml`; it isn't one of the `fuseraft init` templates, so copy it into your project to use it outside this repo.
-
-Use a strong reasoning model (`claude-sonnet-4-6`, `gpt-4o`, `gemini-2.5-pro`) for best results — the Designer reasons about schema trade-offs, not just field names.

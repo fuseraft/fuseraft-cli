@@ -134,7 +134,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         // Semantic checks
         if (string.IsNullOrWhiteSpace(config.Name))
-            issues.Add(("warning", "Orchestration.Name is empty."));
+            issues.Add(("warning", "Team is empty."));
 
         if (!string.IsNullOrWhiteSpace(config.SystemPromptPath))
         {
@@ -146,89 +146,11 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 issues.Add(("error", $"SystemPromptPath file not found: {promptPath}"));
         }
 
-        var magenticFreshViolations = OrchestratorConfigLoader.FindMagenticFreshIsolationViolations(config)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        ValidateAgents(config, settings, issues, magenticFreshViolations);
+        ValidateAgents(config, settings, issues);
 
-        // Selection strategy
         var selType = config.Selection.Type.ToLowerInvariant();
-        if (selType is not (OrchestratorTypes.Sequential or OrchestratorTypes.RoundRobin or OrchestratorTypes.Llm or OrchestratorTypes.Keyword or OrchestratorTypes.Structured or OrchestratorTypes.Magentic or OrchestratorTypes.StateMachine or OrchestratorTypes.Graph or OrchestratorTypes.Workflow or OrchestratorTypes.Adversarial or OrchestratorTypes.MapReduce or OrchestratorTypes.ScatterGather))
-            issues.Add(("error", $"Unknown selection type: '{config.Selection.Type}'."));
-
-        if (selType == OrchestratorTypes.Llm && config.Selection.Model is null)
-            issues.Add(("error", "LLM selection requires Selection.Model to be set."));
-
-        if (selType == OrchestratorTypes.Keyword && (config.Selection.Routes is null || config.Selection.Routes.Count == 0))
-            issues.Add(("error", "Keyword selection requires at least one entry in Routes."));
-
-        if (selType == OrchestratorTypes.Structured)
-            ValidateStructuredRoutes(config, issues);
-
         if (selType == OrchestratorTypes.Magentic)
             ValidateMagenticSelection(config, issues);
-
-        if (selType == OrchestratorTypes.Graph)
-            ValidateGraph(config, issues);
-
-        if (selType == OrchestratorTypes.Workflow)
-        {
-            ValidateGraph(config, issues);
-            ValidateWorkflowRestrictions(config, issues);
-        }
-
-        if (selType == OrchestratorTypes.MapReduce)
-            ValidateMapReduce(config, issues);
-
-        if (selType == OrchestratorTypes.ScatterGather)
-            ValidateScatterGather(config, issues);
-
-        if (selType == OrchestratorTypes.StateMachine)
-            ValidateStateMachine(config, issues);
-
-        if (selType == OrchestratorTypes.Adversarial)
-            ValidateAdversarialSelection(config, issues);
-
-        if (selType == OrchestratorTypes.Keyword && config.Selection.Routes is { Count: > 1 })
-        {
-            // Detect routes that share the same keyword and SourceAgents but have different
-            // validators. Because selection uses first-match-wins, the second route's validator
-            // is permanently unreachable — this is almost always a misconfiguration. The intent
-            // is usually AND semantics (both validators must pass), which requires a single route
-            // with a Validators[] array instead of two separate routes.
-            //
-            // Exception: routes that carry a Condition are disambiguated at runtime by the JSON
-            // value of the condition field — they are intentionally parallel branches of the same
-            // keyword and must not be flagged as unreachable.
-            var routeSignatures = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            for (int ri = 0; ri < config.Selection.Routes.Count; ri++)
-            {
-                var r = config.Selection.Routes[ri];
-                var sourceKey = r.SourceAgents is { Count: > 0 }
-                    ? string.Join(",", r.SourceAgents.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
-                    : "*";
-
-                // Include the condition in the signature so condition-differentiated routes
-                // on the same keyword do not trigger the unreachable-route warning.
-                var condKey = r.Condition is { } c
-                    ? $"|cond:{c.Field}:{c.Is}{c.IsNot}{c.Contains}{c.Exists}"
-                    : string.Empty;
-
-                var sig = $"{r.Keyword}::{sourceKey}{condKey}";
-
-                if (routeSignatures.TryGetValue(sig, out var firstIndex))
-                    issues.Add(("warning",
-                        $"Routes[{firstIndex}] and Routes[{ri}] share keyword '{r.Keyword}' " +
-                        $"and SourceAgents '{sourceKey}'. The second route's validator is " +
-                        $"unreachable (first-match wins). To require both validators, merge them " +
-                        $"into a single route using a \"Validators\": [] array."));
-                else
-                    routeSignatures[sig] = ri;
-            }
-        }
-
-        // Termination strategy — only validate when the section was explicitly configured.
-        if (config.Termination is not null)
-            ValidateTermination(config.Termination, config.Agents, issues, maxTotalTokens: config.MaxTotalTokens);
 
         ValidateCompactionConfig(config, issues);
 
@@ -244,8 +166,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
     private void ValidateAgents(
         OrchestrationConfig config,
         ValidateConfigSettings settings,
-        List<(string Level, string Message)> issues,
-        HashSet<string> magenticFreshViolations)
+        List<(string Level, string Message)> issues)
     {
         if (config.Agents.Count == 0)
         {
@@ -262,7 +183,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                     issues.Add(("error", $"Duplicate agent name: '{agent.Name}'."));
 
                 if (string.IsNullOrWhiteSpace(agent.Instructions))
-                    issues.Add(("warning", $"Agent '{agent.Name}' has no Instructions."));
+                    issues.Add(("warning", $"Agent '{agent.Name}' has no instructions."));
 
                 // Remote A2A agent: validate URL; skip local model checks.
                 if (agent.RemoteAgent is not null)
@@ -276,7 +197,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                         issues.Add(("warning", $"Agent '{agent.Name}': RemoteAgent header '{header}' uses ${{{variable}}}, which is not set; it will be sent empty."));
 
                     if (!string.IsNullOrWhiteSpace(agent.Model.ModelId))
-                        issues.Add(("warning", $"Agent '{agent.Name}': Model.ModelId is ignored when RemoteAgent is set."));
+                        issues.Add(("warning", $"Agent '{agent.Name}': model.modelId is ignored when remoteAgent is set."));
 
                     if (agent.Plugins.Count > 0)
                         issues.Add(("warning", $"Agent '{agent.Name}': Plugins are ignored when RemoteAgent is set."));
@@ -284,8 +205,12 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 else
                 {
                 if (string.IsNullOrWhiteSpace(agent.Model.ModelId))
-                    issues.Add(("error", $"Agent '{agent.Name}': ModelId is empty."));
-
+                {
+                    if (string.IsNullOrWhiteSpace(UserConfigStore.Load().Config?.ModelId))
+                        issues.Add(("error", $"Agent '{agent.Name}': no model, and no default model is set. Give the agent a model, or set one with 'fuseraft settings set provider.modelId <model>'."));
+                }
+                else
+                {
                 // Resolve the model against the Models registry before checking connection
                 // fields — an alias fills in Endpoint and ApiKeyEnvVar at runtime.
                 var resolved = ResolveModelAlias(agent.Model, config.Models);
@@ -293,41 +218,29 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
                 if (string.IsNullOrWhiteSpace(resolved.Endpoint)
                     && !HasKnownProviderPrefix(resolved.ModelId)
                     && !IsOllamaModel(resolved.ModelId))
-                    issues.Add(("error", $"Agent '{agent.Name}': Model.Endpoint is empty and '{resolved.ModelId}' does not match a known provider prefix. Set Endpoint explicitly or use a model ID that starts with a recognised prefix (grok-, gpt-, claude-, gemini-, etc.)."));
+                    issues.Add(("error", $"Agent '{agent.Name}': model.endpoint is empty and '{resolved.ModelId}' does not match a known provider prefix. Set endpoint explicitly or use a model ID that starts with a recognised prefix (grok-, gpt-, claude-, gemini-, etc.)."));
 
                 if (string.IsNullOrWhiteSpace(resolved.ApiKeyEnvVar)
                     && !IsOllamaModel(resolved.ModelId))
-                    issues.Add(("warning", $"Agent '{agent.Name}': No ApiKeyEnvVar set."));
+                    issues.Add(("warning", $"Agent '{agent.Name}': no apiKeyEnvVar set."));
                 else if (!string.IsNullOrWhiteSpace(resolved.ApiKeyEnvVar)
                     && string.IsNullOrEmpty(Environment.GetEnvironmentVariable(resolved.ApiKeyEnvVar)))
                     issues.Add(("warning", $"Agent '{agent.Name}': Env var '{resolved.ApiKeyEnvVar}' is not set in this shell."));
                 }
+                }
 
                 if (agent.FunctionChoice.ToLowerInvariant() is not ("auto" or "required" or "none"))
-                    issues.Add(("error", $"Agent '{agent.Name}': FunctionChoice '{agent.FunctionChoice}' is invalid. Valid values: auto, required, none."));
+                    issues.Add(("error", $"Agent '{agent.Name}': functionChoice '{agent.FunctionChoice}' is invalid. Valid values: auto, required, none."));
 
                 if (agent.TrustScore is < 0.0 or > 1.0)
-                    issues.Add(("error", $"Agent '{agent.Name}': TrustScore must be 0.0–1.0 (got {agent.TrustScore})."));
-
-                if (agent.ContextWindow?.ContextCapFraction is < 0.0 or > 1.0)
-                    issues.Add(("error", $"Agent '{agent.Name}': ContextCapFraction must be 0.0–1.0 (got {agent.ContextWindow.ContextCapFraction})."));
+                    issues.Add(("error", $"Agent '{agent.Name}': trustScore must be 0.0–1.0 (got {agent.TrustScore})."));
 
                 // Accepted values are provider- and model-specific (and keep growing — e.g.
                 // "xhigh", "max"), so this isn't checked against a fixed enum. The only thing
                 // that's unambiguously wrong is a value with embedded whitespace.
                 var effort = agent.Model.ReasoningEffort;
                 if (effort is not null && effort.Trim().Contains(' '))
-                    issues.Add(("error", $"Agent '{agent.Name}': Model.ReasoningEffort '{effort}' looks malformed — expected a single token (e.g. none, low, medium, high, xhigh, max)."));
-
-                // Magentic's manager/ledger loop depends on every participant sharing the
-                // transcript — Isolation: Fresh (the default) would silently starve it. Uses
-                // the same OrchestratorConfigLoader.FindMagenticFreshIsolationViolations the
-                // real config loader hard-fails on, so this lint can't drift out of sync with it.
-                if (magenticFreshViolations.Contains(agent.Name))
-                    issues.Add(("error", $"Agent '{agent.Name}': Isolation: Fresh is incompatible with Selection.Type 'magentic' — set 'Isolation: Shared' (or 'Fork')."));
-                else if (agent.Isolation == fuseraft.Core.Models.Agents.AgentIsolation.Fresh
-                    && agent.Context is not { Count: > 0 })
-                    issues.Add(("warning", $"Agent '{agent.Name}': Isolation: Fresh (the default) with no Context: sources declared — it will receive only the synthesized handoff directive each turn. Fine for a terminal/leaf agent; otherwise add a Context: block or set 'Isolation: Shared'."));
+                    issues.Add(("error", $"Agent '{agent.Name}': model.reasoningEffort '{effort}' looks malformed — expected a single token (e.g. none, low, medium, high, xhigh, max)."));
 
                 if (settings.Strict)
                 {
@@ -352,22 +265,22 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             bool needsCompactor = cb.CutoverAt > 0 || cb.MaxSingleTurnInputTokens > 0;
             if (needsCompactor && config.Compaction is null)
                 issues.Add(("error",
-                    "ContextBudget.CutoverAt and ContextBudget.MaxSingleTurnInputTokens require " +
-                    "a Compaction section. Add Compaction to enable automatic context trimming."));
+                    "advanced.contextBudget.cutoverAt and maxSingleTurnInputTokens require " +
+                    "advanced.compaction. Add it to enable automatic context trimming."));
 
             if (cb.WarnAt > 0 && cb.CutoverAt > 0 && cb.WarnAt >= cb.CutoverAt)
                 issues.Add(("error",
-                    $"ContextBudget.WarnAt ({cb.WarnAt:N0}) must be less than CutoverAt ({cb.CutoverAt:N0})."));
+                    $"advanced.contextBudget.warnAt ({cb.WarnAt:N0}) must be less than cutoverAt ({cb.CutoverAt:N0})."));
 
             if (config.WarnTurnTokens > 0 && cb.CutoverAt > 0 && config.WarnTurnTokens >= cb.CutoverAt)
                 issues.Add(("warning",
-                    $"WarnTurnTokens ({config.WarnTurnTokens:N0}) is >= ContextBudget.CutoverAt ({cb.CutoverAt:N0}). " +
-                    "The per-turn warning fires in the same turn as compaction — lower WarnTurnTokens " +
-                    "below CutoverAt to get an advance signal."));
+                    $"advanced.warnTurnTokens ({config.WarnTurnTokens:N0}) is >= advanced.contextBudget.cutoverAt ({cb.CutoverAt:N0}). " +
+                    "The per-turn warning fires in the same turn as compaction — lower warnTurnTokens " +
+                    "below cutoverAt to get an advance signal."));
         }
 
         if (config.Compaction?.AntiThrashMinSavingsRatio is < 0.0 or > 1.0)
-            issues.Add(("error", $"Compaction.AntiThrashMinSavingsRatio must be 0.0–1.0 (got {config.Compaction.AntiThrashMinSavingsRatio})."));
+            issues.Add(("error", $"advanced.compaction.antiThrashMinSavingsRatio must be 0.0–1.0 (got {config.Compaction.AntiThrashMinSavingsRatio})."));
     }
 
     private static void ValidateMemoryLayer(
@@ -378,7 +291,7 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         if (config.Telemetry is { OtlpEndpoint: { } endpoint })
         {
             if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
-                issues.Add(("error", $"Telemetry.OtlpEndpoint is not a valid URI: '{endpoint}'."));
+                issues.Add(("error", $"advanced.telemetry.otlpEndpoint is not a valid URI: '{endpoint}'."));
         }
     }
 
@@ -392,13 +305,13 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         if (!string.Equals(mode, ShellPolicy.AllowModeSubstring, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(mode, ShellPolicy.AllowModeSegments, StringComparison.OrdinalIgnoreCase))
             issues.Add(("error",
-                $"Security.ShellPolicy.AllowMode '{mode}' is invalid. Valid values: " +
+                $"security.shellPolicy.allowMode '{mode}' is invalid. Valid values: " +
                 $"{ShellPolicy.AllowModeSubstring}, {ShellPolicy.AllowModeSegments}."));
 
         if (policy.AllowSegments && policy.Allow.Count == 0)
             issues.Add(("warning",
-                "Security.ShellPolicy.AllowMode is 'segments' but Allow is empty, so it has no effect " +
-                "(an empty Allow list means every command is allowed)."));
+                "security.shellPolicy.allowMode is 'segments' but allow is empty, so it has no effect " +
+                "(an empty allow list means every command is allowed)."));
     }
 
     private static void ValidateMcpServers(
@@ -410,49 +323,49 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var server in config.McpServers)
         {
-            var prefix = string.IsNullOrWhiteSpace(server.Name) ? "McpServers[?]" : $"McpServers['{server.Name}']";
+            var prefix = string.IsNullOrWhiteSpace(server.Name) ? "mcpServers[?]" : $"mcpServers['{server.Name}']";
 
             if (string.IsNullOrWhiteSpace(server.Name))
-                issues.Add(("error", $"{prefix}: Name is required."));
+                issues.Add(("error", $"{prefix}: name is required."));
             else if (!names.Add(server.Name))
                 issues.Add(("error", $"{prefix}: Duplicate MCP server name."));
 
             var transport = server.Transport.ToLowerInvariant();
             if (transport is not ("stdio" or "http"))
             {
-                issues.Add(("error", $"{prefix}: Unknown Transport '{server.Transport}'. Valid values: stdio, http."));
+                issues.Add(("error", $"{prefix}: unknown transport '{server.Transport}'. Valid values: stdio, http."));
                 continue;
             }
 
             if (transport == "stdio")
             {
                 if (string.IsNullOrWhiteSpace(server.Command))
-                    issues.Add(("error", $"{prefix}: Command is required for stdio transport."));
+                    issues.Add(("error", $"{prefix}: command is required for stdio transport."));
 
                 if (server.Headers.Count > 0)
-                    issues.Add(("warning", $"{prefix}: Headers is ignored for stdio transport (http only)."));
+                    issues.Add(("warning", $"{prefix}: headers is ignored for stdio transport (http only)."));
                 if (server.OAuth is not null)
-                    issues.Add(("error", $"{prefix}: OAuth requires Transport: http."));
+                    issues.Add(("error", $"{prefix}: oauth requires transport: http."));
                 if (!server.TransportMode.Equals("auto", StringComparison.OrdinalIgnoreCase))
-                    issues.Add(("warning", $"{prefix}: TransportMode is ignored for stdio transport (http only)."));
+                    issues.Add(("warning", $"{prefix}: transportMode is ignored for stdio transport (http only)."));
             }
             else // http
             {
                 if (string.IsNullOrWhiteSpace(server.Url))
                 {
-                    issues.Add(("error", $"{prefix}: Url is required for http transport."));
+                    issues.Add(("error", $"{prefix}: url is required for http transport."));
                 }
                 else
                 {
                     var expandedUrl = ProcessHelper.ExpandEnvTokens(server.Url);
                     if (!Uri.TryCreate(expandedUrl, UriKind.Absolute, out _))
-                        issues.Add(("error", $"{prefix}: Url '{server.Url}' is not a valid absolute URL."));
+                        issues.Add(("error", $"{prefix}: url '{server.Url}' is not a valid absolute URL."));
                 }
 
                 var mode = server.TransportMode.Trim().ToLowerInvariant();
                 if (mode is not ("" or "auto" or "autodetect" or "streamable-http" or "streamablehttp" or "streamable" or "sse"))
                     issues.Add(("error",
-                        $"{prefix}: Unknown TransportMode '{server.TransportMode}'. Valid values: auto, streamable-http, sse."));
+                        $"{prefix}: unknown transportMode '{server.TransportMode}'. Valid values: auto, streamable-http, sse."));
 
                 foreach (var (header, value) in server.Headers)
                     foreach (var envVar in ExtractEnvTokens(value))
@@ -574,70 +487,13 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
         OllamaPrefixes.Any(p => modelId.StartsWith(p, StringComparison.OrdinalIgnoreCase))
         || (modelId.Contains(':') && !modelId.Contains("://"));
 
-    private static void ValidateTermination(
-        TerminationStrategyConfig t,
-        List<AgentConfig> agents,
-        List<(string, string)> issues,
-        int depth = 0,
-        int? maxTotalTokens = null)
-    {
-        var prefix = depth > 0 ? "  Nested termination: " : "Termination: ";
-        var type = t.Type.ToLowerInvariant();
-
-        if (type is not ("regex" or "structured" or "tokenbudget" or "maxiterations" or "composite"))
-            issues.Add(("error", $"{prefix}Unknown type '{t.Type}'."));
-
-        if (type == "regex" && string.IsNullOrWhiteSpace(t.Pattern))
-            issues.Add(("error", $"{prefix}Regex strategy requires a Pattern."));
-
-        if (type == "structured" && t.Condition is null)
-            issues.Add(("error", $"{prefix}Structured strategy requires a Condition block."));
-        else if (type == "structured" && string.IsNullOrWhiteSpace(t.Condition!.Field))
-            issues.Add(("error", $"{prefix}Structured strategy's Condition requires a Field."));
-
-        if (type == "tokenbudget" && t.MaxTokens <= 0)
-            issues.Add(("error", $"{prefix}Token budget strategy requires a positive MaxTokens value."));
-        else if (type == "tokenbudget" && maxTotalTokens is { } cap && t.MaxTokens >= cap)
-            issues.Add(("warning",
-                $"{prefix}MaxTokens ({t.MaxTokens}) should be lower than the top-level MaxTotalTokens " +
-                $"({cap}), otherwise the hard BudgetExceededException abort fires first and this " +
-                "strategy never gets a chance to end the session gracefully."));
-
-        // MaxIterations: warn when explicitly using the maxiterations type with no cap,
-        // or at depth 0 for non-composite strategies (composite delegates capping to children).
-        if (t.MaxIterations <= 0 && (type == "maxiterations" || (depth == 0 && type != "composite")))
-            issues.Add(("warning", $"{prefix}MaxIterations should be > 0 (got {t.MaxIterations})."));
-
-        if (t.AgentNames is { Length: > 0 })
-        {
-            var agentNames = agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var name in t.AgentNames)
-                if (!agentNames.Contains(name))
-                    issues.Add(("warning", $"{prefix}AgentName '{name}' doesn't match any defined agent."));
-        }
-
-        if (type == "composite")
-        {
-            if (t.Strategies is not { Count: > 0 })
-                issues.Add(("error", $"{prefix}Composite strategy requires at least one child strategy."));
-            else
-                foreach (var child in t.Strategies)
-                    ValidateTermination(child, agents, issues, depth + 1, maxTotalTokens);
-        }
-    }
-
     private static void ValidateMagenticSelection(
         OrchestrationConfig config,
         List<(string Level, string Message)> issues)
     {
         var mag = config.Selection.Magentic;
 
-        if (mag is null || mag.Model is null)
-        {
-            issues.Add(("error",
-                "Selection.Type 'magentic' requires a 'Selection.Magentic.Model' configuration block."));
-            return;
-        }
+        if (mag?.Model is null) return;
 
         var resolved = ResolveModelAlias(mag.Model, config.Models);
 
@@ -645,515 +501,16 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             && !HasKnownProviderPrefix(resolved.ModelId)
             && !IsOllamaModel(resolved.ModelId))
             issues.Add(("error",
-                $"Selection.Magentic.Model: Endpoint is empty and '{resolved.ModelId}' does not match " +
-                "a known provider prefix. Set Endpoint explicitly or use a model ID that starts with a " +
+                $"flow.model: endpoint is empty and '{resolved.ModelId}' does not match " +
+                "a known provider prefix. Set endpoint explicitly or use a model ID that starts with a " +
                 "recognised prefix (grok-, gpt-, claude-, gemini-, etc.)."));
 
         if (string.IsNullOrWhiteSpace(resolved.ApiKeyEnvVar) && !IsOllamaModel(resolved.ModelId))
-            issues.Add(("warning", "Selection.Magentic.Model: No ApiKeyEnvVar set."));
+            issues.Add(("warning", "flow.model: no apiKeyEnvVar set."));
         else if (!string.IsNullOrWhiteSpace(resolved.ApiKeyEnvVar)
             && string.IsNullOrEmpty(Environment.GetEnvironmentVariable(resolved.ApiKeyEnvVar)))
             issues.Add(("warning",
-                $"Selection.Magentic.Model: Env var '{resolved.ApiKeyEnvVar}' is not set in this shell."));
-
-        if (mag.MaxRoundCount < 1)
-            issues.Add(("error",
-                $"Selection.Magentic.MaxRoundCount must be at least 1 (got {mag.MaxRoundCount}). " +
-                "A value of 0 would exit immediately without invoking any participant agents."));
-
-        if (mag.MaxStallCount < 1)
-            issues.Add(("error",
-                $"Selection.Magentic.MaxStallCount must be at least 1 (got {mag.MaxStallCount}). " +
-                "A value of 0 would trigger a replan on every single round."));
-
-        if (mag.MaxResetCount < 0)
-            issues.Add(("error",
-                $"Selection.Magentic.MaxResetCount must be >= 0 (got {mag.MaxResetCount}). " +
-                "Use 0 to disable replanning entirely."));
-
-        // Warn when a Termination section is configured — it is silently ignored for Magentic.
-        var t = config.Termination;
-        bool hasNonDefaultTermination = t is not null && (
-            !t.Type.Equals("composite", StringComparison.OrdinalIgnoreCase) ||
-            t.Pattern    is not null ||
-            t.Strategies is { Count: > 0 });
-        if (hasNonDefaultTermination)
-            issues.Add(("warning",
-                "The 'Termination' section is ignored for Selection.Type 'magentic'. " +
-                "Session termination is controlled by MaxRoundCount, MaxStallCount, and MaxResetCount " +
-                "in the 'Selection.Magentic' block."));
-    }
-
-    private static void ValidateGraph(
-        OrchestrationConfig config,
-        List<(string Level, string Message)> issues)
-    {
-        var graph = config.Selection.Graph;
-        if (graph is null)
-        {
-            issues.Add(("error", "Graph selection requires a 'Selection.Graph' configuration block."));
-            return;
-        }
-
-        if (graph.Nodes.Count == 0)
-        {
-            issues.Add(("error", "Selection.Graph: at least one node is required."));
-            return;
-        }
-
-        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        // Node IDs must be unique and reference valid agents. Mirrors
-        // OrchestratorBuilder.ValidateAndSelectStrategy's per-node checks, including the
-        // SubGraphId branch — without it, a valid sub-graph node (Agent left empty,
-        // SubGraphId set) was reported as a false "Agent is required" error.
-        var nodeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < graph.Nodes.Count; i++)
-        {
-            var node   = graph.Nodes[i];
-            var prefix = $"Selection.Graph.Nodes[{i}]";
-
-            if (string.IsNullOrWhiteSpace(node.Id))
-                issues.Add(("error", $"{prefix}: Id is required."));
-            else if (!nodeIds.Add(node.Id))
-                issues.Add(("error", $"{prefix}: Duplicate node Id '{node.Id}'."));
-
-            bool isSubGraphNode = !string.IsNullOrWhiteSpace(node.SubGraphId);
-
-            if (isSubGraphNode)
-            {
-                if (!string.IsNullOrWhiteSpace(node.Agent))
-                {
-                    issues.Add(("error", $"{prefix} (id='{node.Id}'): has both 'Agent' and 'SubGraphId' set. " +
-                        "Use one or the other — leave 'Agent' empty when using 'SubGraphId'."));
-                }
-
-                if (graph.SubGraphs is null || !graph.SubGraphs.TryGetValue(node.SubGraphId!, out var subSpec))
-                {
-                    issues.Add(("error", $"{prefix} (id='{node.Id}'): references SubGraphId '{node.SubGraphId}' " +
-                        "which is not defined in 'Selection.Graph.SubGraphs'."));
-                }
-                else if (!subSpec.IsValid)
-                {
-                    issues.Add(("error", $"SubGraph '{node.SubGraphId}' must set exactly one of 'Graph', 'MapReduce', or 'ScatterGather'."));
-                }
-                else if (subSpec.IsMapReduce)
-                {
-                    var mr = subSpec.MapReduce!;
-                    if (string.IsNullOrWhiteSpace(mr.Splitter) || !agentNames.Contains(mr.Splitter))
-                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.Splitter '{mr.Splitter}' is not defined in Agents."));
-                    if (string.IsNullOrWhiteSpace(mr.Mapper) || !agentNames.Contains(mr.Mapper))
-                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.Mapper '{mr.Mapper}' is not defined in Agents."));
-                    if (string.IsNullOrWhiteSpace(mr.Reducer) || !agentNames.Contains(mr.Reducer))
-                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.Reducer '{mr.Reducer}' is not defined in Agents."));
-                    if (mr.MaxConcurrency < 0)
-                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.MaxConcurrency must be >= 0 (got {mr.MaxConcurrency})."));
-                    if (mr.MaxSplitterRetries < 1)
-                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.MaxSplitterRetries must be at least 1 (got {mr.MaxSplitterRetries})."));
-                    if (string.IsNullOrWhiteSpace(mr.ItemsJsonPath))
-                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' MapReduce.ItemsJsonPath must be a non-empty string."));
-                }
-                else if (subSpec.IsScatterGather)
-                {
-                    var sg = subSpec.ScatterGather!;
-                    if (sg.Participants.Count == 0)
-                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' ScatterGather.Participants must contain at least one agent name."));
-                    foreach (var p in sg.Participants)
-                        if (string.IsNullOrWhiteSpace(p) || !agentNames.Contains(p))
-                            issues.Add(("error", $"SubGraph '{node.SubGraphId}' ScatterGather.Participants contains '{p}' which is not defined in Agents."));
-                    if (string.IsNullOrWhiteSpace(sg.Synthesizer) || !agentNames.Contains(sg.Synthesizer))
-                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' ScatterGather.Synthesizer '{sg.Synthesizer}' is not defined in Agents."));
-                    if (sg.MaxConcurrency < 0)
-                        issues.Add(("error", $"SubGraph '{node.SubGraphId}' ScatterGather.MaxConcurrency must be >= 0 (got {sg.MaxConcurrency})."));
-                }
-            }
-            else
-            {
-                if (string.IsNullOrWhiteSpace(node.Agent))
-                    issues.Add(("error", $"{prefix} (id='{node.Id}'): Agent is required."));
-                else if (!agentNames.Contains(node.Agent))
-                    issues.Add(("error", $"{prefix} (id='{node.Id}'): Agent '{node.Agent}' is not defined in Agents."));
-            }
-        }
-
-        // EntryNode must resolve to a declared node.
-        if (graph.EntryNode is { Length: > 0 } entry && !nodeIds.Contains(entry))
-            issues.Add(("error", $"Selection.Graph.EntryNode '{entry}' does not match any declared node Id."));
-
-        // MaxRetries must be positive.
-        if (graph.MaxRetries <= 0)
-            issues.Add(("warning", $"Selection.Graph.MaxRetries should be > 0 (got {graph.MaxRetries})."));
-
-        // Edges must reference valid node IDs.
-        for (int i = 0; i < graph.Edges.Count; i++)
-        {
-            var edge   = graph.Edges[i];
-            var prefix = $"Selection.Graph.Edges[{i}]";
-
-            if (string.IsNullOrWhiteSpace(edge.From))
-                issues.Add(("error", $"{prefix}: From is required."));
-            else if (!nodeIds.Contains(edge.From))
-                issues.Add(("error", $"{prefix}: From '{edge.From}' does not match any declared node Id."));
-
-            if (string.IsNullOrWhiteSpace(edge.To))
-                issues.Add(("error", $"{prefix}: To is required."));
-            else if (!nodeIds.Contains(edge.To))
-                issues.Add(("error", $"{prefix}: To '{edge.To}' does not match any declared node Id."));
-
-            if (edge.SourceAgents is { Count: > 0 })
-                foreach (var src in edge.SourceAgents)
-                    if (!agentNames.Contains(src))
-                        issues.Add(("warning", $"{prefix}: SourceAgent '{src}' is not defined in Agents."));
-
-            if (!string.IsNullOrWhiteSpace(edge.RecoveryAgent) && !agentNames.Contains(edge.RecoveryAgent))
-                issues.Add(("warning", $"{prefix}: RecoveryAgent '{edge.RecoveryAgent}' is not defined in Agents."));
-        }
-    }
-
-    // Mirrors OrchestratorBuilder.ValidateAndSelectStrategy's Selection.MapReduce checks.
-    private static void ValidateMapReduce(
-        OrchestrationConfig config,
-        List<(string Level, string Message)> issues)
-    {
-        var mr = config.Selection.MapReduce;
-        if (mr is null)
-        {
-            issues.Add(("error", "Selection.Type 'mapreduce' requires a 'Selection.MapReduce' configuration block."));
-            return;
-        }
-
-        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        if (string.IsNullOrWhiteSpace(mr.Splitter))
-            issues.Add(("error", "Selection.MapReduce.Splitter must be a non-empty agent name."));
-        else if (!agentNames.Contains(mr.Splitter))
-            issues.Add(("error", $"Selection.MapReduce.Splitter '{mr.Splitter}' is not defined in 'Orchestration.Agents'."));
-
-        if (string.IsNullOrWhiteSpace(mr.Mapper))
-            issues.Add(("error", "Selection.MapReduce.Mapper must be a non-empty agent name."));
-        else if (!agentNames.Contains(mr.Mapper))
-            issues.Add(("error", $"Selection.MapReduce.Mapper '{mr.Mapper}' is not defined in 'Orchestration.Agents'."));
-
-        if (string.IsNullOrWhiteSpace(mr.Reducer))
-            issues.Add(("error", "Selection.MapReduce.Reducer must be a non-empty agent name."));
-        else if (!agentNames.Contains(mr.Reducer))
-            issues.Add(("error", $"Selection.MapReduce.Reducer '{mr.Reducer}' is not defined in 'Orchestration.Agents'."));
-
-        if (mr.MaxConcurrency < 0)
-            issues.Add(("error", $"Selection.MapReduce.MaxConcurrency must be >= 0 (got {mr.MaxConcurrency}). Use 0 for unlimited."));
-
-        if (mr.MaxSplitterRetries < 1)
-            issues.Add(("error", $"Selection.MapReduce.MaxSplitterRetries must be at least 1 (got {mr.MaxSplitterRetries})."));
-
-        if (string.IsNullOrWhiteSpace(mr.ItemsJsonPath))
-            issues.Add(("error", "Selection.MapReduce.ItemsJsonPath must be a non-empty string."));
-    }
-
-    // Mirrors OrchestratorBuilder.ValidateAndSelectStrategy's Selection.ScatterGather checks.
-    private static void ValidateScatterGather(
-        OrchestrationConfig config,
-        List<(string Level, string Message)> issues)
-    {
-        var sg = config.Selection.ScatterGather;
-        if (sg is null)
-        {
-            issues.Add(("error", "Selection.Type 'scattergather' requires a 'Selection.ScatterGather' configuration block."));
-            return;
-        }
-
-        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        if (sg.Participants.Count == 0)
-            issues.Add(("error", "Selection.ScatterGather.Participants must contain at least one agent name."));
-
-        foreach (var p in sg.Participants)
-            if (string.IsNullOrWhiteSpace(p) || !agentNames.Contains(p))
-                issues.Add(("error", $"Selection.ScatterGather.Participants contains '{p}' which is not defined in 'Orchestration.Agents'."));
-
-        if (string.IsNullOrWhiteSpace(sg.Synthesizer))
-            issues.Add(("error", "Selection.ScatterGather.Synthesizer must be a non-empty agent name."));
-        else if (!agentNames.Contains(sg.Synthesizer))
-            issues.Add(("error", $"Selection.ScatterGather.Synthesizer '{sg.Synthesizer}' is not defined in 'Orchestration.Agents'."));
-
-        if (sg.MaxConcurrency < 0)
-            issues.Add(("error", $"Selection.ScatterGather.MaxConcurrency must be >= 0 (got {sg.MaxConcurrency}). Use 0 for unlimited."));
-    }
-
-    // Selection.Type 'workflow' reuses the same Selection.Graph block as 'graph' (checked by
-    // ValidateGraph above) but is a v1 implementation that rejects Parallel, SubGraphId,
-    // RequireHumanApproval, RecoveryAgent, and no-keyword edges, and requires every node's
-    // agent to have the Handoff plugin (routing is tool-call-only, no text-keyword fallback).
-    // Mirrors the same checks OrchestratorBuilder.ValidateAndSelectStrategy enforces at run
-    // time, so 'fuseraft validate' surfaces them without needing to actually run a session.
-    private static void ValidateWorkflowRestrictions(
-        OrchestrationConfig config,
-        List<(string Level, string Message)> issues)
-    {
-        var graph = config.Selection.Graph;
-        if (graph is null) return;
-
-        var agentByName = config.Agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
-
-        for (int i = 0; i < graph.Nodes.Count; i++)
-        {
-            var node   = graph.Nodes[i];
-            var prefix = $"Selection.Graph.Nodes[{i}] (id='{node.Id}')";
-
-            if (!string.IsNullOrWhiteSpace(node.SubGraphId))
-                issues.Add(("error", $"{prefix}: 'SubGraphId' is not supported under Selection.Type 'workflow'. Use 'graph' instead."));
-
-            if (node.Parallel)
-                issues.Add(("error", $"{prefix}: 'Parallel: true' is not supported under Selection.Type 'workflow'. Use 'graph' instead."));
-
-            if (!string.IsNullOrWhiteSpace(node.Agent) && agentByName.TryGetValue(node.Agent, out var agentCfg)
-                && !agentCfg.Plugins.Contains(HandoffPlugin.PluginName, StringComparer.OrdinalIgnoreCase))
-                issues.Add(("error", $"{prefix}: agent '{node.Agent}' must have '{HandoffPlugin.PluginName}' in Plugins — 'workflow' routes exclusively via handoff(route_keyword: ...) tool calls."));
-        }
-
-        for (int i = 0; i < graph.Edges.Count; i++)
-        {
-            var edge   = graph.Edges[i];
-            var prefix = $"Selection.Graph.Edges[{i}] (From='{edge.From}' To='{edge.To}')";
-
-            if (string.IsNullOrEmpty(edge.Keyword))
-                issues.Add(("error", $"{prefix}: 'Keyword' is required under Selection.Type 'workflow' — unconditional edges are not supported. Use 'graph' instead."));
-
-            if (edge.RequireHumanApproval)
-                issues.Add(("error", $"{prefix}: 'RequireHumanApproval' is not supported under Selection.Type 'workflow'. Use 'graph' instead."));
-
-            if (edge.RecoveryAgent is not null)
-                issues.Add(("error", $"{prefix}: 'RecoveryAgent' is not supported under Selection.Type 'workflow'. Use 'graph' instead."));
-        }
-    }
-
-    private static void ValidateAdversarialSelection(
-        OrchestrationConfig config,
-        List<(string Level, string Message)> issues)
-    {
-        var adv = config.Selection.Adversarial;
-
-        if (adv is null)
-        {
-            issues.Add(("error",
-                "Selection.Type 'adversarial' requires a 'Selection.Adversarial' configuration block."));
-            return;
-        }
-
-        if (adv.Stages.Count == 0)
-        {
-            issues.Add(("error", "Selection.Adversarial.Stages must contain at least one stage."));
-            return;
-        }
-
-        if (adv.Rounds < 1)
-            issues.Add(("error",
-                $"Selection.Adversarial.Rounds must be at least 1 (got {adv.Rounds})."));
-
-        if (string.IsNullOrWhiteSpace(adv.PassKeyword))
-            issues.Add(("error", "Selection.Adversarial.PassKeyword must be a non-empty string."));
-
-        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        for (int si = 0; si < adv.Stages.Count; si++)
-        {
-            var stage  = adv.Stages[si];
-            var prefix = $"Selection.Adversarial.Stages[{si}]";
-
-            if (string.IsNullOrWhiteSpace(stage.Generator))
-                issues.Add(("error", $"{prefix}: Generator is required."));
-            else if (!agentNames.Contains(stage.Generator))
-                issues.Add(("error", $"{prefix}.Generator '{stage.Generator}' is not defined in Orchestration.Agents."));
-
-            if (string.IsNullOrWhiteSpace(stage.Critic))
-                issues.Add(("error", $"{prefix}: Critic is required."));
-            else if (!agentNames.Contains(stage.Critic))
-                issues.Add(("error", $"{prefix}.Critic '{stage.Critic}' is not defined in Orchestration.Agents."));
-
-            if (!string.IsNullOrWhiteSpace(stage.Generator) && !string.IsNullOrWhiteSpace(stage.Critic) &&
-                string.Equals(stage.Generator, stage.Critic, StringComparison.OrdinalIgnoreCase))
-                issues.Add(("warning",
-                    $"{prefix}: Generator and Critic are the same agent ('{stage.Generator}'). " +
-                    "Self-critique defeats the context firewall — use two distinct agents."));
-        }
-    }
-
-    private static void ValidateStateMachine(
-        OrchestrationConfig config,
-        List<(string Level, string Message)> issues)
-    {
-        var sm = config.Selection.StateMachine;
-        if (sm is null)
-        {
-            issues.Add(("error", "StateMachine selection requires a 'Selection.StateMachine' configuration block."));
-            return;
-        }
-
-        if (sm.States.Count == 0)
-        {
-            issues.Add(("error", "Selection.StateMachine: at least one state is required."));
-            return;
-        }
-
-        var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var stateNames = sm.States.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var benchmarkUsages = OrchestratorConfigLoader.FindBenchmarkMergeStrategyUsages(config)
-            .ToHashSet();
-
-        // Initial state must exist.
-        if (string.IsNullOrWhiteSpace(sm.Initial))
-            issues.Add(("error", "Selection.StateMachine.Initial is required."));
-        else if (!stateNames.Contains(sm.Initial))
-            issues.Add(("error", $"Selection.StateMachine.Initial '{sm.Initial}' does not match any declared state."));
-
-        foreach (var (name, state) in sm.States)
-        {
-            var prefix = $"Selection.StateMachine.States['{name}']";
-
-            if (string.IsNullOrWhiteSpace(state.Agent))
-                issues.Add(("error", $"{prefix}: Agent is required."));
-            else if (!agentNames.Contains(state.Agent))
-                issues.Add(("error", $"{prefix}: Agent '{state.Agent}' is not defined in Agents."));
-
-            for (int ti = 0; ti < state.Transitions.Count; ti++)
-            {
-                var t      = state.Transitions[ti];
-                var tpfx   = $"{prefix}.Transitions[{ti}]";
-
-                if (string.IsNullOrWhiteSpace(t.To))
-                    issues.Add(("error", $"{tpfx}: To is required."));
-                else if (!stateNames.Contains(t.To))
-                    issues.Add(("error", $"{tpfx}: To '{t.To}' does not match any declared state."));
-
-                if (t.SourceAgents is { Count: > 0 })
-                    foreach (var src in t.SourceAgents)
-                        if (!agentNames.Contains(src))
-                            issues.Add(("warning", $"{tpfx}: SourceAgent '{src}' is not defined in Agents."));
-
-                if (!string.IsNullOrWhiteSpace(t.RecoveryAgent) && !agentNames.Contains(t.RecoveryAgent))
-                    issues.Add(("warning", $"{tpfx}: RecoveryAgent '{t.RecoveryAgent}' is not defined in Agents."));
-
-                // Parallel transition checks.
-                if (t.Parallel)
-                {
-                    if (t.Targets is null or { Count: 0 })
-                    {
-                        issues.Add(("error",
-                            $"{tpfx}: Parallel transition requires at least one entry in Targets."));
-                    }
-                    else
-                    {
-                        var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        foreach (var target in t.Targets)
-                        {
-                            if (!seenTargets.Add(target))
-                                issues.Add(("warning", $"{tpfx}: Duplicate target state '{target}' in Targets."));
-
-                            if (!stateNames.Contains(target))
-                                issues.Add(("error",
-                                    $"{tpfx}: Targets['{target}'] does not match any declared state."));
-                            else if (string.Equals(target, t.To, StringComparison.OrdinalIgnoreCase))
-                                issues.Add(("warning",
-                                    $"{tpfx}: Target state '{target}' is the same as the join state (To). " +
-                                    "Branch targets and the join state should be distinct."));
-                        }
-                    }
-
-                    // Merge agent is required for Ranked and SemanticDiff.
-                    if (t.Merge is { Strategy: MergeStrategy.Ranked or MergeStrategy.SemanticDiff })
-                    {
-                        if (string.IsNullOrWhiteSpace(t.Merge.Agent))
-                            issues.Add(("error",
-                                $"{tpfx}: Merge.Strategy '{t.Merge.Strategy}' requires Merge.Agent to be set."));
-                        else if (!agentNames.Contains(t.Merge.Agent))
-                            issues.Add(("error",
-                                $"{tpfx}: Merge.Agent '{t.Merge.Agent}' is not defined in Agents."));
-                    }
-
-                    // Benchmark is a selectable enum value with no implementation — MergeEngine
-                    // throws unconditionally for it. OrchestratorConfigLoader runs the same
-                    // FindBenchmarkMergeStrategyUsages check as a hard load-time failure;
-                    // flagged here too (from the same shared helper) so `fuseraft validate-config`
-                    // catches it without a run.
-                    if (benchmarkUsages.Contains((name, ti)))
-                        issues.Add(("error",
-                            $"{tpfx}: Merge.Strategy 'Benchmark' is not implemented and always throws at " +
-                            "runtime. Use Union, Consensus, Vote, Ranked, or SemanticDiff instead."));
-
-                    // RecoveryAgent is meaningless on a parallel transition (no contract evaluation).
-                    if (!string.IsNullOrWhiteSpace(t.RecoveryAgent))
-                        issues.Add(("warning",
-                            $"{tpfx}: RecoveryAgent is ignored on parallel transitions."));
-                }
-                else
-                {
-                    // Targets without Parallel: true is almost certainly a config mistake.
-                    if (t.Targets is { Count: > 0 })
-                        issues.Add(("warning",
-                            $"{tpfx}: Targets is set but Parallel is false — Targets will be ignored. " +
-                            "Set 'Parallel: true' to enable fan-out."));
-
-                    // Merge without Parallel: true is ignored.
-                    if (t.Merge is not null)
-                        issues.Add(("warning",
-                            $"{tpfx}: Merge is set but Parallel is false — it will be ignored."));
-                }
-            }
-
-            // Terminal states should have no transitions — they're unreachable.
-            if (state.Terminal && state.Transitions.Count > 0)
-                issues.Add(("warning", $"{prefix}: Terminal state declares {state.Transitions.Count} transition(s) that will never fire."));
-        }
-    }
-
-    private static void ValidateStructuredRoutes(
-        OrchestrationConfig config,
-        List<(string Level, string Message)> issues)
-    {
-        if (config.Selection.StructuredRoutes is not { Count: > 0 })
-        {
-            issues.Add(("error", "Structured selection requires at least one entry in StructuredRoutes."));
-            return;
-        }
-
-        var agentNames = config.Agents.Select(a => a.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        for (int i = 0; i < config.Selection.StructuredRoutes.Count; i++)
-        {
-            var route = config.Selection.StructuredRoutes[i];
-            var prefix = $"StructuredRoutes[{i}]";
-
-            if (string.IsNullOrWhiteSpace(route.Agent))
-                issues.Add(("error", $"{prefix}: Agent is empty."));
-            else if (!agentNames.Contains(route.Agent))
-                issues.Add(("error", $"{prefix}: Agent '{route.Agent}' is not defined in Agents."));
-
-            if (route.SourceAgents is { Count: > 0 })
-                foreach (var src in route.SourceAgents)
-                    if (!agentNames.Contains(src))
-                        issues.Add(("warning", $"{prefix}: SourceAgent '{src}' is not defined in Agents."));
-
-            // Condition validation
-            if (string.IsNullOrWhiteSpace(route.Condition.Field))
-            {
-                issues.Add(("error", $"{prefix}: Condition.Field is required."));
-                continue;
-            }
-
-            int operatorCount =
-                (route.Condition.Is    is not null ? 1 : 0) +
-                (route.Condition.IsNot is not null ? 1 : 0) +
-                (route.Condition.Contains  is not null ? 1 : 0) +
-                (route.Condition.Exists    is not null ? 1 : 0);
-
-            if (operatorCount == 0)
-                issues.Add(("error",
-                    $"{prefix}: Condition must specify at least one operator " +
-                    "(Is, IsNot, Contains, or Exists)."));
-            else if (operatorCount > 1)
-                issues.Add(("warning",
-                    $"{prefix}: Condition specifies {operatorCount} operators — only the first one evaluated " +
-                    "will apply (Equals → NotEquals → Contains → Exists)."));
-        }
+                $"flow.model: env var '{resolved.ApiKeyEnvVar}' is not set in this shell."));
     }
 
     private static async Task CheckConnectivityAsync(
@@ -1175,21 +532,16 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             catch { /* unresolvable — already flagged by static checks */ }
         }
 
-        if (config.Selection.Model is { ModelId.Length: > 0 } selModel)
-        {
-            try { candidates.Add(("Selection.Model", factory.Resolve(selModel))); }
-            catch (Exception) { /* unresolvable — already flagged by static checks */ }
-        }
 
         if (config.Selection.Magentic?.Model is { ModelId.Length: > 0 } magModel)
         {
-            try { candidates.Add(("Selection.Magentic", factory.Resolve(magModel))); }
+            try { candidates.Add(("flow.model", factory.Resolve(magModel))); }
             catch (Exception) { /* unresolvable — already flagged by static checks */ }
         }
 
         if (config.Compaction?.Model is { ModelId.Length: > 0 } compModel)
         {
-            try { candidates.Add(("Compaction", factory.Resolve(compModel))); }
+            try { candidates.Add(("advanced.compaction.model", factory.Resolve(compModel))); }
             catch (Exception) { /* unresolvable — already flagged by static checks */ }
         }
 
@@ -1335,32 +687,32 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
 
         // Session / state paths
         if (raw.Events is { } evRaw && expanded.Events is { } evExp)
-            Add("Events.Path", evRaw.Path, evExp.Path);
+            Add("events (built-in)", evRaw.Path, evExp.Path);
 
         if (raw.ChangeTracking is { } ctRaw && expanded.ChangeTracking is { } ctExp)
         {
-            Add("ChangeTracking.Path",          ctRaw.Path,                    ctExp.Path);
-            Add("ChangeTracking.IntentLogPath", ctRaw.ResolveIntentLogPath(),  ctExp.IntentLogPath);
+            Add("change log (built-in)",        ctRaw.Path,                    ctExp.Path);
+            Add("intent log (built-in)",        ctRaw.ResolveIntentLogPath(),  ctExp.IntentLogPath);
         }
 
         if (raw.EvidenceStore is { } esRaw && expanded.EvidenceStore is { } esExp)
-            Add("EvidenceStore.Path", esRaw.Path, esExp.Path);
+            Add("evidence store (built-in)", esRaw.Path, esExp.Path);
 
         if (raw.Validation is { } vRaw && expanded.Validation is { } vExp)
         {
-            Add("Validation.BriefPath",      vRaw.BriefPath,      vExp.BriefPath);
-            Add("Validation.TestReportPath", vRaw.TestReportPath, vExp.TestReportPath);
-            Add("Validation.ChangeLogPath",  vRaw.ChangeLogPath,  vExp.ChangeLogPath);
+            Add("brief artifact",            vRaw.BriefPath,      vExp.BriefPath);
+            Add("test report artifact",      vRaw.TestReportPath, vExp.TestReportPath);
+            Add("change log read by gates",  vRaw.ChangeLogPath,  vExp.ChangeLogPath);
         }
 
         if (raw.Brownfield is { } bfRaw && expanded.Brownfield is { } bfExp)
         {
-            Add("Brownfield.DiscoveryBriefPath",    bfRaw.DiscoveryBriefPath,    bfExp.DiscoveryBriefPath);
-            Add("Brownfield.ConventionProfilePath", bfRaw.ConventionProfilePath, bfExp.ConventionProfilePath);
+            Add("advanced.brownfield.discoveryBriefPath",    bfRaw.DiscoveryBriefPath,    bfExp.DiscoveryBriefPath);
+            Add("advanced.brownfield.conventionProfilePath", bfRaw.ConventionProfilePath, bfExp.ConventionProfilePath);
         }
 
         if (raw.Chatroom is { } chRaw && expanded.Chatroom is { } chExp)
-            Add("Chatroom.Path", chRaw.Path, chExp.Path);
+            Add("advanced.chatroom.path", chRaw.Path, chExp.Path);
 
         // Contracts — only path-bearing predicates
         var rawContracts = raw.Contracts ?? [];
@@ -1373,10 +725,10 @@ public sealed class ValidateConfigCommand(PluginRegistry pluginRegistry) : Async
             {
                 var pr = cr.Requires[pi];
                 var pe = ce.Requires.Count > pi ? ce.Requires[pi] : pr;
-                var pfx = $"Contracts[{cr.Name}].Requires[{pi}]";
-                if (pr.Path        is not null) Add($"{pfx}.Path",          pr.Path,          pe.Path);
-                if (pr.Source      is not null) Add($"{pfx}.Source",        pr.Source,        pe.Source);
-                if (pr.PatternSource is not null) Add($"{pfx}.PatternSource", pr.PatternSource, pe.PatternSource);
+                var pfx = $"gate '{cr.Name}' [{pi}]";
+                if (pr.Path        is not null) Add($"{pfx} path",           pr.Path,          pe.Path);
+                if (pr.Source      is not null) Add($"{pfx} source",         pr.Source,        pe.Source);
+                if (pr.PatternSource is not null) Add($"{pfx} command source", pr.PatternSource, pe.PatternSource);
             }
         }
 

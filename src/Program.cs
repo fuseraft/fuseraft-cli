@@ -237,9 +237,9 @@ app.Configure(cfg =>
 
     // Register "run" explicitly so `fuseraft run "task"` also works.
     cfg.AddCommand<RunCommand>("run")
-        .WithDescription("Run an orchestration session with the agent team.")
+        .WithDescription("Run a session with the agent team defined in a team file.")
         .WithExample(["run", "\"Build a REST API in Go with JWT auth\""])
-        .WithExample(["run", "--config", "config/examples/devops-team.json", "\"Deploy to staging\""]);
+        .WithExample(["run", "--config", "config/examples/devops-team.yaml", "\"Deploy to staging\""]);
 
     cfg.AddCommand<ServeCommand>("serve")
         .WithDescription("Start a long-lived idle-mode daemon that waits for a human (fuseraft attach) or another agent (MCP) to dispatch tasks.")
@@ -259,16 +259,21 @@ app.Configure(cfg =>
         .WithExample(["plugins", "--plugin", "Git"]);
 
     cfg.AddCommand<ShowConfigCommand>("config")
-        .WithDescription("Display an orchestration configuration as rich tables.")
+        .WithDescription("Display a team file as rich tables.")
         .WithAlias("show-config")
         .WithExample(["config"])
-        .WithExample(["config", ".fuseraft/config/examples/devops-team.json"])
+        .WithExample(["config", "config/examples/devops-team.yaml"])
         .WithExample(["config", "--list"]);
 
     cfg.AddCommand<ValidateConfigCommand>("validate")
-        .WithDescription("Validate a configuration file and report all issues.")
+        .WithDescription("Validate a team file and report all issues.")
         .WithExample(["validate", ".fuseraft/config/orchestration.yaml"])
-        .WithExample(["validate", ".fuseraft/config/my-team.json", "--strict"]);
+        .WithExample(["validate", ".fuseraft/config/my-team.yaml", "--strict"]);
+
+    cfg.AddCommand<MigrateCommand>("migrate")
+        .WithDescription("Convert a config in the old 'Orchestration:' format to the current team format.")
+        .WithExample(["migrate", ".fuseraft/config/orchestration.yaml"])
+        .WithExample(["migrate", ".fuseraft/config/orchestration.yaml", "--write"]);
 
     cfg.AddCommand<SessionsCommand>("sessions")
         .WithDescription("List, inspect, or delete persisted session checkpoints.")
@@ -281,9 +286,9 @@ app.Configure(cfg =>
         .WithExample(["sessions", "--cleanup", "--older-than", "2w", "--project", "brewer"]);
 
     cfg.AddCommand<InitCommand>("init")
-        .WithDescription("Generate a ready-to-run orchestration config from an interactive wizard.")
+        .WithDescription("Generate a ready-to-run team file from an interactive wizard.")
         .WithExample(["init"])
-        .WithExample(["init", ".fuseraft/config/my-team.json"])
+        .WithExample(["init", ".fuseraft/config/my-team.yaml"])
         .WithExample(["init", "--template", "swe", "--model", "claude-sonnet-4-6"])
         .WithExample(["init", "--template", "solo", "--no-interactive"])
         .WithExample(["init", "--list-templates"]);
@@ -321,7 +326,7 @@ app.Configure(cfg =>
         branch.AddCommand<ScheduleAddCommand>("add")
             .WithDescription("Create a new scheduled job.")
             .WithExample(["schedule", "add", "nightly-audit", "--cron", "0 2 * * *", "--task", "Run a security audit and report findings"])
-            .WithExample(["schedule", "add", "weekly-report", "--cron", "0 9 * * 1", "--task", "Generate a weekly status report", "--config", "config/report.yaml"]);
+            .WithExample(["schedule", "add", "weekly-report", "--cron", "0 9 * * 1", "--task", "Generate a weekly status report", "--config", ".fuseraft/config/report.yaml"]);
 
         branch.AddCommand<ScheduleListCommand>("list")
             .WithDescription("List all scheduled jobs.")

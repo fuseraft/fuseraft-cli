@@ -4,27 +4,26 @@ namespace fuseraft.Cli.Commands;
 
 public static partial class InitTemplates
 {
-    /// <summary>
-    /// Generates the <c>greenfield</c> template:
-    /// Preflight → Planner → Developer → Tester → Reviewer.
-    ///
-    /// Differences from <c>swe</c>:
-    /// <list type="bullet">
-    ///   <item>No PlannerCritic — the Planner self-critiques with greenfield-specific rules instead.</item>
-    ///   <item>No Verifier — reduces overhead and avoids the verify_command confusion seen on pure-new-file tasks.</item>
-    ///   <item>Planner always reads brief-review before re-handing off (fixes the short-circuit-on-stale-brief bug).</item>
-    ///   <item>Planner enforces greenfield rules: manifest required, no test files, verify_command must be a smoke test.</item>
-    ///   <item>ImplementationComplete drops the secondary pattern match — only the verify_command itself must succeed.</item>
-    ///   <item>Developer keeps one more turn of history (MaxTurnAge 6) for writing multiple new files at once.</item>
-    ///   <item>Tester receives changes_recent so it can detect Developer fixes and re-run automatically.</item>
-    /// </list>
-    /// </summary>
-    private static GeneratedConfig Greenfield(string model, string? endpoint)
-    {
-        var preflight = $"""
-            Name: Preflight
-            Description: Validates the execution environment before planning begins.
-            Instructions: |
+    private static GeneratedConfig Greenfield(string model, string? endpoint) => GeneratedConfig.Inline($$"""
+        team: Greenfield Engineering Team
+        description: "Preflight → Planner → Developer → Tester → Reviewer. Optimised for new projects: no PlannerCritic, no Verifier, stricter greenfield Planner rules (manifest required, no test files, smoke-test verify_command), Developer keeps one more turn of history, and Tester always re-runs after Developer fixes."
+
+        models:
+          default:
+            modelId: {{model}}{{Ep(endpoint, "    ")}}
+
+        artifacts:
+          brief:
+            path: "~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json"
+          testResults:
+            path: .fuseraft/artifacts/test-report.json
+
+        agents:
+          Preflight:
+            role: Validates the execution environment before planning begins.
+            model: default
+            tools: [FileSystem, Shell, Git, Preflight]
+            instructions: |
               You are an environment validator. Run exactly once, at session start.
               Your job is to confirm the sandbox is ready before any code is written.
               Complete these steps in order, then route.
@@ -90,36 +89,39 @@ public static partial class InitTemplates
               its own line as the very last line of your response.
 
               ON SUCCESS — include any warnings as plain text, then call
-              handoff(route_keyword: "PREFLIGHT PASSED").
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
+              handoff(route_keyword: "Planner").
+            advanced:
+              functionChoice: required
+              contextWindow:
+                textOnly: true
+                maxTailMessages: 0
+                maxTurnAge: 1
+                maxToolResultChars: 0
+                maxReplayChars: 0
+              skipExecutionState: true
+              capabilities:
+                FileSystem: [read]
+                Git: [read]
+          Planner:
+            role: Analyses the task and writes a comprehensive greenfield brief.
+            model: default
+            tools:
               - FileSystem
-              - Shell
-              - Git
-              - Preflight
-              - Handoff
-            Capabilities:
-              FileSystem: [read]
-              Git: [read]
-            FunctionChoice: required
-            SkipExecutionState: true
-            ContextWindow:
-              TextOnly: true
-              MaxTurnAge: 1
-            {AgentFileOptions}
-            """;
-
-        var planner = $"""
-            Name: Planner
-            Description: Analyses the task and writes a comprehensive greenfield brief.
-            Instructions: |
+              - Search
+              - SessionContext
+              - Subagent
+              - Decision
+              - Objective
+              - Brief
+              - Self
+            reads: [testResults]
+            instructions: |
               You are a software architect. Your job is to produce a brief that gives the
               Developer everything needed to implement a greenfield project from scratch.
 
               STEP 1 — CATCH UP
-              {ContextReadStep}
-              Also read {FuseraftPaths.LocalPreflight} if it exists — it records
+              {{ContextReadStep}}
+              Also read ~/.fuseraft/sessions/{project_slug}/{session_id}/preflight.json if it exists — it records
               the detected project type, available runtimes, and git repo status.
               If the file is absent, infer these values from the task and sandbox.
               When preflight is present:
@@ -134,16 +136,16 @@ public static partial class InitTemplates
               Call changes_read_latest. Look for failed commands, test failures, or
               "REPLAN REQUIRED" in the session context.
               IF a failure signal is present:
-                - Read {FuseraftPaths.LocalTestReport} and recent changes to understand
+                - Read .fuseraft/artifacts/test-report.json and recent changes to understand
                   the specific failure.
                 - Revise the brief: call write_file_brief(content: ..., format: "json") with
                   the full updated brief — implementation_hints retargeted at the root cause,
                   a new failure_analysis field, and known_pitfalls appended to.
                 - Do NOT re-handoff with the same brief the Developer already tried.
               IF no failure signal:
-                - If {FuseraftPaths.LocalBrief} already exists: read it now.
+                - If ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json already exists: read it now.
                 - If it exists AND there is no known_pitfalls entry AND no recent failure
-                  in changes_read_latest: call handoff(route_keyword: "HANDOFF TO DEVELOPER")
+                  in changes_read_latest: call handoff(route_keyword: "Developer")
                   immediately. Do not rewrite a brief that has no known problems.
                 - Otherwise: write or update the brief as described in STEP 4.
 
@@ -182,7 +184,7 @@ public static partial class InitTemplates
                 Correct: "python -m lily --help"
                 Wrong:   "python -m pytest tests/"
                 Wrong:   "dotnet build" (compile only — no feature logic)
-                {BackgroundedVerifyCommandRule}
+                {{BackgroundedVerifyCommandRule}}
 
               build_command
                 Command to install dependencies before the Tester runs its suite.
@@ -241,17 +243,17 @@ public static partial class InitTemplates
               e. CHECKLIST ↔ files_to_change ALIGNMENT: for each step in
                  execution_checklist that mentions a file path, confirm that path appears
                  in files_to_change. Add any missing paths — a file referenced only in the
-                 checklist but absent from files_to_change bypasses the ImplementationComplete
-                 contract silently.
+                 checklist but absent from files_to_change bypasses the files_to_change
+                 gate silently.
 
               f. VERIFY COMMAND BACKGROUNDING SAFETY: if verify_command backgrounds a
                  long-running process, confirm it follows the rule above — built binary,
                  not a run-wrapper; defensive cleanup prefix; kill within the same command.
 
               STEP 6 — WRITE CONTEXT
-              {ContextWriteStep}
+              {{ContextWriteStep}}
 
-              When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+              When done, call handoff(route_keyword: "Developer").
 
               IF YOU CANNOT PROCEED
               Do not call handoff. Do not treat another agent's session_context note about
@@ -268,36 +270,31 @@ public static partial class InitTemplates
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_brief is the only way to persist this
               brief; implementing the task itself is the Developer's job, not yours.
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Search
-              - SessionContext
-              - Subagent
-              - Decision
-              - Objective
-              - Brief
-              - Handoff
-              - Self
-            Capabilities:
-              FileSystem: [read]
-            FunctionChoice: required
-            {AgentFileOptions}
-            """;
-
-        var developer = $"""
-            Name: Developer
-            Description: Implements every file described in the brief.
-            Instructions: |
+            advanced:
+              functionChoice: required
+              context:
+                - source: session_context
+                  maxChars: 0
+                  label: null
+                - source: changes_recent
+                  maxChars: 0
+                  label: null
+              capabilities:
+                FileSystem: [read]
+          Developer:
+            role: Implements every file described in the brief.
+            model: default
+            tools: [FileSystem, Shell, Git, Changes, SessionContext]
+            reads: [testResults]
+            instructions: |
               You are a senior software engineer building a greenfield project from scratch.
               Your job is to implement every file in the brief and verify the result.
 
               STEP 1 — CATCH UP
-              {ContextReadStep}
+              {{ContextReadStep}}
 
               STEP 2 — READ THE BRIEF
-              Read {FuseraftPaths.LocalBrief}. Note these fields:
+              Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json. Note these fields:
                 known_pitfalls      — approaches that failed before. MUST NOT be repeated.
                 execution_checklist — ordered steps. Work through them in order.
                 build_command       — run this ONCE before implementing, to install deps.
@@ -334,339 +331,198 @@ public static partial class InitTemplates
               creates or modifies a file appears in filesWritten.
               If any step is incomplete, continue implementing — do NOT hand off with
               stubs or partial files.
-              If git_repo is true in {FuseraftPaths.LocalPreflight}, commit with
+              If git_repo is true in ~/.fuseraft/sessions/{project_slug}/{session_id}/preflight.json, commit with
               git_add(repo_path: "workspace") and git_commit(repo_path: "workspace") — the
               repo root Preflight checked is workspace/ itself, not the sandbox root, so commits
               must target the same directory. If git_repo is false or the file is absent, skip.
 
               STEP 7 — WRITE CONTEXT
-              {ContextWriteStep}
+              {{ContextWriteStep}}
               Include: which files were written, whether verify_command passed, and any
               open issues. Keep it under 200 words.
 
               When checklist is complete and verify_command passed:
-                call handoff(route_keyword: "HANDOFF TO TESTER").
+                call handoff(route_keyword: "Tester").
               If the remaining work cannot fit in the current context window:
-                call handoff(route_keyword: "REPLAN REQUIRED").
+                call handoff(route_keyword: "Planner").
               If the brief is missing or contradictory:
-                call handoff(route_keyword: "REPLAN REQUIRED").
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Shell
-              - Git
-              - Changes
-              - SessionContext
-              - Handoff
-            FunctionChoice: required
-            MaxInTurnToolPairs: 12
-            MaxInTurnContextTokens: 60000
-            ContextWindow:
-              TextOnly: true
-              MaxTurnAge: 6
-            {AgentFileOptions}
-            """;
-
-        var tester = $"""
-            Name: Tester
-            Description: Writes and runs tests against the implemented source, produces a structured report.
-            Instructions: |
+                call handoff(route_keyword: "Planner").
+            advanced:
+              functionChoice: required
+              contextWindow:
+                textOnly: true
+                maxTailMessages: 0
+                maxTurnAge: 6
+                maxToolResultChars: 0
+                maxReplayChars: 0
+              context:
+                - source: session_context
+                  maxChars: 0
+                  label: null
+                - source: changes_recent
+                  maxChars: 0
+                  label: null
+              maxInTurnContextTokens: 60000
+              maxInTurnToolPairs: 12
+          Tester:
+            role: "Writes and runs tests against the implemented source, produces a structured report."
+            model: default
+            tools: [FileSystem, Shell, Changes, SessionContext]
+            instructions: |
               You are a QA engineer. Your job is to verify the implementation against the
               acceptance criteria in the brief and produce a structured test report.
 
               CONSTRAINTS — read before doing anything else:
               - NEVER write to, modify, or delete any source file. Source is owned by Developer.
               - NEVER create or edit pyproject.toml, setup.py, package.json, or any project manifest.
-              - Your write scope is strictly: {FuseraftPaths.LocalTests}/ and {FuseraftPaths.LocalTestFixtures}/.
+              - Your write scope is strictly: .fuseraft/tests/ and .fuseraft/tests/fixtures/.
               - If a test fails because a source file is broken, document it in the test report
-                and route BUGS FOUND. Do NOT attempt to fix source files.
+                and hand off to Developer. Do NOT attempt to fix source files.
 
               STEP 1 — CATCH UP
-              {ContextReadStep}
+              {{ContextReadStep}}
               Also call changes_read_latest(count: 10) to check for recent Developer fixes.
               If the session context or recent changes show that the Developer fixed a source
               bug since your last test run, you MUST re-run the full test suite — do not
               route based on stale results.
 
               STEP 2 — READ THE BRIEF
-              Read {FuseraftPaths.LocalBrief} to understand acceptance_criteria, test_targets,
+              Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json to understand acceptance_criteria, test_targets,
               and build_command.
 
               STEP 3 — INSTALL DEPENDENCIES
               If build_command is set in the brief, run it with shell_run before running tests.
 
               STEP 4 — WRITE AND RUN TESTS
-              Write test scripts to {FuseraftPaths.LocalTests}/ and any fixtures to
-              {FuseraftPaths.LocalTestFixtures}/. Run them with shell_run.
+              Write test scripts to .fuseraft/tests/ and any fixtures to
+              .fuseraft/tests/fixtures/. Run them with shell_run.
               Write one test per acceptance criterion. Use the test framework appropriate
               for the project (pytest for Python, jest for Node, etc.).
 
               STEP 5 — WRITE TEST REPORT
-              Write results to {FuseraftPaths.LocalTestReport}:
+              Write results to .fuseraft/artifacts/test-report.json:
                 passed  — true if every criterion passes, false otherwise
                 results — array of objects:
                   PASS: name, status, exit_code, command (exact shell_run command — required)
                   FAIL: name, status, exit_code, command, output (relevant stderr/stdout)
               A PASS result with an empty or missing command field is treated as fabricated
-              and will block handoff. {TestReportCommandFieldRule}
+              and will block handoff. {{TestReportCommandFieldRule}}
               Always write the report before routing.
 
               STEP 6 — WRITE CONTEXT AND ROUTE
-              {ContextWriteStep}
-              If all tests pass: call handoff(route_keyword: "HANDOFF TO REVIEWER").
-              If any test fails: call handoff(route_keyword: "BUGS FOUND").
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Shell
-              - Changes
-              - SessionContext
-              - Handoff
-            FunctionChoice: required
-            MaxInTurnToolPairs: 12
-            MaxInTurnContextTokens: 30000
-            Context:
-              - Source: session_context
-              - Source: changes_recent:5
-              - Source: brief_field:test_targets
-              - Source: brief_field:build_command
-              - Source: own_history:6
-            {AgentFileOptions}
-            """;
-
-        var reviewer = $"""
-            Name: Reviewer
-            Description: Reviews implementation and test results; gives final approval.
-            Instructions: |
+              {{ContextWriteStep}}
+              If all tests pass: call handoff(route_keyword: "Reviewer").
+              If any test fails: call handoff(route_keyword: "Developer").
+            advanced:
+              functionChoice: required
+              context:
+                - source: session_context
+                  maxChars: 0
+                  label: null
+                - source: changes_recent:5
+                  maxChars: 0
+                  label: null
+                - source: brief_field:test_targets
+                  maxChars: 0
+                  label: null
+                - source: brief_field:build_command
+                  maxChars: 0
+                  label: null
+                - source: own_history:6
+                  maxChars: 0
+                  label: null
+                - source: changes_recent
+                  maxChars: 0
+                  label: null
+              maxInTurnContextTokens: 30000
+              maxInTurnToolPairs: 12
+          Reviewer:
+            role: Reviews implementation and test results; gives final approval.
+            model: default
+            tools: [FileSystem, Shell, Changes, SessionContext]
+            reads: [testResults]
+            instructions: |
               You are a principal engineer. Your job is to:
-              1. {ContextReadStep}
-              2. Read the implementation files listed in {FuseraftPaths.LocalBrief} under
-                 files_to_change, and {FuseraftPaths.LocalTestReport}. For any large file:
-                 {LargeFileProtocolReviewer}
+              1. {{ContextReadStep}}
+              2. Read the implementation files listed in ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json under
+                 files_to_change, and .fuseraft/artifacts/test-report.json. For any large file:
+                 {{LargeFileProtocolReviewer}}
               3. Run at least one acceptance criterion as a spot-check with shell_run.
-              4. {ReviewerVerificationIntegrityRule}
-              If the code meets all acceptance criteria, call handoff(route_keyword: "APPROVED").
-              If changes are needed, call handoff(route_keyword: "REVISION REQUIRED").
+              4. {{ReviewerVerificationIntegrityRule}}
+              If the code meets all acceptance criteria, call handoff(route_keyword: "end").
+              If changes are needed, call handoff(route_keyword: "Developer").
                 For each fix: name the file and line, quote the current incorrect code,
                 and provide the exact corrected replacement. Do not describe in prose —
                 provide the code change.
-              If the plan is fundamentally wrong, call handoff(route_keyword: "REPLAN REQUIRED").
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Shell
-              - Changes
-              - SessionContext
-              - Handoff
-            Capabilities:
-              FileSystem: [read]
-            FunctionChoice: auto
-            Context:
-              - Source: session_context
-              - Source: changes_recent:3
-              - Source: file:{FuseraftPaths.LocalTestReport}
-                MaxChars: 3000
-              - Source: own_history:2
-            {AgentFileOptions}
-            """;
+              If the plan is fundamentally wrong, call handoff(route_keyword: "Planner").
+            advanced:
+              context:
+                - source: session_context
+                  maxChars: 0
+                  label: null
+                - source: changes_recent:3
+                  maxChars: 0
+                  label: null
+                - source: own_history:2
+                  maxChars: 0
+                  label: null
+                - source: changes_recent
+                  maxChars: 0
+                  label: null
+              capabilities:
+                FileSystem: [read]
 
-        var mainConfig = $"""
-            Orchestration:
-              Name: Greenfield Engineering Team
-              Description: >-
-                Preflight → Planner → Developer → Tester → Reviewer.
-                Optimised for new projects: no PlannerCritic, no Verifier, stricter
-                greenfield Planner rules (manifest required, no test files, smoke-test
-                verify_command), Developer keeps one more turn of history, and Tester always
-                re-runs after Developer fixes.
+        flow:
+          start: Preflight
+          steps:
+            Preflight:
+              - to: Planner
+                when: preflight passed
+            Planner:
+              - to: Developer
+                requires: [brief]
+            Developer:
+              - to: Tester
+                requires:
+                  - filesWritten: brief.files_to_change
+                  - checklistComplete: brief.execution_checklist
+                  - commandSucceeded: brief.verify_command
+              - to: Planner
+                when: the plan needs rethinking
+                maxRevisits: 3
+            Tester:
+              - to: Reviewer
+                requires:
+                  - testReport: testResults
+              - to: Developer
+            Reviewer:
+              - to: end
+                when: the work is approved
+              - to: Developer
+                when: the code or tests need fixing
+              - to: Planner
+                when: the plan is fundamentally wrong
 
-              Security:
-                FileSystemSandboxPath: .   # set to your project root
+        limits:
+          maxTurns: 50
 
-              EvidenceStore:
-                Path: {FuseraftPaths.LocalEvidence}
+        security:
+          fileSystemSandboxPath: .
 
-              ChangeTracking:
-                Path: {FuseraftPaths.LocalChanges}
-
-              Validation:
-                BriefPath: {FuseraftPaths.LocalBrief}
-                TestReportPath: {FuseraftPaths.LocalTestReport}
-                ChangeLogPath: {FuseraftPaths.LocalChanges}
-
-              Contracts:
-                - Name: BriefExists
-                  Requires:
-                    - Type: FileExists
-                      Path: {FuseraftPaths.LocalBrief}
-
-                - Name: ImplementationComplete
-                  Requires:
-                    - Type: FilesWritten
-                      Source: {FuseraftPaths.LocalBrief}
-                      Field: files_to_change
-                    - Type: ChecklistComplete
-                      Source: {FuseraftPaths.LocalBrief}
-                      Field: execution_checklist
-                    # PatternField only — no secondary Pattern match.
-                    # The exact verify_command from the brief must have succeeded.
-                    - Type: CommandSucceeded
-                      PatternField: verify_command
-
-                - Name: TestsValid
-                  Requires:
-                    - Type: FileExists
-                      Path: {FuseraftPaths.LocalTestReport}
-                    - Type: TestReport
-                      NoFailures: true
-                      HasAssertions: true
-
-              FailureHandling:
-                MissingEvidence:
-                  Action: Reinstruct
-                  Threshold: 3
-                ConflictingEvidence:
-                  Action: Reinstruct
-                  Threshold: 2
-                NoProgress:
-                  Action: Abort
-                  Threshold: 3
-                MaxConsecutiveContractFailures: 6
-                # Catch stuck agents faster than the swe default of 8.
-                MaxConsecutiveTurnsWithoutSignal: 5
-
-              Compaction:
-                TriggerTurnCount: 30
-                KeepRecentTurns: 8
-                Mode: lossless
-                PinLastRoutingSignal: true
-
-              WarnTurnTokens: 60000
-
-              ContextBudget:
-                WarnAt: 80000
-                CutoverAt: 150000
-                MaxSingleTurnInputTokens: 200000
-                MaxToolResultTokens: 6000
-                InTurnToolWindow: 5
-
-              Events:
-                Path: {FuseraftPaths.LocalEventsLog}
-
-              Agents:
-                - AgentFile: agents/preflight.yaml
-                - AgentFile: agents/planner.yaml
-                - AgentFile: agents/developer.yaml
-                - AgentFile: agents/tester.yaml
-                - AgentFile: agents/reviewer.yaml
-
-              Selection:
-                Type: statemachine
-                StateMachine:
-                  Initial: Preflight
-
-                  States:
-                    Preflight:
-                      Agent: Preflight
-                      Transitions:
-                        - To: Planning
-                          Signal: "PREFLIGHT PASSED"
-
-                    Planning:
-                      Agent: Planner
-                      Transitions:
-                        - To: Implementation
-                          Signal: "HANDOFF TO DEVELOPER"
-                          Contract: BriefExists
-
-                    Implementation:
-                      Agent: Developer
-                      Transitions:
-                        - To: Testing
-                          Signal: "HANDOFF TO TESTER"
-                          Contract: ImplementationComplete
-                          HandoffContext:
-                            - Source: session_context
-                            - Source: changes_recent
-                            - Source: brief_field:test_targets
-                        - To: Planning
-                          Signal: "REPLAN REQUIRED"
-                          MaxRevisits: 3
-                          HandoffContext:
-                            - Source: session_context
-                            - Source: changes_recent
-                            - Source: file:{FuseraftPaths.LocalTestReport}
-
-                    Testing:
-                      Agent: Tester
-                      Transitions:
-                        - To: Review
-                          Signal: "HANDOFF TO REVIEWER"
-                          Contract: TestsValid
-                          HandoffContext:
-                            - Source: session_context
-                            - Source: changes_recent
-                            - Source: file:{FuseraftPaths.LocalTestReport}
-                        - To: Implementation
-                          Signal: "BUGS FOUND"
-                          HandoffContext:
-                            - Source: session_context
-                            - Source: changes_recent
-                            - Source: file:{FuseraftPaths.LocalTestReport}
-
-                    Review:
-                      Agent: Reviewer
-                      Transitions:
-                        - To: Done
-                          Signal: APPROVED
-                        - To: Implementation
-                          Signal: "REVISION REQUIRED"
-
-                    Done:
-                      Agent: Reviewer
-                      Terminal: true
-
-              Termination:
-                Type: composite
-                Strategies:
-                  - Type: regex
-                    Pattern: "\\bAPPROVED\\b"
-                    AgentNames: [Reviewer]
-                  - Type: maxiterations
-                    MaxIterations: 50
-
-              # ---------------------------------------------------------------------------
-              # OPTIONAL EXTRAS — uncomment and fill in as needed
-              # ---------------------------------------------------------------------------
-
-              # MaxTotalTokens: 500000
-
-              # McpServers:
-              #   - Name: my-mcp-server
-              #     Command: npx
-              #     Args: [-y, "@modelcontextprotocol/server-filesystem", "."]
-
-              # Checkpoint:
-              #   Mode: json
-              #   Path: {FuseraftPaths.LocalCheckpoints}
-
-              # Models:
-              #   fast:
-              #     ModelId: {model}
-              #   reasoning:
-              #     ModelId: {model}
-              #     ReasoningEffort: low
-            """;
-
-        return new GeneratedConfig(mainConfig, [
-            ("agents/preflight.yaml", preflight),
-            ("agents/planner.yaml",   planner),
-            ("agents/developer.yaml", developer),
-            ("agents/tester.yaml",    tester),
-            ("agents/reviewer.yaml",  reviewer),
-        ]);
-    }
+        advanced:
+          warnTurnTokens: 60000
+          contextBudget:
+            warnAt: 80000
+            cutoverAt: 150000
+            maxSingleTurnInputTokens: 200000
+            maxToolResultTokens: 6000
+            inTurnToolWindow: 5
+          compaction:
+            triggerTurnCount: 30
+            keepRecentTurns: 8
+            mode: lossless
+          failureHandling:
+            maxConsecutiveTurnsWithoutSignal: 5
+            maxConsecutiveContractFailures: 6
+        """);
 }

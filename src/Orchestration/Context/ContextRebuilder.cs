@@ -28,13 +28,13 @@ public static class ContextRebuilder
 
         if (snapshot.CurrentStateName is not null)
         {
-            sb.AppendLine($"STATE MACHINE POSITION: {snapshot.CurrentStateName}");
+            sb.AppendLine($"CURRENT STEP: {snapshot.CurrentStateName}");
             sb.AppendLine();
         }
 
         if (snapshot.ContractResults.Count > 0)
         {
-            sb.AppendLine("CONTRACT STATUS (at compaction time \u2014 retained turns below may supersede failures):");
+            sb.AppendLine("GATE STATUS (at compaction time \u2014 retained turns below may supersede failures):");
             foreach (var r in snapshot.ContractResults.Where(r => r.Passed))
                 sb.AppendLine($"  \u2713 {r.Name}");
             foreach (var r in snapshot.ContractResults.Where(r => !r.Passed))
@@ -124,12 +124,12 @@ public static class ContextRebuilder
         }
 
         var stateHint = snapshot.CurrentStateName is not null
-            ? $" Continue from state '{snapshot.CurrentStateName}'."
+            ? $" Continue from step '{snapshot.CurrentStateName}'."
             : string.Empty;
 
         sb.Append(
             "RESUMPTION NOTE: History compacted. Evidence entries (file writes, commands) above are " +
-            "ground-truth from durable records. Contract status reflects disk state at compaction time " +
+            "ground-truth from durable records. Gate status reflects disk state at compaction time " +
             $"and may be superseded by evidence in the retained turns below \u2014 verify from disk " +
             $"before acting on any \u2717 failures.{stateHint}");
 

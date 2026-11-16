@@ -1,500 +1,307 @@
 ---
 title: "Harness Engineering"
-description: "Harness engineering is the practice of designing orchestration configs so that agents cannot advance the pipeline without real, mechanical evidence — regardless of what they claim in prose. This page…"
+description: "Harness engineering is designing a team so agents can't advance without real, mechanical evidence, whatever they claim in prose. This page covers the control layers and how to combine them."
 ---
 
-Harness engineering is the practice of designing orchestration configs so that agents cannot advance the pipeline without real, mechanical evidence — regardless of what they claim in prose. This page explains the control layers available and how to combine them into a config that is resistant to hallucinated progress.
+Harness engineering is designing a team so agents can't advance without real, mechanical evidence, whatever they claim in prose. This page covers the control layers fuseraft gives you and how to combine them into a team that resists hallucinated progress.
 
 ---
 
 ## The core problem
 
-Agents can write confident-sounding output that does not reflect what actually happened. An agent might say "I wrote the implementation" without ever calling `write_file`. It might claim "all tests pass" without running a single command. Without a mechanical enforcement layer, the pipeline advances on claims rather than facts.
+Agents write confident output that doesn't always match what happened. An agent might say "I wrote the implementation" without ever calling `write_file`, or "all tests pass" without running a command. Without a mechanical layer, the work advances on claims rather than facts.
 
-fuseraft addresses this with four interlocking control layers:
+fuseraft answers with four control layers:
 
 | Layer | What it does |
 |-------|-------------|
-| **Validators** | Block routes until a disk artifact or tool-call record proves the claim |
-| **Change tracking** | Records every file write, shell command, and git commit to a JSONL log on disk |
-| **Routing corrections** | Injects error messages and re-invokes the agent when routing signals are wrong or validators fail |
-| **Stagnation detection** | Throws after too many consecutive bad turns rather than letting an agent loop — the exact counter and default depend on `Selection.Type` (see [Routing corrections](#routing-corrections)) |
+| **Recorded actions** | Every file write, shell command (with exit code) and git commit is recorded, per turn, on every run. |
+| **Gates** | Block a handoff until a file on disk or a recorded action proves the claim. |
+| **Fixed routes** | An agent can only hand off on its step's routes; the `handoff` tool rejects anything else. |
+| **Corrections and stuck detection** | A failed gate sends the agent a specific correction; repeated failures stop the run instead of letting it loop. |
 
-> **Scope note — REPL vs orchestration configs.** Everything below (validators, change tracking, routing corrections, stagnation detection) is orchestrator machinery, wired up by `OrchestratorBuilder` for configs with `Selection`/`Agents`/`Validation` sections. `fuseraft repl` does not run through an orchestrator, so none of these four layers apply there. The REPL's only anti-fabrication check is a single regex in `ReplTurn.ContainsMutationClaim` that catches first-person "I wrote/fixed/updated ..." language unaccompanied by a write-class tool call in the same turn, plus the forced-tool-call behavior for identify/locate-style questions (`ReplTurn.ForceEvidenceQuestionPattern`). For tasks where hallucinated progress is a real risk — long or high-stakes changes, work you can't easily eyeball — prefer an orchestration config (even a single-agent one) so the full validator/change-tracking stack is in effect, rather than relying on the REPL's lighter-weight heuristics.
-
----
-
-## Change tracking
-
-Enable change tracking first — it is the ground-truth record that validators and compaction grounding depend on.
-
-```yaml
-ChangeTracking:
-  Path: ~/.fuseraft/state/{project_slug}/changes.json
-```
-
-With this enabled, every `write_file`, `delete_file`, `shell_run`, `shell_run_script`, and `git_commit` call is recorded to `changes.json`. Downstream agents can call `changes_read_latest()` (via the `Changes` plugin) to see what previous agents actually did. Validators that reference `Validation.ChangeLogPath` cross-check their evidence against this log.
-
-Add `Changes` to the Tester and Reviewer agent plugin lists so they can inspect the record:
-
-```yaml
-- Name: Tester
-  Plugins:
-    - FileSystem
-    - Shell
-    - Changes
-```
+> **Scope note: REPL vs teams.** Everything below is team machinery, used by `fuseraft run`. `fuseraft repl` doesn't run a team, so none of these layers apply there. The REPL's only anti-fabrication check is a regex in `ReplTurn.ContainsMutationClaim` that catches "I wrote/fixed/updated …" with no write-class tool call in the same turn, plus forced tool calls for identify/locate-style questions. For work where hallucinated progress is a real risk, run it as a team, even a one-agent team with a gated edge to `end`.
 
 ---
 
-## Execution state
+## Recorded actions
 
-When `ChangeTracking` is configured, fuseraft maintains a second derived artifact alongside `changes.json`: `execution-state.json` in the same state directory. It is written after every agent turn and injected into every agent's context as the `execution_state` source.
+Every run records each `write_file`, `patch_file`, `delete_file`, `shell_run`, `shell_run_script` and `git_commit` to the change log, with no configuration. A file changed indirectly, say by `sed` in a shell command, is recorded too if the agent has read or written it.
 
-**What agents see:**
+Give the `Changes` tool to agents that check others' work, so they can call `changes_read_latest()` to see what actually happened:
+
+```yaml
+Tester:
+  tools: [FileSystem, Shell, Changes]
+```
+
+### Execution state
+
+Alongside the change log, fuseraft keeps `execution-state.json`, rebuilt after every turn and included in each flow agent's context:
 
 | Field | Content |
 |-------|---------|
-| `ActiveFailures` | Compiler/linker errors extracted from the most recent failed build — file, line, error code, and message. Cleared on the next successful build. |
-| `FailedAttempts` | Ring buffer (last 10) of attempts that were recorded as failed this session — description, error summary, and timestamp. |
-| `SignificantChanges` | Ring buffer (last 50) of file writes, patches, copies, and deletes this session — path, operation, and timestamp. |
-| `Build` | Most recent build result — succeeded flag, exit code, command, and errors. |
-| `OpenTasks` | Tasks opened (description, status) but not yet completed this session. |
+| `ActiveFailures` | Compiler and linker errors from the latest failed build: file, line, code, message. Cleared on the next successful build. |
+| `FailedAttempts` | The last 10 attempts recorded as failed this run. |
+| `SignificantChanges` | The last 50 file writes, patches, copies and deletes. |
+| `Build` | The latest build result: succeeded, exit code, command, errors. |
+| `OpenTasks` | Tasks opened but not completed this run. |
 
-**Session scoping:**
-
-The execution state file lives at the project level (next to `changes.json`) and persists on disk between runs. On session start, fuseraft compares the on-disk `SessionId` to the current session's ID. If they differ, the file is reset to a clean state before the first agent turn runs — so a new run never inherits `ActiveFailures`, `FailedAttempts`, `SignificantChanges`, or a stale `Build.Succeeded` from a prior run.
-
-Within a session, state accumulates across all turns and survives compaction. A REPLAN loop in the same session picks up where it left off — `FailedAttempts` from earlier Developer turns are still visible to the Planner when deciding how to revise the brief.
-
-**When it matters:**
-
-- The Developer reads `ActiveFailures` to know exactly which compiler errors to fix rather than re-running a build to rediscover them.
-- The Planner reads `FailedAttempts` on a REPLAN to avoid proposing an approach the Developer already tried.
-- The Verifier cross-checks `FailedAttempts` against the change log to detect silent failures (errors that recur without being recorded).
+It is reset when a new run starts and survives compaction within a run. A Developer reads `ActiveFailures` to know exactly what to fix; a Planner sent back for a replan sees `FailedAttempts` and avoids an approach that already failed. Set `advanced.skipExecutionState: true` on an agent that doesn't need it.
 
 ---
 
-## Validators
+## Gates
 
-Validators are deterministic pre-flight checks that run before a keyword route fires. They inspect disk artifacts, tool-call records in the conversation history, or both. If a check fails, the route is blocked, an error message is injected, and the source agent is re-invoked.
+A gate checks evidence before a handoff goes through. Declare gates on the edge that needs them; the full list is in [Configuration → Gates](configuration.md#gates) and the details in [Gates](validators.md).
 
-### RequireBrief
-
-Blocks until `brief.json` exists on disk with non-empty `goal`, `files_to_change`, `acceptance_criteria`, and `implementation`.
+**Require the artifact, with its shape.** A brief described in prose but never written doesn't pass; neither does one missing a field the Developer needs.
 
 ```yaml
-Validation:
-  BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
+artifacts:
+  brief:
+    path: .fuseraft/artifacts/brief.json
+    shape: { goal: string, files_to_change: [string], acceptance_criteria: [string], verify_command: string }
 
-Selection:
-  Routes:
-    - Keyword: "HANDOFF TO DEVELOPER"
-      Agent: Developer
-      Validator: RequireBrief
-      SourceAgents:
-        - Planner
+flow:
+  start: Planner
+  steps:
+    Planner:
+      - to: Developer
+        requires: [brief]
 ```
 
-The Planner must call `write_file` to produce `brief.json` at `Validation.BriefPath` before this route fires. A claimed brief — one described in prose but never written — will not pass.
-
-> `RequireBrief` reads `Validation.BriefPath`, so the `Validation` section must be present. If it is omitted entirely, `RequireBrief` is silently unavailable — the route fires unconditionally and the "must call `write_file`" guarantee above does not hold. The same applies to `RequireAllFilesWritten` and `TestReportValid` below.
-
-### RequireWriteFile
-
-Blocks unless the current agent called `write_file` at least once in the current turn.
+**Require the whole job, and proof it builds.** `filesWritten` closes the loophole where an agent writes one trivial file and hands off. `commandSucceeded` reads the verify command from the brief and checks that it ran and exited 0.
 
 ```yaml
-- Keyword: "HANDOFF TO TESTER"
-  Agent: Tester
-  Validator: RequireWriteFile
-  SourceAgents:
-    - Developer
+    Developer:
+      - to: Tester
+        requires:
+          - filesWritten: brief.files_to_change
+          - commandSucceeded: brief.verify_command
 ```
 
-Use `ShellFallbackPattern` when a fix requires only a shell command (no file write):
+**Require test results backed by real commands.** `testReport` rejects any FAIL, and any PASS whose command never actually ran.
 
 ```yaml
-- Keyword: "HANDOFF TO TESTER"
-  Agent: Tester
-  Validator: RequireWriteFile
-  ShellFallbackPattern: "npm install|pip install|go get"
-  SourceAgents:
-    - Developer
+    Tester:
+      - to: Reviewer
+        requires:
+          - testReport: testResults
 ```
 
-### RequireAllFilesWritten
-
-Stronger than `RequireWriteFile` — checks that every path in `brief.json`'s `files_to_change` was written either this turn or in a prior turn recorded in `changes.json`. Closes the loophole where an agent writes one trivial file and hands off while leaving implementation files untouched.
+**Require a structured verdict to finish.** `reviewJudgement` stops a run ending on a vague "looks good": the Reviewer must give a PASS/FAIL verdict with evidence per acceptance criterion, and must have run something this turn if it claims PASS.
 
 ```yaml
-- Keyword: "HANDOFF TO TESTER"
-  Agent: Tester
-  Validator: RequireAllFilesWritten
-  SourceAgents:
-    - Developer
+    Reviewer:
+      - to: end
+        requires: [reviewJudgement]
 ```
 
-### RequireShellPass
-
-Blocks unless a shell command exited 0 in the current turn. Use `RequiredCommandPattern` to require a specific command.
-
-```yaml
-- Keyword: "HANDOFF TO TESTER"
-  Agent: Tester
-  Validator: RequireShellPass
-  RequiredCommandPattern: "go build|cargo build|npm run build"
-  SourceAgents:
-    - Developer
-```
-
-Without `RequiredCommandPattern`, any successful shell run satisfies the check. With it, `go mod tidy` exits 0 but is rejected because it does not match the pattern — the agent must actually run the build.
-
-### TestReportValid
-
-Blocks unless a valid `.fuseraft/artifacts/test-report.json` exists and passes eight structural checks, including: no FAIL results, real assertion patterns in test files, no empty `command` fields on PASS results, and (when a change log is configured) PASS result commands cross-referenced against commands that were actually executed.
-
-```yaml
-- Keyword: "HANDOFF TO REVIEWER"
-  Agent: Reviewer
-  Validator: TestReportValid
-  SourceAgents:
-    - Tester
-```
-
-The Tester must write the test report using `write_file` before this route fires. See [Validators](validators.md#testreportvalid) for the full schema and check details.
-
-### RequireReviewJudgement
-
-Blocks unless the Reviewer's last message contains a `{"review": [...]}` JSON block with `criterion`, `verdict`, and `evidence` entries — one per acceptance criterion.
-
-```yaml
-- Keyword: APPROVED
-  Agent: Reviewer
-  Validators:
-    - RequireShellPass
-    - RequireReviewJudgement
-  SourceAgents:
-    - Reviewer
-```
-
-Used on the terminal route so the session cannot end with a vague "looks good" message. Combines with `RequireShellPass` to require both a real shell run and a structured per-criterion verdict.
+All gates on an edge must pass. When one fails, the agent is told exactly what's missing, and runs again.
 
 ---
 
-## Stacking validators
+## Fixed routes
 
-Use the `Validators` list (AND semantics — all must pass) instead of a single `Validator` when a route requires multiple checks:
+Each agent can only hand off on its own step's edges: the `handoff` tool's `route_keyword` is an enum of them. A Developer can't send work to the Reviewer by skipping the Tester, and a Tester can't approve the run. This replaces the old `SourceAgents` restrictions: role boundaries are the shape of the flow itself.
 
-```yaml
-Routes:
-  - Keyword: "HANDOFF TO TESTER"
-    Agent: Tester
-    Validators:
-      - RequireWriteFile
-      - RequireShellPass
-    RequiredCommandPattern: "go build|go test"
-    SourceAgents:
-      - Developer
-```
-
-The route fires only when both validators pass. If either fails, the source agent is re-invoked with the specific failure message.
+fuseraft writes each agent's routes, and the gates on each, into its prompt, so agents know the bar before they try.
 
 ---
 
-## Source-agent restrictions
+## Corrections and stuck detection
 
-`SourceAgents` enforces role boundaries mechanically. A keyword not authored by an agent in the list is ignored — the routing engine treats it as if the keyword was not present.
+When a gate fails, fuseraft injects a correction naming the missing artifact or action, and the agent runs again. When an agent finishes a turn without handing off, it gets a reminder listing its routes.
+
+Failures are classified, and each kind escalates on its own threshold (see [Failure handling](configuration.md#failure-handling)):
+
+| Kind | Example | Default |
+|------|---------|---------|
+| Missing evidence | The brief doesn't exist yet | 3 |
+| Conflicting evidence | A PASS names a command that never ran | 2 |
+| No progress | The agent hands off again without calling any tool | 3 |
+
+When a threshold is reached, the run stops with a stuck error naming the failing gate and its last message, instead of looping. Two optional backstops: `maxConsecutiveContractFailures` caps failures on one edge across kinds, and `maxConsecutiveTurnsWithoutSignal` stops an agent that keeps working without ever handing off.
+
+`onStuck` on an edge calls in a different agent after two consecutive failures: a Tester that can't produce a passing report because the code is broken gets the Developer, not another retry.
 
 ```yaml
-- Keyword: "BUGS FOUND"
-  Agent: Developer
-  SourceAgents:
-    - Tester   # Only the Tester can send Developer back to fix bugs
-- Keyword: "REVISION REQUIRED"
-  Agent: Developer
-  SourceAgents:
-    - Reviewer  # Only the Reviewer can trigger revision
+    Tester:
+      - to: Reviewer
+        requires:
+          - testReport: testResults
+        onStuck: Developer
 ```
-
-Without `SourceAgents`, any agent could emit `BUGS FOUND` and route another agent backwards. With it, the Developer cannot self-report as the Tester.
 
 ---
 
-## The Validation section
+## Isolated context
 
-Provide file paths used by validators that read disk artifacts:
-
-```yaml
-Validation:
-  BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
-  TestReportPath: .fuseraft/artifacts/test-report.json
-  ChangeLogPath: ~/.fuseraft/state/{project_slug}/changes.json
-  TestAssertionPatterns:
-    - \bassert\b
-    - \bexpect\b
-    - assertEqual
-    - "#\\[test\\]"
-```
-
-`ChangeLogPath` enables check 8 in `TestReportValid` — PASS result commands are cross-referenced against `changes.json`. Omit it to skip that check. `TestAssertionPatterns` are .NET regexes; add patterns for your test framework if the defaults do not cover it.
-
----
-
-## Routing corrections
-
-When an agent produces no valid routing keyword, an unknown keyword, multiple keywords in the same response, or a keyword that belongs to a different role, fuseraft injects a correction message and re-invokes the agent. The agent does not advance the pipeline — it must produce a valid turn to proceed.
-
-**With `Selection.Type: graph`** (`GraphOrchestrator`), one counter covers all failure modes together — a turn with no keyword, then a turn with a wrong-role keyword, then a turn with a validator failure all increment the same counter, which does not reset between different failure types. When it reaches `Selection.Graph.MaxRetries` (default 4), `ValidatorStuckException` is raised and the session stops.
-
-**With `Selection.Type: keyword` or `statemachine`**, there is no single shared counter. Validator/contract failures escalate per failure-type threshold in `FailureHandlingConfig` (default 3, or 2 for `ConflictingEvidence` — see [Failure handling](configuration.md#failure-handling)); a bare no-keyword/no-signal turn only triggers a periodic warning (every 5 consecutive same-agent turns) and is otherwise bounded by `Termination.MaxIterations` alone. Either way, an agent cannot loop indefinitely without eventually hitting a hard stop or a warning that redirects it.
-
----
-
-## Human-in-the-loop gates
-
-Add `RequireHumanApproval: true` to any route to pause and prompt the operator before that route fires, regardless of whether `--hitl` is set:
-
-```yaml
-- Keyword: "HANDOFF TO DEVELOPER"
-  Agent: Developer
-  Validator: RequireBrief
-  RequireHumanApproval: true
-  SourceAgents:
-    - Planner
-```
-
-The operator sees the Planner's output and the brief, then types `y` to allow the handoff or `n` to re-invoke the Planner with a message. This is useful for high-trust checkpoints (e.g. reviewing the brief before a Developer writes code, or approving the APPROVED route before the session ends).
+Agents default to `sees: handoff`: each gets the task or the previous agent's handoff note, the artifacts it reads, its own recent turns and any correction addressed to it, and never another agent's transcript. That stops one agent's mistaken claim from becoming the next agent's premise. Artifacts carry the durable facts; the handoff carries the instructions. Use `sees: conversation` only for agents that genuinely need the discussion.
 
 ---
 
 ## Compaction grounding
 
-When history compaction is enabled, the compaction model summarizes old turns before they are dropped. Without grounding, fabricated claims in those turns bake into the summary and carry forward as apparent facts.
-
-To ground summaries in the change log, configure both `Compaction` and `ChangeTracking`:
+When compaction summarizes old turns, fabricated claims in them could otherwise be baked into the summary. fuseraft passes the change log to the summarizer as ground truth, so a claim like "I wrote `src/main.rs`" is corrected if the log records no such write.
 
 ```yaml
-ChangeTracking:
-  Path: ~/.fuseraft/state/{project_slug}/changes.json
-
-Compaction:
-  TriggerTurnCount: 30
-  KeepRecentTurns: 8
-  Model:
-    ModelId: gpt-4o-mini
+advanced:
+  compaction:
+    triggerTurnCount: 30
+    keepRecentTurns: 8
+    mode: lossless
 ```
 
-When `Validation.ChangeLogPath` is set and `changes.json` exists, the compaction prompt reads the log and instructs the summarizer to correct any agent claims that contradict it. A claim like "I wrote `src/main.rs`" is rejected by the summary if `changes.json` records no such write in that session.
-
-Set `TriggerTurnCount` high enough that implementation is mostly complete before compaction fires. A value of 30–50 is a reasonable default for a four-agent dev team. Compacting at turn 4–6 mid-implementation loses live context before the agents have established their state.
+`lossless` mode goes further: it rebuilds context from the evidence graph and gate results, with no LLM call at all. Set `triggerTurnCount` high enough that implementation is mostly done before compaction fires; 30–50 suits a four-agent team.
 
 ---
 
-## Iteration control
+## Run limits
 
-Three settings cap how long a session runs:
-
-| Setting | Where | What it does |
-|---------|-------|-------------|
-| `MaxIterations` | `Termination` | Hard cap on total agent turns |
-| `MaxTailMessages` | `Agent.ContextWindow` | Trims how much history each agent sees |
-| `MaxTotalTokens` | Top-level | Hard budget cap across the whole session |
-
-For a four-agent pipeline use a composite termination strategy:
-
-```yaml
-Termination:
-  Type: composite
-  MaxIterations: 40
-  Strategies:
-    - Type: regex
-      Pattern: '(?m)^\s*APPROVED\s*$'
-      AgentNames:
-        - Reviewer
-    - Type: maxiterations
-      MaxIterations: 40
-```
-
-The `regex` strategy ends the session cleanly when the Reviewer emits `APPROVED`. The `maxiterations` child is a safety cap — it fires unconditionally at turn 40 regardless of validators or keywords.
+| Setting | What it does |
+|---------|-------------|
+| `limits.maxTurns` | Hard cap on agent turns (default 40). |
+| `limits.maxTokens` | Hard cap on total tokens; the run is saved and can be resumed. |
+| `advanced.contextBudget` | Per-agent input budget that compacts instead of stopping. |
 
 ---
 
 ## Sandbox enforcement
 
-Restrict agent file and shell access to a directory tree. Paths outside the sandbox are denied at the tool level regardless of agent instructions:
+Restrict file and shell access to a directory tree. Paths outside it are denied at the tool level, whatever the instructions say:
 
 ```yaml
-Security:
-  FileSystemSandboxPath: /workspace/project
+security:
+  fileSystemSandboxPath: /workspace/project
 ```
 
-All `read_file`, `write_file`, `delete_file`, and shell path arguments are resolved canonically. Any access outside the tree returns a `[DENIED] '<path>': <reason>` error. System binary prefixes (`/usr/`, `/bin/`, `/sbin/`, `/lib/`, `/lib64/`, `/opt/`, `/nix/`, `/run/current-system/`, `/snap/`) are exempted so agents can run standard tools — note `/etc/` is *not* exempted. `~/.fuseraft` is always accessible regardless of the sandbox, since agents need to read and write session artifacts (briefs, events, context summaries) even when the project sandbox is locked to the repo root.
-
-For stricter isolation, add `CodeExecution` to the agent's plugins list and configure a Docker sandbox. Commands run inside a container rather than the host shell — they cannot write outside the container filesystem regardless of sandbox config.
+Path arguments are resolved canonically; anything outside the tree returns `[DENIED] '<path>': <reason>`. System binary prefixes (`/usr/`, `/bin/`, `/sbin/`, `/lib/`, `/lib64/`, `/opt/`, `/nix/`, `/run/current-system/`, `/snap/`) are exempt so agents can run standard tools; `/etc/` is not. `~/.fuseraft` is always accessible, since agents read and write run artifacts there. For stronger isolation, use the `CodeExecution` tool with a Docker sandbox.
 
 ---
 
-## A complete hardened config
-
-The following is the minimal skeleton of a four-agent config with all enforcement layers active:
+## A complete hardened team
 
 ```yaml
-Orchestration:
-  Name: Software Team
+team: HardenedSoftwareTeam
 
-  ChangeTracking:
-    Path: ~/.fuseraft/state/{project_slug}/changes.json
+models:
+  strong: { modelId: gpt-4o }
+  fast:   { modelId: gpt-4o-mini }
 
-  Validation:
-    BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
-    TestReportPath: .fuseraft/artifacts/test-report.json
-    ChangeLogPath: ~/.fuseraft/state/{project_slug}/changes.json
-    TestAssertionPatterns:
-      - \bassert\b
-      - \bexpect\b
+artifacts:
+  brief:
+    path: .fuseraft/artifacts/brief.json
+    shape:
+      goal: string
+      files_to_change: [string]
+      acceptance_criteria: [string]
+      verify_command: string
+  testResults:
+    path: .fuseraft/artifacts/test-report.json
+    shape:
+      results:
+        - criterion: string
+          status: PASS|FAIL
+          command: string
 
-  Compaction:
-    TriggerTurnCount: 30
-    KeepRecentTurns: 8
-    Model:
-      ModelId: gpt-4o-mini
+agents:
+  Planner:
+    model: strong
+    tools: [FileSystem, Search]
+    writes: [brief]
+    instructions: Read the codebase, decide what must change, and write the brief.
+  Developer:
+    model: strong
+    tools: [FileSystem, Shell, Git, Changes]
+    reads: [brief]
+    instructions: Implement every file in the brief, then run its verify_command.
+    advanced: { functionChoice: required }
+  Tester:
+    model: strong
+    tools: [FileSystem, Shell, Changes]
+    reads: [brief]
+    writes: [testResults]
+    instructions: See what was implemented, write and run tests, and record one result per acceptance criterion.
+    advanced: { functionChoice: required }
+  Reviewer:
+    model: strong
+    tools: [FileSystem, Shell, Changes]
+    reads: [brief, testResults]
+    instructions: Verify the change against every acceptance criterion and re-run the key commands yourself.
 
-  Security:
-    FileSystemSandboxPath: /workspace
+flow:
+  start: Planner
+  steps:
+    Planner:
+      - to: Developer
+        requires: [brief]
+    Developer:
+      - to: Tester
+        requires:
+          - filesWritten: brief.files_to_change
+          - commandSucceeded: brief.verify_command
+      - to: Planner
+        when: the brief is wrong or incomplete
+    Tester:
+      - to: Reviewer
+        when: every criterion passes
+        requires:
+          - testReport: testResults
+        onStuck: Developer
+      - to: Developer
+        when: a test fails
+    Reviewer:
+      - to: end
+        when: every criterion is verified
+        requires: [reviewJudgement]
+      - to: Developer
+        when: the code needs fixing
+      - to: Planner
+        when: the brief itself was wrong
 
-  Models:
-    strong:
-      ModelId: gpt-4o
-    fast:
-      ModelId: gpt-4o-mini
+limits:
+  maxTurns: 60
+  maxTokens: 2000000
 
-  Agents:
-    - Name: Planner
-      Instructions: >-
-        You are a software planner. Read the codebase, identify what needs to change,
-        and write ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json with goal,
-        files_to_change, and acceptance_criteria. When done, write HANDOFF TO DEVELOPER on its own line.
-      Model: strong
-      Plugins: [FileSystem]
-      FunctionChoice: auto
-      TrustScore: 0.9
+security:
+  fileSystemSandboxPath: /workspace
 
-    - Name: Developer
-      Instructions: >-
-        You are a software developer. Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json to understand the task.
-        Implement every file in files_to_change. Run the build with shell_run to verify
-        before handing off. Write HANDOFF TO TESTER on its own line when done.
-      Model: strong
-      Plugins: [FileSystem, Shell, Git, Changes]
-      FunctionChoice: auto
-      TrustScore: 0.9
-
-    - Name: Tester
-      Instructions: >-
-        You are a software tester. Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json for acceptance criteria.
-        Call changes_read_latest() to see what was implemented. Write tests, run them with shell_run,
-        and write .fuseraft/artifacts/test-report.json before handing off.
-        Write HANDOFF TO REVIEWER on its own line when all tests pass.
-        Write BUGS FOUND on its own line when tests fail.
-      Model: strong
-      Plugins: [FileSystem, Shell, Changes]
-      FunctionChoice: auto
-      TrustScore: 0.8
-
-    - Name: Reviewer
-      Instructions: >-
-        You are a code reviewer. Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json and .fuseraft/artifacts/test-report.json.
-        Verify the implementation against every acceptance criterion. Re-run key commands.
-        Emit a JSON review block before your decision keyword.
-        Write APPROVED on its own line when satisfied.
-        Write REVISION REQUIRED on its own line if changes are needed.
-        Write REPLAN REQUIRED on its own line if the brief itself was wrong.
-      Model: strong
-      Plugins: [FileSystem, Shell, Changes]
-      FunctionChoice: auto
-      TrustScore: 0.8
-
-  Selection:
-    Type: keyword
-    DefaultAgent: Planner
-    Routes:
-      - Keyword: "HANDOFF TO DEVELOPER"
-        Agent: Developer
-        Validator: RequireBrief
-        SourceAgents: [Planner]
-
-      - Keyword: "HANDOFF TO TESTER"
-        Agent: Tester
-        Validators:
-          - RequireAllFilesWritten
-          - RequireShellPass
-        RequiredCommandPattern: "go build|go test|cargo build|cargo test|npm run build"
-        SourceAgents: [Developer]
-
-      - Keyword: "HANDOFF TO REVIEWER"
-        Agent: Reviewer
-        Validator: TestReportValid
-        SourceAgents: [Tester]
-
-      - Keyword: "BUGS FOUND"
-        Agent: Developer
-        SourceAgents: [Tester]
-
-      - Keyword: "REVISION REQUIRED"
-        Agent: Developer
-        SourceAgents: [Reviewer]
-
-      - Keyword: "REPLAN REQUIRED"
-        Agent: Planner
-        SourceAgents: [Reviewer]
-
-      - Keyword: APPROVED
-        Agent: Reviewer
-        Validators:
-          - RequireShellPass
-          - RequireReviewJudgement
-        SourceAgents: [Reviewer]
-
-  Termination:
-    Type: composite
-    MaxIterations: 60
-    Strategies:
-      - Type: regex
-        Pattern: '(?m)^\s*APPROVED\s*$'
-        AgentNames: [Reviewer]
-      - Type: maxiterations
-        MaxIterations: 60
-
-  MaxTotalTokens: 2000000
+advanced:
+  compaction:
+    triggerTurnCount: 30
+    keepRecentTurns: 8
+    model: fast
 ```
+
+Notice what the instructions don't say: where the brief lives, what it must contain, which keyword to write, or what each handoff requires. fuseraft generates all of that from the team file.
 
 ---
 
-## What to adjust per task
+## What to add for which problem
 
-Not every task needs all of these controls. Use this table to decide what to include:
-
-| Situation | What to add |
-|-----------|------------|
-| Agent fabricates file writes | `RequireWriteFile` or `RequireAllFilesWritten` on the outbound route |
-| Agent hands off without running the build | `RequireShellPass` + `RequiredCommandPattern` |
-| Tester writes placeholder tests | `TestReportValid` + `TestAssertionPatterns` |
-| Reviewer gives vague approvals | `RequireReviewJudgement` on the `APPROVED` route |
-| One agent triggers another agent's route | `SourceAgents` on every route |
-| Agent loops between failure modes | Stagnation detection is always on; tune `Selection.Graph.MaxRetries` (graph) or the relevant `FailureHandling.<Type>.Threshold` (keyword/statemachine) if it fires too early or too late |
-| Compaction loses real state | Increase `TriggerTurnCount`; set `Validation.ChangeLogPath` |
-| Agent escapes expected directory | Set `Security.FileSystemSandboxPath` |
-| Expensive model burning budget mid-loop | Set `MaxTotalTokens`; use a fast model for the brief and compaction |
+| Problem | Add |
+|---------|-----|
+| An agent claims files it never wrote | `filesWritten: brief.files_to_change`, or `anyFileWritten` |
+| An agent hands off without building | `commandSucceeded: brief.verify_command` |
+| A tester invents passing results | `testReport: testResults` |
+| A reviewer approves vaguely | `reviewJudgement` on the edge to `end` |
+| An artifact is missing fields | A `shape` on the artifact, and the artifact in `requires` |
+| Two agents loop forever | `maxRevisits` on the back-edge; `onStuck` where another agent can fix it |
+| Stuck detection fires too early or late | `advanced.failureHandling` thresholds |
+| Compaction loses real state | Raise `triggerTurnCount`; use `lossless` mode |
+| An agent escapes the project | `security.fileSystemSandboxPath` |
+| A run burns budget in a loop | `limits.maxTokens`; a cheaper model for compaction |
 
 ---
 
 ## Design principles
 
-**Instructions are advisory. Validators are mechanical.** Write agent instructions that describe the workflow, but do not rely on them alone to enforce it. A validator that reads a file on disk cannot be fooled by confident prose. An instruction that says "always write the file before handing off" can be.
+**Instructions are advisory; gates are mechanical.** Describe the work in instructions, but don't rely on them to enforce it. A gate that reads a file on disk can't be talked out of its answer.
 
-**Validators + change tracking together are stronger than either alone.** `RequireWriteFile` checks the conversation history for tool call records. `RequireAllFilesWritten` checks the change log for previous turns. Combine them when completeness matters.
+**Declare each fact once.** Put paths and shapes in `artifacts`, routes in `flow`. fuseraft tells every agent what it needs from there, so nothing drifts between a prompt and a check.
 
-**Ground compaction in facts.** Setting `Validation.ChangeLogPath` alongside `Compaction` means fabricated claims are contradicted at compaction time rather than promoted to the summary. This is the single most important systemic protection against long-session drift.
+**Gate on what ran, not on what was said.** Prefer `commandSucceeded` and `testReport`, which read the recorded actions, over anything that trusts an agent's reply.
 
-**Stagnation is a signal, not a failure.** When a `ValidatorStuckException` fires, check the injected error messages in the transcript. They tell you exactly which validator failed and what evidence was missing. The fix is usually either a tighter instruction (add explicit tool-call guidance) or a relaxed validator (e.g. adding `ShellFallbackPattern` when the fix is a dependency update).
+**A stuck error is a signal.** The correction messages in the transcript say exactly which gate failed and what was missing. The fix is usually a clearer instruction or a different gate, such as `anyFileWritten` with a `fallback` command when the fix is a dependency update.

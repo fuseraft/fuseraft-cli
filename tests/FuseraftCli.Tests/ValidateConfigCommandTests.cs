@@ -6,1971 +6,495 @@ using System.Text.Json;
 using Xunit;
 using fuseraft.Cli.Commands;
 using fuseraft.Cli.Protocol;
-using fuseraft.Core.Models;
 using fuseraft.Infrastructure.Plugins;
-using Spectre.Console.Cli;
 
 namespace fuseraft.Tests;
 
 [Collection("FuseraftHomeEnv")] // --json tests swap the process-wide WireProtocol.Writer
 public class ValidateConfigCommandTests : IDisposable
 {
-    private readonly List<string> _tempFiles = new();
-
-    public ValidateConfigCommandTests()
-    {
-    }
+    private readonly List<string> _tempFiles = [];
 
     public void Dispose()
     {
         foreach (var file in _tempFiles)
-        {
-            try { if (File.Exists(file)) File.Delete(file); }
-            catch { /* best effort */ }
-        }
+            try { if (File.Exists(file)) File.Delete(file); } catch { /* best effort */ }
     }
 
-    [Fact]
-    public async Task FileNotFound_Returns1_WithError()
-    {
-        var tempPath = Path.GetTempFileName();
-        File.Delete(tempPath);
-        _tempFiles.Add(tempPath);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task InvalidJson_Returns1_WithError()
-    {
-        var tempPath = CreateTempFile("invalid { json");
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task SchemaBindingFailure_Returns1_WithError()
-    {
-        var badConfig = """
-        {
-          "Orchestration": {
-            "Agents": "not an array"
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(badConfig);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task DuplicateAgentNames_DetectsError()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Agent1", "Instructions": "ok", "Model": {"ModelId": "gpt"}},
-              {"Name": "Agent1", "Instructions": "ok", "Model": {"ModelId": "gpt"}}
-            ],
-            "Selection": {"Type": "sequential"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task EmptyModelId_FailsValidation()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Agent", "Instructions": "ok", "Model": {"ModelId": ""}}
-            ],
-            "Selection": {"Type": "sequential"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task UnknownSelectionType_ReportsError()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {"Type": "foo"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task KeywordSelectionNoRoutes_ReportsError()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {"Type": "keyword"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task LlmSelectionNoModel_ReportsError()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {"Type": "llm"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task CompositeTerminationNoStrategies_ReportsError()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "composite"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task StrictMode_DoesNotFailOnUnregisteredPlugin(bool strict)
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}, "Plugins": ["fake-plugin"]}
-            ],
-            "Selection": {"Type": "sequential"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath, Strict = strict };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode); // warnings don't fail
-    }
-
-    [Fact]
-    public async Task ValidConfig_Returns0_NoErrors()
-    {
-        var validConfig = """
-        {
-          "Orchestration": {
-            "Name": "Test",
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(validConfig);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task ModelWithKnownPrefix_NoEndpointError()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task ModelWithoutPrefix_NoEndpoint_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "unknown-model"}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task ModelAlias_ResolvesEndpoint()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Models": {
-              "myalias": {
-                "ModelId": "unknown-model",
-                "Endpoint": "http://example.com"
-              }
-            },
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "myalias"}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Theory]
-    [InlineData("llama3:8b")]
-    [InlineData("phi3:mini")]
-    [InlineData("unknown:tag")]
-    public async Task OllamaModel_NoApiKeyWarning(string modelId)
-    {
-        var config = string.Format(@"
-        {{
-          ""Orchestration"": {{
-            ""Agents"": [
-              {{""Name"": ""A"", ""Instructions"": ""ok"", ""Model"": {{""ModelId"": ""{0}""}}}}
-            ],
-            ""Selection"": {{""Type"": ""sequential""}},
-            ""Termination"": {{""Type"": ""maxiterations"", ""MaxIterations"": 10}}
-          }}
-        }}
-        ", modelId);
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Theory]
-    [InlineData("invalidchoice")]
-    [InlineData("")]
-    public async Task InvalidFunctionChoice_Errors(string functionChoice)
-    {
-        var config = string.Format(@"
-        {{
-          ""Orchestration"": {{
-            ""Agents"": [
-              {{""Name"": ""A"", ""Instructions"": ""ok"", ""Model"": {{""ModelId"": ""gpt-4o""}}, ""FunctionChoice"": ""{0}""}}
-            ],
-            ""Selection"": {{""Type"": ""sequential""}},
-            ""Termination"": {{""Type"": ""maxiterations"", ""MaxIterations"": 10}}
-          }}
-        }}
-        ", functionChoice);
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task Termination_UnknownType_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "foo"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task Termination_Regex_NoPattern_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "regex"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task Termination_MaxIterations_Zero_Warning()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 0}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode); // warning only
-    }
-
-    [Fact]
-    public async Task Termination_AgentName_Invalid_Warning()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10, "AgentNames": ["Missing"]}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode); // warning only
-    }
-
-    [Fact]
-    public async Task NestedTermination_Composite_Recursion()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {
-              "Type": "composite",
-              "Strategies": [
-                {
-                  "Type": "regex",
-                  "Pattern": "ok"
-                },
-                {
-                  "Type": "composite",
-                  "Strategies": []
-                }
-              ]
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode); // nested composite no strategies error with prefix
-    }
-
-    [Fact]
-    public async Task KeywordRoutes_ConflictingSignatures_Warning()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt"}}],
-            "Selection": {
-              "Type": "keyword",
-              "Routes": [
-                {"Keyword": "HANDOFF", "SourceAgents": ["A"], "Validator": "V1"},
-                {"Keyword": "HANDOFF", "SourceAgents": ["A"], "Validator": "V2"}
-              ]
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode); // warning only
-    }
-
-    [Fact]
-    public async Task OrchestrationName_Empty_Warning()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Name": "",
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode); // warning only
-    }
-
-    [Fact]
-    public async Task AgentInstructions_Empty_Warning()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode); // warning only
-    }
-
-    [Fact]
-    public async Task NoAgents_Error()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task AgentName_Empty_Error()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    // -----------------------------------------------------------------------
-    // Magentic selection tests
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task MagenticSelection_MissingManagerModel_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "Worker", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "magentic"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task MagenticSelection_MaxRoundCountZero_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "Worker", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {
-              "Type": "magentic",
-              "Magentic": {
-                "Model": {"ModelId": "gpt-4o"},
-                "MaxRoundCount": 0
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task MagenticSelection_MaxStallCountZero_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "Worker", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {
-              "Type": "magentic",
-              "Magentic": {
-                "Model": {"ModelId": "gpt-4o"},
-                "MaxStallCount": 0
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task MagenticSelection_ValidConfig_Returns0()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "Worker", "Instructions": "do work", "Model": {"ModelId": "gpt-4o"}, "Isolation": "Shared"}],
-            "Selection": {
-              "Type": "magentic",
-              "Magentic": {
-                "Model": {"ModelId": "gpt-4o"},
-                "MaxRoundCount": 20,
-                "MaxStallCount": 3,
-                "MaxResetCount": 2
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task MagenticSelection_MaxResetCountNegative_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "Worker", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {
-              "Type": "magentic",
-              "Magentic": {
-                "Model": {"ModelId": "gpt-4o"},
-                "MaxResetCount": -1
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task MagenticSelection_ModelAlias_Resolves()
-    {
-        // The example YAML uses ModelId: "manager" which is defined in Models.
-        // ValidateConfigCommand must resolve the alias before checking endpoint/key.
-        var config = """
-        {
-          "Orchestration": {
-            "Models": {
-              "manager": {
-                "ModelId": "gpt-4o",
-                "Endpoint": "https://api.openai.com/v1",
-                "ApiKeyEnvVar": "OPENAI_API_KEY"
-              }
-            },
-            "Agents": [{"Name": "Worker", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "Isolation": "Shared"}],
-            "Selection": {
-              "Type": "magentic",
-              "Magentic": {
-                "Model": {"ModelId": "manager"}
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        // Warnings about the env var not being set in CI are expected; no errors.
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task MagenticSelection_TerminationConfigured_WarnsButPasses()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "Worker", "Instructions": "do work", "Model": {"ModelId": "gpt-4o"}, "Isolation": "Shared"}],
-            "Selection": {
-              "Type": "magentic",
-              "Magentic": {"Model": {"ModelId": "gpt-4o"}}
-            },
-            "Termination": {"Type": "maxiterations", "MaxIterations": 50}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        // Termination with non-default type alongside Magentic is a warning, not an error.
-        Assert.Equal(0, exitCode);
-    }
-
-    // -----------------------------------------------------------------------
-    // Workflow selection tests
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task WorkflowSelection_ValidConfig_Returns0()
-    {
-        // Regression test: 'workflow' was missing from the selection-type allowlist entirely,
-        // so even a fully valid config reported "Unknown selection type: 'workflow'".
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Writer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "Plugins": ["Handoff"]},
-              {"Name": "Reviewer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "Plugins": ["Handoff"]}
-            ],
-            "Selection": {
-              "Type": "workflow",
-              "Graph": {
-                "EntryNode": "writer",
-                "Nodes": [
-                  {"Id": "writer", "Agent": "Writer"},
-                  {"Id": "reviewer", "Agent": "Reviewer", "Terminal": true}
-                ],
-                "Edges": [
-                  {"From": "writer", "To": "reviewer", "Keyword": "HANDOFF TO REVIEWER"}
-                ]
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task WorkflowSelection_MissingHandoffPlugin_Errors()
-    {
-        // 'workflow' routes exclusively via handoff() tool calls (no text-keyword fallback),
-        // so an agent referenced by a workflow node without the Handoff plugin must error.
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Writer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Reviewer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "Plugins": ["Handoff"]}
-            ],
-            "Selection": {
-              "Type": "workflow",
-              "Graph": {
-                "EntryNode": "writer",
-                "Nodes": [
-                  {"Id": "writer", "Agent": "Writer"},
-                  {"Id": "reviewer", "Agent": "Reviewer", "Terminal": true}
-                ],
-                "Edges": [
-                  {"From": "writer", "To": "reviewer", "Keyword": "HANDOFF TO REVIEWER"}
-                ]
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    // -----------------------------------------------------------------------
-    // MapReduce selection tests
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task MapReduceSelection_ValidConfig_Returns0()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Splitter", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Mapper", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Reducer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {
-              "Type": "mapreduce",
-              "MapReduce": {
-                "Splitter": "Splitter",
-                "Mapper": "Mapper",
-                "Reducer": "Reducer",
-                "ItemsJsonPath": "items"
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task MapReduceSelection_MissingBlock_Errors()
-    {
-        // Regression test: 'mapreduce' was missing from the selection-type allowlist entirely
-        // (found while fixing the same gap for 'workflow'), so this used to report "Unknown
-        // selection type" instead of the more useful "missing MapReduce block" message.
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "mapreduce"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task MapReduceSelection_UnknownSplitterAgent_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Mapper", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Reducer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {
-              "Type": "mapreduce",
-              "MapReduce": {
-                "Splitter": "Missing",
-                "Mapper": "Mapper",
-                "Reducer": "Reducer"
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task MapReduceSelection_MaxSplitterRetriesZero_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Splitter", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Mapper", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Reducer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {
-              "Type": "mapreduce",
-              "MapReduce": {
-                "Splitter": "Splitter",
-                "Mapper": "Mapper",
-                "Reducer": "Reducer",
-                "MaxSplitterRetries": 0
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    // -----------------------------------------------------------------------
-    // ScatterGather selection tests
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task ScatterGatherSelection_ValidConfig_Returns0()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Expert1", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Expert2", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Synthesizer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {
-              "Type": "scattergather",
-              "ScatterGather": {
-                "Participants": ["Expert1", "Expert2"],
-                "Synthesizer": "Synthesizer"
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task ScatterGatherSelection_MissingBlock_Errors()
-    {
-        // Regression test: 'scattergather' was missing from the selection-type allowlist
-        // entirely (found alongside the same 'mapreduce' gap).
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "scattergather"}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task ScatterGatherSelection_NoParticipants_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "Synthesizer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {
-              "Type": "scattergather",
-              "ScatterGather": {
-                "Participants": [],
-                "Synthesizer": "Synthesizer"
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task ScatterGatherSelection_UnknownParticipant_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Expert1", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Synthesizer", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {
-              "Type": "scattergather",
-              "ScatterGather": {
-                "Participants": ["Expert1", "Missing"],
-                "Synthesizer": "Synthesizer"
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    // -----------------------------------------------------------------------
-    // YAML config tests
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task ValidYaml_Returns0_NoErrors()
-    {
-        var yaml = """
-        Orchestration:
-          Name: TestWorkflow
-          Agents:
-            - Name: Agent1
-              Instructions: "Do things."
-              Model:
-                ModelId: gpt-4o
-          Selection:
-            Type: sequential
-          Termination:
-            Type: maxiterations
-            MaxIterations: 10
-        """;
-        var tempPath = CreateTempYamlFile(yaml);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task InvalidYaml_Returns1_WithError()
-    {
-        // Deliberately broken YAML: tab character in indentation (YAML disallows tabs)
-        var yaml = "Orchestration:\n\t Name: bad";
-        var tempPath = CreateTempYamlFile(yaml);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task YamlMissingOrchestrationKey_Returns1()
-    {
-        var yaml = """
-        Name: TestWorkflow
+    // A one-agent team; {agent} adds agent fields, {top} adds top-level keys.
+    private static string Team(string agent = "", string top = "", string model = "gpt-4o") => $$"""
+        Team: Test
         Agents:
-          - Name: Agent1
+          A:
+            Instructions: ok
+            Model: { ModelId: {{model}} }
+        {{Indent(agent, 4)}}
+        Flow:
+          Start: A
+          Steps:
+            A:
+              - To: end
+        {{top}}
         """;
-        var tempPath = CreateTempYamlFile(yaml);
-        var settings = new ValidateConfigSettings { Path = tempPath };
 
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
+    private static string Indent(string text, int spaces) =>
+        string.Join("\n", text.Split('\n').Select(l => l.Length > 0 ? new string(' ', spaces) + l : l));
 
-        Assert.Equal(1, exitCode);
+    private string Yaml(string content)
+    {
+        var path = Path.ChangeExtension(Path.GetTempFileName(), ".yaml");
+        File.WriteAllText(path, content);
+        _tempFiles.Add(path);
+        return path;
     }
 
-    [Fact]
-    public async Task YamlDuplicateAgentNames_DetectsError()
+    private string Json(string content)
     {
-        var yaml = """
-        Orchestration:
-          Agents:
-            - Name: Agent1
-              Instructions: ok
-              Model:
-                ModelId: gpt
-            - Name: Agent1
-              Instructions: ok
-              Model:
-                ModelId: gpt
-          Selection:
-            Type: sequential
-        """;
-        var tempPath = CreateTempYamlFile(yaml);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
+        var path = Path.ChangeExtension(Path.GetTempFileName(), ".json");
+        File.WriteAllText(path, content);
+        _tempFiles.Add(path);
+        return path;
     }
 
-    [Fact]
-    public async Task YmlExtension_AlsoAccepted()
+    private static async Task<(int Exit, List<(string Level, string Message)> Issues, JsonElement Item)> Validate(
+        string path, bool strict = false)
     {
-        var yaml = """
-        Orchestration:
-          Name: TestWorkflow
-          Agents:
-            - Name: A
-              Instructions: ok
-              Model:
-                ModelId: gpt-4o
-          Selection:
-            Type: sequential
-          Termination:
-            Type: maxiterations
-            MaxIterations: 5
-        """;
-        var tempPath = Path.ChangeExtension(Path.GetTempFileName(), ".yml");
-        File.WriteAllText(tempPath, yaml);
-        _tempFiles.Add(tempPath);
-
-        var settings = new ValidateConfigSettings { Path = tempPath };
         var registry = new PluginRegistry();
         registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    // -----------------------------------------------------------------------
-    // Fractional range validation tests
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task TrustScore_OutOfRange_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "TrustScore": 1.5}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task TrustScore_OutOfRange_Negative_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "TrustScore": -0.1}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task TrustScore_BoundaryValues_Valid()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "TrustScore": 0.0},
-              {"Name": "B", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "TrustScore": 1.0}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task ContextCapFraction_OutOfRange_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "ContextWindow": {"ContextCapFraction": 1.5}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task ContextCapFraction_Negative_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}, "ContextWindow": {"ContextCapFraction": -0.2}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task AntiThrashMinSavingsRatio_OutOfRange_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "Compaction": {"AntiThrashMinSavingsRatio": 1.1}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task AntiThrashMinSavingsRatio_Negative_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "Compaction": {"AntiThrashMinSavingsRatio": -0.05}
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    // Regression coverage: a graph node with SubGraphId set (Agent intentionally left empty)
-    // used to be reported as a false "Agent is required" error, because ValidateGraph had no
-    // SubGraphId branch at all — a config that runs correctly under `fuseraft run` failed
-    // `validate-config`.
-    [Fact]
-    public async Task GraphNode_WithValidSubGraphId_DoesNotReportAgentRequiredError()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [
-              {"Name": "Planner",  "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Splitter", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Mapper",   "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}},
-              {"Name": "Reducer",  "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {
-              "Type": "graph",
-              "Graph": {
-                "EntryNode": "plan",
-                "Nodes": [
-                  {"Id": "plan", "Agent": "Planner"},
-                  {"Id": "analyze", "SubGraphId": "parallel_analysis", "Terminal": true}
-                ],
-                "Edges": [
-                  {"From": "plan", "To": "analyze", "Keyword": "READY"}
-                ],
-                "SubGraphs": {
-                  "parallel_analysis": {
-                    "MapReduce": {
-                      "Splitter": "Splitter",
-                      "Mapper": "Mapper",
-                      "Reducer": "Reducer",
-                      "ItemsJsonPath": "tasks"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    // -----------------------------------------------------------------------
-    // McpServers validation tests
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task McpServers_HttpMissingUrl_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "McpServers": [{"Name": "Remote", "Transport": "http"}]
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task McpServers_StdioMissingCommand_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "McpServers": [{"Name": "Local", "Transport": "stdio"}]
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task McpServers_DuplicateNames_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "McpServers": [
-              {"Name": "Dup", "Transport": "stdio", "Command": "npx"},
-              {"Name": "Dup", "Transport": "stdio", "Command": "python"}
-            ]
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task McpServers_OAuthOnStdioTransport_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "McpServers": [
-              {"Name": "Local", "Transport": "stdio", "Command": "npx", "OAuth": {"CallbackPort": 1179}}
-            ]
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task McpServers_UnknownTransportMode_Errors()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "McpServers": [
-              {"Name": "Remote", "Transport": "http", "Url": "https://example.com/mcp", "TransportMode": "bogus"}
-            ]
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
-    }
-
-    [Fact]
-    public async Task McpServers_ValidHttpWithHeadersAndOAuth_Returns0()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "McpServers": [
-              {
-                "Name": "Remote",
-                "Transport": "http",
-                "Url": "https://example.com/mcp",
-                "TransportMode": "streamable-http",
-                "Headers": {"Authorization": "Bearer literal-value-not-an-env-token"},
-                "OAuth": {"ClientId": "abc123"}
-              }
-            ]
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task McpServers_ValidStdio_Returns0()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "McpServers": [
-              {"Name": "Local", "Transport": "stdio", "Command": "npx", "Args": ["-y", "some-server"]}
-            ]
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task McpServers_UnsetEnvVarInHeader_WarnsButPasses()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "McpServers": [
-              {
-                "Name": "Remote",
-                "Transport": "http",
-                "Url": "https://example.com/mcp",
-                "Headers": {"Authorization": "Bearer ${DEFINITELY_UNSET_TEST_VAR_XYZ}"}
-              }
-            ]
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode); // warning only, not an error
-    }
-
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
-
-    private const string ValidJsonConfig = """
-        {
-          "Orchestration": {
-            "Name": "Test",
-            "Agents": [
-              {"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}
-            ],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10}
-          }
-        }
-        """;
-
-    private static async Task<(int Exit, JsonElement Root)> ValidateJsonAsync(ValidateConfigSettings settings)
-    {
         var original = WireProtocol.Writer;
         var sw = new StringWriter();
         WireProtocol.Writer = sw;
         int exit;
-        try { exit = await new ValidateConfigCommand(new PluginRegistry()).ExecuteAsync(null!, settings); }
+        try { exit = await new ValidateConfigCommand(registry).ExecuteAsync(null!, new ValidateConfigSettings { Path = path, Json = true, Strict = strict }); }
         finally { WireProtocol.Writer = original; }
-        return (exit, JsonDocument.Parse(sw.ToString()).RootElement.Clone());
+
+        var item = JsonDocument.Parse(sw.ToString()).RootElement.GetProperty("item").Clone();
+        var issues = item.GetProperty("issues").EnumerateArray()
+            .Select(i => (i.GetProperty("level").GetString()!, i.GetProperty("message").GetString()!))
+            .ToList();
+        return (exit, issues, item);
+    }
+
+    private static void HasError(List<(string Level, string Message)> issues, string text) =>
+        Assert.Contains(issues, i => i.Level == "error" && i.Message.Contains(text));
+
+    private static void HasWarning(List<(string Level, string Message)> issues, string text) =>
+        Assert.Contains(issues, i => i.Level == "warning" && i.Message.Contains(text));
+
+    private static void NoErrors(List<(string Level, string Message)> issues) =>
+        Assert.DoesNotContain(issues, i => i.Level == "error");
+
+    // ── File and format ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task FileNotFound_Errors()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.yaml");
+        var (exit, issues, _) = await Validate(path);
+
+        Assert.Equal(1, exit);
+        HasError(issues, "File not found");
+    }
+
+    [Fact]
+    public async Task InvalidYaml_Errors()
+    {
+        var (exit, issues, _) = await Validate(Yaml("Team:\n\t A: bad"));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "Invalid YAML");
+    }
+
+    [Fact]
+    public async Task InvalidJson_Errors()
+    {
+        var (exit, issues, item) = await Validate(Json("invalid { json"));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "Invalid JSON");
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("config").ValueKind);
+    }
+
+    [Fact]
+    public async Task ValidYaml_Returns0()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Team()));
+
+        Assert.Equal(0, exit);
+        NoErrors(issues);
+    }
+
+    [Fact]
+    public async Task ValidJson_Returns0()
+    {
+        var json = """
+            {"Team": "Test",
+             "Agents": {"A": {"Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}},
+             "Flow": {"Start": "A", "Steps": {"A": [{"To": "end"}]}}}
+            """;
+        var (exit, issues, _) = await Validate(Json(json));
+
+        Assert.Equal(0, exit);
+        NoErrors(issues);
+    }
+
+    [Fact]
+    public async Task YmlExtension_Accepted()
+    {
+        var path = Path.ChangeExtension(Path.GetTempFileName(), ".yml");
+        File.WriteAllText(path, Team());
+        _tempFiles.Add(path);
+
+        var (exit, _, _) = await Validate(path);
+        Assert.Equal(0, exit);
+    }
+
+    [Fact]
+    public async Task OldFormat_ReportsMigrateHint()
+    {
+        var (exit, issues, _) = await Validate(Yaml("Orchestration:\n  Name: old\n"));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "fuseraft migrate");
+    }
+
+    [Fact]
+    public async Task CompileError_IsReported()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Team().Replace("- To: end", "- To: Ghost")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "to 'Ghost' isn't declared");
     }
 
     [Fact]
     public async Task Json_ValidConfig_ReportsSummary()
     {
-        var path = CreateTempFile(ValidJsonConfig);
-
-        var (exit, root) = await ValidateJsonAsync(new ValidateConfigSettings { Path = path, Json = true });
+        var path = Yaml(Team());
+        var (exit, _, item) = await Validate(path);
 
         Assert.Equal(0, exit);
-        var item = root.GetProperty("item");
         Assert.True(item.GetProperty("valid").GetBoolean());
         Assert.Equal(Path.GetFullPath(path), item.GetProperty("path").GetString());
         var config = item.GetProperty("config");
         Assert.Equal("Test", config.GetProperty("name").GetString());
         Assert.Equal("A", Assert.Single(config.GetProperty("agents").EnumerateArray()).GetString());
-        Assert.Equal("sequential", config.GetProperty("selectionType").GetString());
-    }
-
-    [Fact]
-    public async Task Json_Errors_AreItemsNotEnvelopeErrors()
-    {
-        var path = CreateTempFile("""
-            {"Orchestration": {"Name": "Empty", "Agents": [], "Selection": {"Type": "sequential"}}}
-            """);
-
-        var (exit, root) = await ValidateJsonAsync(new ValidateConfigSettings { Path = path, Json = true });
-
-        Assert.Equal(1, exit);
-        var item = root.GetProperty("item");
-        Assert.False(item.GetProperty("valid").GetBoolean());
-        Assert.Contains(item.GetProperty("issues").EnumerateArray(), i =>
-            i.GetProperty("level").GetString() == "error" && i.GetProperty("message").GetString()!.Contains("No agents"));
-    }
-
-    [Fact]
-    public async Task Json_UnparseableFile_HasNoConfigSummary()
-    {
-        var path = CreateTempFile("invalid { json");
-
-        var (exit, root) = await ValidateJsonAsync(new ValidateConfigSettings { Path = path, Json = true });
-
-        Assert.Equal(1, exit);
-        var item = root.GetProperty("item");
-        Assert.False(item.GetProperty("valid").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, item.GetProperty("config").ValueKind);
+        Assert.Equal("statemachine", config.GetProperty("selectionType").GetString());
     }
 
     [Fact]
     public async Task Json_WithDiagram_IsRejected()
     {
-        var (exit, root) = await ValidateJsonAsync(new ValidateConfigSettings { Path = "x.yaml", Json = true, Diagram = true });
+        var original = WireProtocol.Writer;
+        var sw = new StringWriter();
+        WireProtocol.Writer = sw;
+        int exit;
+        try { exit = await new ValidateConfigCommand(new PluginRegistry()).ExecuteAsync(null!, new ValidateConfigSettings { Path = "x.yaml", Json = true, Diagram = true }); }
+        finally { WireProtocol.Writer = original; }
 
         Assert.Equal(1, exit);
-        Assert.Contains("--diagram", root.GetProperty("error").GetString());
+        Assert.Contains("--diagram", JsonDocument.Parse(sw.ToString()).RootElement.GetProperty("error").GetString());
     }
 
-    private string CreateTempFile(string content)
+    // ── Agents and models ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task EmptyInstructions_Errors()
     {
-        var tempPath = Path.GetTempFileName();
-        File.WriteAllText(tempPath, content);
-        _tempFiles.Add(tempPath);
-        return tempPath;
+        var (exit, issues, _) = await Validate(Yaml(Team().Replace("Instructions: ok", "Instructions: \"\"")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "instructions: required");
     }
 
-    private string CreateTempYamlFile(string content)
+    [Fact]
+    public async Task ModelWithKnownPrefix_NeedsNoEndpoint()
     {
-        var tempPath = Path.ChangeExtension(Path.GetTempFileName(), ".yaml");
-        File.WriteAllText(tempPath, content);
-        _tempFiles.Add(tempPath);
-        return tempPath;
+        var (_, issues, _) = await Validate(Yaml(Team(model: "claude-sonnet-4-6")));
+        Assert.DoesNotContain(issues, i => i.Message.Contains("endpoint is empty"));
+    }
+
+    [Fact]
+    public async Task ModelWithoutPrefixOrEndpoint_Errors()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Team(model: "mystery-model")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "endpoint is empty");
+    }
+
+    [Fact]
+    public async Task ModelAlias_ResolvesEndpoint()
+    {
+        var yaml = """
+            Team: Test
+            Models:
+              fast: { ModelId: mystery-model, Endpoint: https://example.com/v1 }
+            Agents:
+              A:
+                Instructions: ok
+                Model: fast
+            Flow:
+              Start: A
+              Steps:
+                A:
+                  - To: end
+            """;
+        var (exit, issues, _) = await Validate(Yaml(yaml));
+
+        Assert.Equal(0, exit);
+        Assert.DoesNotContain(issues, i => i.Message.Contains("endpoint is empty"));
+    }
+
+    [Theory]
+    [InlineData("llama3:8b")]
+    [InlineData("phi3:mini")]
+    public async Task OllamaModel_NoApiKeyWarning(string modelId)
+    {
+        var (_, issues, _) = await Validate(Yaml(Team(model: $"\"{modelId}\"")));
+        Assert.DoesNotContain(issues, i => i.Message.Contains("apiKeyEnvVar"));
+    }
+
+    [Theory]
+    [InlineData("invalidchoice")]
+    [InlineData("\"\"")]
+    public async Task InvalidFunctionChoice_Errors(string choice)
+    {
+        var (exit, issues, _) = await Validate(Yaml(Team(agent: $"Advanced:\n  FunctionChoice: {choice}")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "functionChoice");
+    }
+
+    [Theory]
+    [InlineData("1.5", true)]
+    [InlineData("-0.1", true)]
+    [InlineData("0.0", false)]
+    [InlineData("1.0", false)]
+    public async Task TrustScore_Range(string value, bool errors)
+    {
+        var (exit, issues, _) = await Validate(Yaml(Team(agent: $"Advanced:\n  TrustScore: {value}")));
+
+        if (errors) HasError(issues, "trustScore must be 0.0–1.0");
+        else NoErrors(issues);
+        Assert.Equal(errors ? 1 : 0, exit);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StrictMode_UnregisteredTool_WarnsNeverFails(bool strict)
+    {
+        var (exit, issues, _) = await Validate(Yaml(Team(agent: "Tools: [NotARealPlugin]")), strict);
+
+        Assert.Equal(0, exit);
+        if (strict) HasWarning(issues, "plugin 'NotARealPlugin' is not registered");
+        else Assert.DoesNotContain(issues, i => i.Message.Contains("NotARealPlugin"));
+    }
+
+    // ── Patterns ───────────────────────────────────────────────────────────
+
+    private static string Pattern(string flow, string agents = "S, M, R") => $$"""
+        Team: P
+        Models:
+          manager: { ModelId: gpt-4o }
+        Agents:
+        {{string.Join("\n", agents.Split(", ").Select(a => $"  {a}: {{ Instructions: ok, Model: {{ ModelId: gpt-4o }} }}"))}}
+        Flow:
+        {{Indent(flow, 2)}}
+        """;
+
+    [Fact]
+    public async Task Magentic_Valid_Returns0()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Pattern("Pattern: magentic\nModel: manager", "A, B")));
+
+        Assert.Equal(0, exit);
+        NoErrors(issues);
+    }
+
+    [Theory]
+    [InlineData("MaxRoundCount: 0", "maxRoundCount must be at least 1")]
+    [InlineData("MaxStallCount: 0", "maxStallCount must be at least 1")]
+    [InlineData("MaxResetCount: -1", "maxResetCount must be >= 0")]
+    public async Task Magentic_BadLimits_Error(string field, string message)
+    {
+        var (exit, issues, _) = await Validate(Yaml(Pattern($"Pattern: magentic\nModel: manager\n{field}", "A")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, message);
+    }
+
+    [Fact]
+    public async Task Magentic_WithoutModel_Errors()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Pattern("Pattern: magentic", "A")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "magentic");
+    }
+
+    [Fact]
+    public async Task Magentic_HandoffSees_Errors()
+    {
+        var yaml = Pattern("Pattern: magentic\nModel: manager", "A").Replace("Instructions: ok,", "Instructions: ok, Sees: handoff,");
+        var (exit, issues, _) = await Validate(Yaml(yaml));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "needs every agent to see the conversation");
+    }
+
+    [Fact]
+    public async Task MapReduce_Valid_Returns0()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Pattern("Pattern: mapreduce\nSplitter: S\nMapper: M\nReducer: R")));
+
+        Assert.Equal(0, exit);
+        NoErrors(issues);
+    }
+
+    [Fact]
+    public async Task MapReduce_UnknownAgent_Errors()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Pattern("Pattern: mapreduce\nSplitter: Ghost\nMapper: M\nReducer: R")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "splitter 'Ghost' isn't declared");
+    }
+
+    [Fact]
+    public async Task MapReduce_MaxSplitterRetriesZero_Errors()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Pattern("Pattern: mapreduce\nSplitter: S\nMapper: M\nReducer: R\nMaxSplitterRetries: 0")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "maxSplitterRetries must be at least 1");
+    }
+
+    [Fact]
+    public async Task ScatterGather_Valid_Returns0()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Pattern("Pattern: scattergather\nParticipants: [S, M]\nSynthesizer: R")));
+
+        Assert.Equal(0, exit);
+        NoErrors(issues);
+    }
+
+    [Fact]
+    public async Task ScatterGather_NoParticipants_Errors()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Pattern("Pattern: scattergather\nParticipants: []\nSynthesizer: R")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "participants needs at least one agent");
+    }
+
+    [Fact]
+    public async Task UnknownPattern_Errors()
+    {
+        var (exit, issues, _) = await Validate(Yaml(Pattern("Pattern: keyword")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "'keyword' isn't a pattern");
+    }
+
+    // ── Advanced layers ────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("1.1")]
+    [InlineData("-0.05")]
+    public async Task AntiThrashMinSavingsRatio_OutOfRange_Errors(string value)
+    {
+        var (exit, issues, _) = await Validate(Yaml(Team(top: $"Advanced:\n  Compaction:\n    AntiThrashMinSavingsRatio: {value}")));
+
+        Assert.Equal(1, exit);
+        HasError(issues, "antiThrashMinSavingsRatio must be 0.0–1.0");
+    }
+
+    // ── MCP servers ────────────────────────────────────────────────────────
+
+    private string WithMcp(string servers) => Yaml(Team(top: "McpServers:\n" + Indent(servers, 2)));
+
+    [Theory]
+    [InlineData("- { Name: Remote, Transport: http }", "url is required for http transport")]
+    [InlineData("- { Name: Local, Transport: stdio }", "command is required for stdio transport")]
+    [InlineData("- { Name: Dup, Transport: stdio, Command: npx }\n- { Name: Dup, Transport: stdio, Command: python }", "Duplicate MCP server name")]
+    [InlineData("- { Name: Local, Transport: stdio, Command: npx, OAuth: { CallbackPort: 1179 } }", "oauth requires transport: http")]
+    [InlineData("- { Name: Remote, Transport: http, Url: \"https://example.com/mcp\", TransportMode: bogus }", "transportMode")]
+    public async Task McpServers_Invalid_Error(string servers, string message)
+    {
+        var (exit, issues, _) = await Validate(WithMcp(servers));
+
+        Assert.Equal(1, exit);
+        HasError(issues, message);
+    }
+
+    [Fact]
+    public async Task McpServers_ValidHttpWithHeadersAndOAuth_Returns0()
+    {
+        var (exit, issues, _) = await Validate(WithMcp("""
+            - Name: Remote
+              Transport: http
+              Url: https://example.com/mcp
+              TransportMode: streamable-http
+              Headers: { Authorization: Bearer literal-value }
+              OAuth: { ClientId: abc123 }
+            """));
+
+        Assert.Equal(0, exit);
+        NoErrors(issues);
+    }
+
+    [Fact]
+    public async Task McpServers_ValidStdio_Returns0()
+    {
+        var (exit, issues, _) = await Validate(WithMcp("- { Name: Local, Transport: stdio, Command: npx, Args: [\"-y\", some-server] }"));
+
+        Assert.Equal(0, exit);
+        NoErrors(issues);
+    }
+
+    [Fact]
+    public async Task McpServers_UnsetEnvVarInHeader_WarnsButPasses()
+    {
+        var (exit, issues, _) = await Validate(WithMcp("""
+            - Name: Remote
+              Transport: http
+              Url: https://example.com/mcp
+              Headers: { Authorization: "Bearer ${DEFINITELY_UNSET_TEST_VAR_XYZ}" }
+            """));
+
+        Assert.Equal(0, exit);
+        HasWarning(issues, "DEFINITELY_UNSET_TEST_VAR_XYZ");
+    }
+
+    // ── Security ───────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("segments")]
+    [InlineData("SEGMENTS")]
+    [InlineData("substring")]
+    public async Task ShellPolicy_KnownAllowMode_IsValid(string mode)
+    {
+        var (exit, issues, _) = await Validate(Yaml(Team(top: $"Security:\n  ShellPolicy: {{ Allow: [go test], AllowMode: {mode} }}")));
+
+        Assert.Equal(0, exit);
+        NoErrors(issues);
     }
 
     [Fact]
     public async Task ShellPolicy_UnknownAllowMode_Errors()
     {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "Security": { "ShellPolicy": {"Allow": ["go test"], "AllowMode": "bogus"} }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
+        var (exit, issues, _) = await Validate(Yaml(Team(top: "Security:\n  ShellPolicy: { Allow: [go test], AllowMode: bogus }")));
 
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(1, exitCode);
+        Assert.Equal(1, exit);
+        HasError(issues, "allowMode");
     }
 
     [Fact]
-    public async Task ShellPolicy_SegmentsAllowMode_IsValid()
+    public async Task ShellPolicy_SegmentsWithEmptyAllow_WarnsButPasses()
     {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "Security": { "ShellPolicy": {"Allow": ["go test"], "AllowMode": "segments"} }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task ShellPolicy_SegmentsAllowMode_IsCaseInsensitive()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "Security": { "ShellPolicy": {"Allow": ["go test"], "AllowMode": "SEGMENTS"} }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task ShellPolicy_SubstringAllowMode_IsValid()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "Security": { "ShellPolicy": {"Allow": ["go test"], "AllowMode": "substring"} }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
-    }
-
-    [Fact]
-    public async Task ShellPolicy_SegmentsWithEmptyAllow_WarnsButDoesNotFail()
-    {
-        var config = """
-        {
-          "Orchestration": {
-            "Agents": [{"Name": "A", "Instructions": "ok", "Model": {"ModelId": "gpt-4o"}}],
-            "Selection": {"Type": "sequential"},
-            "Termination": {"Type": "maxiterations", "MaxIterations": 10},
-            "Security": { "ShellPolicy": {"AllowMode": "segments"} }
-          }
-        }
-        """;
-        var tempPath = CreateTempFile(config);
-        var settings = new ValidateConfigSettings { Path = tempPath };
-
-        var registry = new PluginRegistry();
-        registry.RegisterDefaults();
-        var command = new ValidateConfigCommand(registry);
-        var exitCode = await command.ExecuteAsync(null!, settings);
-
-        Assert.Equal(0, exitCode);
+        var (exit, _, _) = await Validate(Yaml(Team(top: "Security:\n  ShellPolicy: { AllowMode: segments }")));
+        Assert.Equal(0, exit);
     }
 }

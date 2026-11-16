@@ -8,8 +8,7 @@ namespace fuseraft.Cli.Commands.Repl;
 /// records a captured plan, and verifies a plan step's structural/shell-command checks.
 /// Extracted from <see cref="ReplTurn"/> — narrow <see cref="ReplSessionContext"/> footprint,
 /// and <see cref="VerifyStepAsync"/>/<see cref="RunVerifyCommandAsync"/> already take no
-/// <c>ctx</c> parameter at all, the same "most self-contained" shape
-/// <c>SubGraphExecutor</c> had in the <c>GraphOrchestrator</c> decomposition.
+/// <c>ctx</c> parameter at all.
 /// </summary>
 internal static class ReplTurnOutcome
 {

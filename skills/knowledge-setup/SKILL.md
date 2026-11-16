@@ -58,7 +58,7 @@ Options:
 
 The harness rebuilds affected nodes incrementally after every agent `write_file` call during a run. Re-run manually after large refactors or initial setup.
 
-Add the `Graph` plugin to agents that need to locate symbols, trace dependencies, or understand what references a given type or method. All graph tools are read-only; no `Capabilities` restriction is needed.
+Add the `Graph` plugin to agents that need to locate symbols, trace dependencies, or understand what references a given type or method. All graph tools are read-only; no `capabilities` restriction is needed.
 
 ### Step 3: Configure Architecture Drift Detection
 
@@ -85,7 +85,7 @@ fuseraft arch check
 
 Violations are printed with file path, source namespace, and the forbidden dependency. Fix the manifest (not the source code) only when the dependency is intentional and the boundary rule was wrong.
 
-To wire architecture checking into a pipeline, add `fuseraft arch check` as a `shell_run` step in the Reviewer agent's instructions, or attach it as a `RequireShellPass` validator on the Reviewer → Done edge/transition.
+To wire architecture checking into a pipeline, add `fuseraft arch check` as a `shell_run` step in the Reviewer agent's instructions, or gate the Reviewer's edge to `end` on it with `requires: [{ commandSucceeded: "fuseraft arch check" }]` (or use the `architecture` check).
 
 ### Step 4: Tune the Lifecycle Policy
 
@@ -125,7 +125,8 @@ With the layer initialized, add plugins to agent `Plugins` lists in the orchestr
 Restrict `Decision` to read-only for agents that should query but not create:
 
 ```yaml
-Plugins: [Decision]
-Capabilities:
-  Decision: [read]
+tools: [Decision]
+advanced:
+  capabilities:
+    Decision: [read]
 ```

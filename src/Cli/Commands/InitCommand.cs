@@ -129,7 +129,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
     {
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]fuseraft config generator[/]");
-        AnsiConsole.MarkupLine("[dim]Generates a ready-to-run YAML orchestration config.[/]");
+        AnsiConsole.MarkupLine("[dim]Generates a ready-to-run team file.[/]");
         AnsiConsole.WriteLine();
 
         var templateKey = ResolveTemplate(settings, out _error);

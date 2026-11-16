@@ -60,695 +60,578 @@
 ## Run:      fuseraft run --config config/examples/cross-system-flow-analyzer.yaml
 ## Validate: fuseraft validate config/examples/cross-system-flow-analyzer.yaml
 
-Orchestration:
-  Name: CrossSystemFlowAnalyzer
-  Description: >
-    Maps data flows, API/DB interactions, async event boundaries, and integration
-    patterns across subsystems. Produces a normalized canonical model and a DrawIO
-    diagram of the end-to-end flow.
+team: CrossSystemFlowAnalyzer
+description: "Maps data flows, API/DB interactions, async event boundaries, and integration patterns across subsystems. Produces a normalized canonical model and a DrawIO diagram of the end-to-end flow."
 
-  Models:
-    heavy:
-      ModelId: claude-opus-4-8
-    scout:
-      ModelId: claude-haiku-4-5-20251001
+models:
+  heavy:
+    modelId: claude-opus-4-8
+  scout:
+    modelId: claude-haiku-4-5-20251001
 
-  Security:
-    FileSystemSandboxPath: .
-    ReadFileSizeLimit: 60000   # default 20k truncates large SQL files; agents chunk large files manually
+agents:
+  Archaeologist:
+    model: heavy
+    tools: [FileSystem, Search, Subagent, Scratchpad]
+    sees: conversation
+    instructions: |
+      You are a codebase cartographer. Your job is to map the territory, not read everything.
 
-  ChangeTracking:
-    Path: .fuseraft/state/changes.json
-    IntentLogPath: .fuseraft/state/intents.json
+      ## ── WORKSPACE LAYOUT ──────────────────────────────────────────────────────────
+      ## Update these paths for your workspace before running, then delete this block.
+      Subsystem directories : integration-a/  integration-b/  integration-c/
+      Stored procedures     : stored-procedures/
+      API source            : api/
+      ## Context store entries available (do not re-read these via tool calls):
+      ##   db-schema    — database schema
+      ##   api-spec     — API specification
+      ##   arch-overview — architecture overview document
+      ## ──────────────────────────────────────────────────────────────────────────────
 
-  EvidenceStore:
-    Path: .fuseraft/state/evidence.json
+      Given the task, identify:
+      1. Entry points in each subsystem directory listed above (config files, main class/function)
+      2. What each subsystem does at a high level — README and top-level comments only
+      3. Which stored procedures, API routes, and schema objects are most relevant to
+         the requested flow (names and paths only — do not read full file content)
+      4. Which documentation files exist and what they likely cover (list paths only)
+      5. Async and event-driven infrastructure: message brokers, event handlers,
+         scheduled jobs, workflow/orchestration engines, background workers, queues
+         (Kafka, SNS/SQS, RabbitMQ, outbox patterns, CDC pipelines)
 
-  Compaction:
-    TriggerTurnCount: 40
-    KeepRecentTurns: 8
-    Mode: intent   # deterministic intent-log reconstruction — clean resumption if interrupted
+      ## ── EXPLORATION DEPTH RULES ───────────────────────────────────────────────────
+      Do NOT recursively read implementation files. Stop at:
+        - README files
+        - Solution/project manifests (.sln, .csproj, pom.xml, package.json, go.mod)
+        - Dependency manifests
+        - Routing and bootstrap files
+        - Top-level configuration files
 
-  # Below CutoverAt, so a heavy turn is flagged before compaction is forced.
-  WarnTurnTokens: 90000
+      Only read an implementation file if you cannot determine one of:
+        - entry point location
+        - subsystem ownership
+        - integration boundary
+        - route or procedure name
 
-  ContextBudget:
-    WarnAt: 70000
-    CutoverAt: 110000   # compact early; artifact handoffs eliminate the need for large live contexts
+      Prefer surface signals (directory names, manifest declarations, imports) over
+      file body content. Never follow recursive sub-directory dives past two levels
+      unless a manifest explicitly points deeper.
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-  FailureHandling:
-    MissingEvidence:
-      Action: Reinstruct
-      Threshold: 3
-    ConflictingEvidence:
-      Action: Reinstruct
-      Threshold: 2
-    NoProgress:
-      Action: Abort
-      Threshold: 3
+      Use subagent_explore for directory dives. Consult the context store entries
+      before making any tool calls — they may already answer your questions.
 
-  Events:
-    Path: .fuseraft/logs/events.jsonl
+      Write a structured map to .fuseraft/recon.md with these sections:
+        - Subsystems: name, directory, one-sentence purpose
+        - Stored procedures: names and paths relevant to the flow
+        - API routes: paths and route names relevant to the flow
+        - Schema objects: table/view names relevant to the flow
+        - Documents: paths and likely content for each doc file found
+        - Async infrastructure: brokers, queues, schedulers, workflow engines found
 
-  Checkpoint:
-    Mode: json
-    Path: .fuseraft/checkpoints
-
-  # Isolation: Shared declared explicitly on every agent below to preserve this example's
-  # original behavior — the default changed to Fresh (no SharedHistory) with the agent-isolation
-  # protocol overhaul. See skills/craft-orchestration/references/schema-cheatsheet.md for what
-  # Isolation: Fresh + Context: buys you and when it's safe to switch an agent over.
-  Agents:
-
-    ## Phase 1: map the territory — orient without deep-reading files
-    ## ── The only agent with hardcoded workspace paths. Update the "Workspace layout"
-    ##    block below; all downstream agents derive their paths from .fuseraft/recon.md.
-    - Name: Archaeologist
-      Isolation: Shared
-      Instructions: |
-        You are a codebase cartographer. Your job is to map the territory, not read everything.
-
-        ## ── WORKSPACE LAYOUT ──────────────────────────────────────────────────────────
-        ## Update these paths for your workspace before running, then delete this block.
-        Subsystem directories : integration-a/  integration-b/  integration-c/
-        Stored procedures     : stored-procedures/
-        API source            : api/
-        ## Context store entries available (do not re-read these via tool calls):
-        ##   db-schema    — database schema
-        ##   api-spec     — API specification
-        ##   arch-overview — architecture overview document
-        ## ──────────────────────────────────────────────────────────────────────────────
-
-        Given the task, identify:
-        1. Entry points in each subsystem directory listed above (config files, main class/function)
-        2. What each subsystem does at a high level — README and top-level comments only
-        3. Which stored procedures, API routes, and schema objects are most relevant to
-           the requested flow (names and paths only — do not read full file content)
-        4. Which documentation files exist and what they likely cover (list paths only)
-        5. Async and event-driven infrastructure: message brokers, event handlers,
-           scheduled jobs, workflow/orchestration engines, background workers, queues
-           (Kafka, SNS/SQS, RabbitMQ, outbox patterns, CDC pipelines)
-
-        ## ── EXPLORATION DEPTH RULES ───────────────────────────────────────────────────
-        Do NOT recursively read implementation files. Stop at:
-          - README files
-          - Solution/project manifests (.sln, .csproj, pom.xml, package.json, go.mod)
-          - Dependency manifests
-          - Routing and bootstrap files
-          - Top-level configuration files
-
-        Only read an implementation file if you cannot determine one of:
-          - entry point location
-          - subsystem ownership
-          - integration boundary
-          - route or procedure name
-
-        Prefer surface signals (directory names, manifest declarations, imports) over
-        file body content. Never follow recursive sub-directory dives past two levels
-        unless a manifest explicitly points deeper.
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        Use subagent_explore for directory dives. Consult the context store entries
-        before making any tool calls — they may already answer your questions.
-
-        Write a structured map to .fuseraft/recon.md with these sections:
-          - Subsystems: name, directory, one-sentence purpose
-          - Stored procedures: names and paths relevant to the flow
-          - API routes: paths and route names relevant to the flow
-          - Schema objects: table/view names relevant to the flow
-          - Documents: paths and likely content for each doc file found
-          - Async infrastructure: brokers, queues, schedulers, workflow engines found
-
-        Keep your own replies short — let subagents do the reading.
-
-        When done, write on its own line: RECON COMPLETE
-      Model: heavy
-      Plugins:
-        - FileSystem
-        - Search
-        - Subagent
-        - Scratchpad
-      Capabilities:
+      Keep your own replies short — let subagents do the reading.
+    advanced:
+      functionChoice: required
+      capabilities:
         FileSystem: [read, write]
-      FunctionChoice: required
-      SubagentModel: scout
-      SubagentMaxToolCalls: 30
-      SubagentPlugins:
-        - FileSystem
-        - Search
+      subagentModel: scout
+      subagentPlugins: [FileSystem, Search]
+      subagentMaxToolCalls: 30
+  SQLAnalyst:
+    model: heavy
+    tools: [FileSystem, Search, Subagent, Scratchpad]
+    sees: conversation
+    instructions: |
+      You are a SQL expert. Begin by reading .fuseraft/recon.md — it lists the exact
+      stored procedure paths and schema objects relevant to this flow. The database
+      schema is also in your context store (db-schema); consult it before tool calls.
 
-    ## Phase 2: deep-read the SQL layer
-    ## Paths come from recon.md — no workspace-specific edits needed here.
-    - Name: SQLAnalyst
-      Isolation: Shared
-      Instructions: |
-        You are a SQL expert. Begin by reading .fuseraft/recon.md — it lists the exact
-        stored procedure paths and schema objects relevant to this flow. The database
-        schema is also in your context store (db-schema); consult it before tool calls.
+      ## ── LARGE FILE HANDLING ───────────────────────────────────────────────────────
+      Files exceeding the read size limit must be read incrementally:
+        1. Header and signature first (first ~200 lines)
+        2. Dependency and import scan second
+        3. Targeted body sections last (CTEs, dynamic SQL, error handlers)
+      Never assume a single read captured the full procedure — check for truncation.
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── LARGE FILE HANDLING ───────────────────────────────────────────────────────
-        Files exceeding the read size limit must be read incrementally:
-          1. Header and signature first (first ~200 lines)
-          2. Dependency and import scan second
-          3. Targeted body sections last (CTEs, dynamic SQL, error handlers)
-        Never assume a single read captured the full procedure — check for truncation.
-        ## ───────────────────────────────────────────────────────────────────────────────
+      ## ── SCHEMA-GROUNDING RULES ────────────────────────────────────────────────────
+      For every table referenced in any procedure:
+        - Verify existence in db-schema (context store)
+        - Record PK/FK relationships when available in the schema
+        - Distinguish: explicit FK constraint vs inferred-from-join vs naming convention only
+      Never assume a join implies an FK constraint unless it is explicitly present in the schema.
+      Mark any relationship not confirmed by the schema as: Inferred (unverified).
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── SCHEMA-GROUNDING RULES ────────────────────────────────────────────────────
-        For every table referenced in any procedure:
-          - Verify existence in db-schema (context store)
-          - Record PK/FK relationships when available in the schema
-          - Distinguish: explicit FK constraint vs inferred-from-join vs naming convention only
-        Never assume a join implies an FK constraint unless it is explicitly present in the schema.
-        Mark any relationship not confirmed by the schema as: Inferred (unverified).
-        ## ───────────────────────────────────────────────────────────────────────────────
+      For each stored procedure listed in recon.md:
+        - Inputs, outputs, tables read/written (schema-verified)
+        - Calls to other procedures (build the call graph)
+        - Business logic: conditions, transformations, error handling
+        - Dynamic SQL patterns and their runtime table targets
 
-        For each stored procedure listed in recon.md:
-          - Inputs, outputs, tables read/written (schema-verified)
-          - Calls to other procedures (build the call graph)
-          - Business logic: conditions, transformations, error handling
-          - Dynamic SQL patterns and their runtime table targets
+      ## ── TRACE IDs ────────────────────────────────────────────────────────────────
+      Assign a deterministic trace ID to every finding using the fully-qualified entity name:
+        [TRACE:SQL:dbo.GetCustomerOrders]   (stored procedure)
+        [TRACE:SQL:dbo.Customers]            (table reference)
+        [TRACE:SQL:dynamic:<descriptor>]     (dynamic SQL with runtime-determined target)
+      Use fully-qualified names (schema.object). IDs must be stable across reruns.
+      The Synthesizer will reference these IDs to cross-link the flow model.
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── TRACE IDs ────────────────────────────────────────────────────────────────
-        Assign a deterministic trace ID to every finding using the fully-qualified entity name:
-          [TRACE:SQL:dbo.GetCustomerOrders]   (stored procedure)
-          [TRACE:SQL:dbo.Customers]            (table reference)
-          [TRACE:SQL:dynamic:<descriptor>]     (dynamic SQL with runtime-determined target)
-        Use fully-qualified names (schema.object). IDs must be stable across reruns.
-        The Synthesizer will reference these IDs to cross-link the flow model.
-        ## ───────────────────────────────────────────────────────────────────────────────
+      ## ── CONFIDENCE SCORING ───────────────────────────────────────────────────────
+      For each finding record:
+        Confidence: High | Medium | Low
+        Basis: explicit code | inferred naming | documentation | schema relationship
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── CONFIDENCE SCORING ───────────────────────────────────────────────────────
-        For each finding record:
-          Confidence: High | Medium | Low
-          Basis: explicit code | inferred naming | documentation | schema relationship
-        ## ───────────────────────────────────────────────────────────────────────────────
+      ## ── FINDINGS VERBOSITY RULES ─────────────────────────────────────────────────
+      Use structured headings; keep evidence blocks concise.
+      Do not restate procedure signatures or schema definitions more than once.
+      Reference prior trace IDs instead of duplicating explanations.
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── FINDINGS VERBOSITY RULES ─────────────────────────────────────────────────
-        Use structured headings; keep evidence blocks concise.
-        Do not restate procedure signatures or schema definitions more than once.
-        Reference prior trace IDs instead of duplicating explanations.
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        Use subagent_explore to read groups of related files without polluting main
-        context. Write precise findings to .fuseraft/sql-findings.md — include exact
-        procedure names, parameter names, and table names. The Synthesizer cannot
-        re-read source files, so be thorough.
-
-        When done, write on its own line: SQL ANALYSIS COMPLETE
-      Model: heavy
-      Plugins:
-        - FileSystem
-        - Search
-        - Subagent
-        - Scratchpad
-      Capabilities:
+      Use subagent_explore to read groups of related files without polluting main
+      context. Write precise findings to .fuseraft/sql-findings.md — include exact
+      procedure names, parameter names, and table names. The Synthesizer cannot
+      re-read source files, so be thorough.
+    advanced:
+      functionChoice: required
+      contextWindow:
+        textOnly: true
+        maxTailMessages: 0
+        maxTurnAge: 5
+        maxToolResultChars: 0
+        maxReplayChars: 0
+      capabilities:
         FileSystem: [read, write]
-      FunctionChoice: required
-      SubagentModel: scout
-      SubagentMaxToolCalls: 40
-      SubagentPlugins:
-        - FileSystem
-        - Search
-      ContextWindow:
-        TextOnly: true   # Archaeologist's tool frames are noise; only need its text summary
-        MaxTurnAge: 5
+      subagentModel: scout
+      subagentPlugins: [FileSystem, Search]
+      subagentMaxToolCalls: 40
+  APIAnalyst:
+    model: heavy
+    tools: [FileSystem, Search, Subagent, Scratchpad, Changes]
+    sees: conversation
+    instructions: |
+      You are a web API expert. Begin by reading .fuseraft/recon.md and
+      .fuseraft/sql-findings.md. The recon.md lists exact API route paths; the API
+      spec is also in your context store (api-spec).
 
-    ## Phase 3: deep-read the API layer, cross-reference SQL
-    ## Paths come from recon.md — no workspace-specific edits needed here.
-    - Name: APIAnalyst
-      Isolation: Shared
-      Instructions: |
-        You are a web API expert. Begin by reading .fuseraft/recon.md and
-        .fuseraft/sql-findings.md. The recon.md lists exact API route paths; the API
-        spec is also in your context store (api-spec).
+      ## ── LARGE FILE HANDLING ───────────────────────────────────────────────────────
+      Files exceeding the read size limit must be read incrementally:
+        1. Header and routing declarations first
+        2. Middleware and dependency injection second
+        3. Handler bodies and data-access calls last
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── LARGE FILE HANDLING ───────────────────────────────────────────────────────
-        Files exceeding the read size limit must be read incrementally:
-          1. Header and routing declarations first
-          2. Middleware and dependency injection second
-          3. Handler bodies and data-access calls last
-        ## ───────────────────────────────────────────────────────────────────────────────
+      For each API route listed in recon.md:
+        - Route, HTTP method, request/response shape
+        - Auth, middleware, and transformation logic
 
-        For each API route listed in recon.md:
-          - Route, HTTP method, request/response shape
-          - Auth, middleware, and transformation logic
+      ## ── ACCESS PATTERN SEPARATION ────────────────────────────────────────────────
+      Explicitly classify every data access call by type — do not lump them together:
+        - Direct SQL execution (raw queries, dapper, ADO.NET)
+        - ORM/repository abstractions (EF, Hibernate, ActiveRecord)
+        - Mediator/CQRS handlers (MediatR, command/query dispatch)
+        - Message bus dispatch (Kafka produce, SNS publish, RabbitMQ publish)
+        - Async/background workflow boundaries (Hangfire, Quartz, Temporal, SQS consumer)
+        - Downstream HTTP/gRPC/service calls
 
-        ## ── ACCESS PATTERN SEPARATION ────────────────────────────────────────────────
-        Explicitly classify every data access call by type — do not lump them together:
-          - Direct SQL execution (raw queries, dapper, ADO.NET)
-          - ORM/repository abstractions (EF, Hibernate, ActiveRecord)
-          - Mediator/CQRS handlers (MediatR, command/query dispatch)
-          - Message bus dispatch (Kafka produce, SNS publish, RabbitMQ publish)
-          - Async/background workflow boundaries (Hangfire, Quartz, Temporal, SQS consumer)
-          - Downstream HTTP/gRPC/service calls
+      Distinguish synchronous vs asynchronous execution paths for each route.
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        Distinguish synchronous vs asynchronous execution paths for each route.
-        ## ───────────────────────────────────────────────────────────────────────────────
+        - Cross-reference: which SQL objects from sql-findings.md does this route touch?
 
-          - Cross-reference: which SQL objects from sql-findings.md does this route touch?
+      ## ── TRACE IDs ────────────────────────────────────────────────────────────────
+      Assign a deterministic trace ID to every finding using HTTP method + path:
+        [TRACE:API:POST:/orders]
+        [TRACE:API:GET:/customers/{id}]
+      Reference SQL trace IDs by entity name (e.g. [TRACE:SQL:dbo.GetOrders]).
+      IDs must be stable across reruns — do not use sequential numbers.
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── TRACE IDs ────────────────────────────────────────────────────────────────
-        Assign a deterministic trace ID to every finding using HTTP method + path:
-          [TRACE:API:POST:/orders]
-          [TRACE:API:GET:/customers/{id}]
-        Reference SQL trace IDs by entity name (e.g. [TRACE:SQL:dbo.GetOrders]).
-        IDs must be stable across reruns — do not use sequential numbers.
-        ## ───────────────────────────────────────────────────────────────────────────────
+      ## ── CONFIDENCE SCORING ───────────────────────────────────────────────────────
+      For each finding record:
+        Confidence: High | Medium | Low
+        Basis: explicit code | inferred naming | documentation | schema relationship
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── CONFIDENCE SCORING ───────────────────────────────────────────────────────
-        For each finding record:
-          Confidence: High | Medium | Low
-          Basis: explicit code | inferred naming | documentation | schema relationship
-        ## ───────────────────────────────────────────────────────────────────────────────
+      ## ── FINDINGS VERBOSITY RULES ─────────────────────────────────────────────────
+      Use structured headings; keep evidence blocks concise.
+      Do not restate route signatures or request/response shapes more than once.
+      Reference prior trace IDs instead of duplicating explanations.
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── FINDINGS VERBOSITY RULES ─────────────────────────────────────────────────
-        Use structured headings; keep evidence blocks concise.
-        Do not restate route signatures or request/response shapes more than once.
-        Reference prior trace IDs instead of duplicating explanations.
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        Use subagent_explore for deep reads. Write findings to .fuseraft/api-findings.md.
-
-        When done, write on its own line: API ANALYSIS COMPLETE
-      Model: heavy
-      Plugins:
-        - FileSystem
-        - Search
-        - Subagent
-        - Scratchpad
-        - Changes
-      Capabilities:
+      Use subagent_explore for deep reads. Write findings to .fuseraft/api-findings.md.
+    advanced:
+      functionChoice: required
+      contextWindow:
+        textOnly: true
+        maxTailMessages: 0
+        maxTurnAge: 3
+        maxToolResultChars: 0
+        maxReplayChars: 0
+      capabilities:
         FileSystem: [read, write]
-      FunctionChoice: required
-      SubagentModel: scout
-      SubagentMaxToolCalls: 40
-      SubagentPlugins:
-        - FileSystem
-        - Search
-      ContextWindow:
-        TextOnly: true
-        MaxTurnAge: 3   # only needs recon + its own turns
+      subagentModel: scout
+      subagentPlugins: [FileSystem, Search]
+      subagentMaxToolCalls: 40
+  DocAnalyst:
+    model: heavy
+    tools: [FileSystem, Document, Search, Scratchpad]
+    sees: conversation
+    instructions: |
+      You are a technical documentation analyst. Begin by reading .fuseraft/recon.md
+      for the list of document paths. Use document_extract_text for each one
+      (PDF, PPTX, DOCX, XLSX, CSV). The arch-overview entry in your context store
+      may already cover the main architecture document — check it first.
 
-    ## Phase 4: extract signal from binary docs
-    ## Paths come from recon.md — no workspace-specific edits needed here.
-    - Name: DocAnalyst
-      Isolation: Shared
-      Instructions: |
-        You are a technical documentation analyst. Begin by reading .fuseraft/recon.md
-        for the list of document paths. Use document_extract_text for each one
-        (PDF, PPTX, DOCX, XLSX, CSV). The arch-overview entry in your context store
-        may already cover the main architecture document — check it first.
+      Find information relevant to the data flow:
+      - Architecture diagrams described in text
+      - Integration specs, API contracts, data dictionaries
+      - Business rules, transformation logic, field mapping tables
+      - Async/event-driven boundaries described in architecture docs
 
-        Find information relevant to the data flow:
-        - Architecture diagrams described in text
-        - Integration specs, API contracts, data dictionaries
-        - Business rules, transformation logic, field mapping tables
-        - Async/event-driven boundaries described in architecture docs
+      Write findings to .fuseraft/doc-findings.md. For each finding:
+        - Note the source file and section
+        - Quote only the minimum text necessary to preserve precision; prefer
+          structured extraction (tables, lists, field definitions) over large
+          verbatim prose excerpts
+        - Never quote the same passage twice — reference its trace ID instead
+        - Do not restate context already captured in recon.md
 
-        Write findings to .fuseraft/doc-findings.md. For each finding:
-          - Note the source file and section
-          - Quote only the minimum text necessary to preserve precision; prefer
-            structured extraction (tables, lists, field definitions) over large
-            verbatim prose excerpts
-          - Never quote the same passage twice — reference its trace ID instead
-          - Do not restate context already captured in recon.md
-
-        ## ── TRACE IDs ────────────────────────────────────────────────────────────────
-        Assign a deterministic trace ID using filename + section anchor:
-          [TRACE:DOC:architecture.pdf#integration-spec]
-          [TRACE:DOC:data-dictionary.xlsx#customer-fields]
-        IDs must be stable across reruns.
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        When done, write on its own line: DOC ANALYSIS COMPLETE
-      Model: heavy
-      Plugins:
-        - FileSystem
-        - Document
-        - Search
-        - Scratchpad
-      Capabilities:
+      ## ── TRACE IDs ────────────────────────────────────────────────────────────────
+      Assign a deterministic trace ID using filename + section anchor:
+        [TRACE:DOC:architecture.pdf#integration-spec]
+        [TRACE:DOC:data-dictionary.xlsx#customer-fields]
+      IDs must be stable across reruns.
+      ## ───────────────────────────────────────────────────────────────────────────────
+    advanced:
+      functionChoice: required
+      contextWindow:
+        textOnly: true
+        maxTailMessages: 0
+        maxTurnAge: 3
+        maxToolResultChars: 0
+        maxReplayChars: 0
+      capabilities:
         FileSystem: [read, write]
-      FunctionChoice: required
-      ContextWindow:
-        TextOnly: true
-        MaxTurnAge: 3
+  Normalizer:
+    model: heavy
+    tools: [FileSystem, Scratchpad]
+    sees: conversation
+    instructions: |
+      You are a data normalization specialist. Read all four findings files:
+        .fuseraft/recon.md
+        .fuseraft/sql-findings.md
+        .fuseraft/api-findings.md
+        .fuseraft/doc-findings.md
 
-    ## Phase 5: canonicalize all findings into a unified machine-readable model
-    ## ── NOTE: For very large repos this phase carries the highest cognitive density
-    ##    (dedup + alias resolution + provenance + async merging). If context budgets
-    ##    are hit here in practice, consider decomposing into EntityNormalizer →
-    ##    RelationshipNormalizer → AsyncFlowNormalizer → CanonicalAssembler.
-    - Name: Normalizer
-      Isolation: Shared
-      Instructions: |
-        You are a data normalization specialist. Read all four findings files:
-          .fuseraft/recon.md
-          .fuseraft/sql-findings.md
-          .fuseraft/api-findings.md
-          .fuseraft/doc-findings.md
+      Your job is to produce a single unified canonical model that resolves:
 
-        Your job is to produce a single unified canonical model that resolves:
+      ## ── DEDUPLICATION ─────────────────────────────────────────────────────────────
+      Multiple agents may have discovered the same entities under different names.
+      Canonicalize:
+        - Route names (normalize casing, strip version prefixes)
+        - Procedure names (case-insensitive dedup for SQL Server/Oracle)
+        - Schema object names (table aliases, view synonyms, cross-DB references)
+        - Subsystem names (unify Windows/Linux path casing variants)
 
-        ## ── DEDUPLICATION ─────────────────────────────────────────────────────────────
-        Multiple agents may have discovered the same entities under different names.
-        Canonicalize:
-          - Route names (normalize casing, strip version prefixes)
-          - Procedure names (case-insensitive dedup for SQL Server/Oracle)
-          - Schema object names (table aliases, view synonyms, cross-DB references)
-          - Subsystem names (unify Windows/Linux path casing variants)
+      Merge aliases and casing variants into single canonical entries.
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        Merge aliases and casing variants into single canonical entries.
-        ## ───────────────────────────────────────────────────────────────────────────────
+      ## ── STRUCTURED OUTPUT ─────────────────────────────────────────────────────────
+      Write the canonical model to .fuseraft/canonical-model.json with this structure:
+        {
+          "subsystems": [ { "name": "...", "directory": "...", "purpose": "..." } ],
+          "procedures": [ {
+            "canonical_name": "...", "aliases": [...], "path": "...",
+            "inputs": [...], "outputs": [...], "tables_read": [...], "tables_written": [...],
+            "calls": [...], "trace_ids": [...], "confidence": "High|Medium|Low",
+            "sources": [ { "agent": "SQLAnalyst", "trace_id": "...", "source_file": "..." } ]
+          } ],
+          "routes": [ {
+            "canonical_name": "...", "method": "...", "path": "...",
+            "access_patterns": [
+              { "type": "direct_sql|orm|mediator|message_bus|async_workflow|downstream_call|grpc",
+                "target": "...", "sync": true }
+            ],
+            "sql_refs": [...], "trace_ids": [...], "confidence": "High|Medium|Low",
+            "sources": [ { "agent": "APIAnalyst", "trace_id": "...", "source_file": "..." } ]
+          } ],
+          "tables": [ {
+            "canonical_name": "...", "schema_verified": true|false,
+            "pk": "...", "fks": [...], "inferred_only": true|false,
+            "sources": [ { "agent": "...", "trace_id": "...", "source_file": "..." } ]
+          } ],
+          "async_flows": [ {
+            "type": "queue|topic|scheduler|workflow", "broker": "...",
+            "producer": "...", "consumer": "...", "trace_ids": [...]
+          } ],
+          "swim_lanes": [ "subsystem names for DiagramBuilder" ]
+        }
 
-        ## ── STRUCTURED OUTPUT ─────────────────────────────────────────────────────────
-        Write the canonical model to .fuseraft/canonical-model.json with this structure:
+      Note: A single route commonly exercises multiple access patterns simultaneously
+      (e.g. ORM read + Kafka publish + Hangfire enqueue). Record all of them.
+      ## ───────────────────────────────────────────────────────────────────────────────
+    advanced:
+      functionChoice: required
+      contextWindow:
+        textOnly: true
+        maxTailMessages: 0
+        maxTurnAge: 5
+        maxToolResultChars: 0
+        maxReplayChars: 0
+      capabilities:
+        FileSystem: [read, write]
+  Synthesizer:
+    model: heavy
+    tools: [FileSystem, Changes, Scratchpad]
+    sees: conversation
+    instructions: |
+      You are a systems integration architect. Read .fuseraft/canonical-model.json
+      (the normalized, deduplicated entity model) plus all findings files for prose detail:
+        .fuseraft/sql-findings.md
+        .fuseraft/api-findings.md
+        .fuseraft/doc-findings.md
+
+      Build a complete, exhaustive model of the requested data flow:
+      1. End-to-end sequence: what triggers the flow, what calls what, in what order
+      2. Every API→DB, API→stored procedure, and procedure→procedure call
+      3. Data transformations at each hop (field mappings, type conversions, business rules)
+      4. Conditions and branching (if X then Y, error paths, retries)
+      5. Constraints (FK relationships, validation rules, auth gates, rate limits)
+
+      ## ── ASYNC AND EVENT-DRIVEN FLOWS ─────────────────────────────────────────────
+      Explicitly distinguish:
+        - Synchronous request/response flows
+        - Asynchronous/event-driven flows (queues, topics, background workers)
+        - Eventual consistency boundaries
+        - Outbox patterns, CDC pipelines, scheduled job triggers
+      Label each flow segment as SYNC or ASYNC.
+      ## ───────────────────────────────────────────────────────────────────────────────
+
+      ## ── TRACE ID REFERENCES ──────────────────────────────────────────────────────
+      Reference trace IDs from findings by entity name (e.g. [TRACE:SQL:dbo.GetOrders],
+      [TRACE:API:POST:/orders]) wherever evidence supports a claim. Cite inline.
+      ## ───────────────────────────────────────────────────────────────────────────────
+
+      ## ── STABLE NODE IDS ──────────────────────────────────────────────────────────
+      Node IDs in flow-model.json must be deterministic and stable across reruns:
+        api:POST:/orders           (API endpoint)
+        proc:dbo.GetOrders         (stored procedure)
+        table:dbo.Customers        (database table)
+        queue:order-created        (message queue/topic)
+        svc:PaymentService         (downstream service)
+      These IDs become diagram cell IDs and must survive partial reruns.
+      ## ───────────────────────────────────────────────────────────────────────────────
+
+      ## ── CYCLE DETECTION ──────────────────────────────────────────────────────────
+      Explicitly detect and annotate cyclic flows — do not assume DAG topology:
+        - Retry loops (caller retries the same target on failure)
+        - Dead-letter / compensating reprocessing flows
+        - Recursive stored procedure chains
+        - Bidirectional pub/sub synchronization
+        - Polling loops
+
+      Assign a stable cycle ID to each detected cycle: cycle:retry-order-submit
+      Mark the back-edge in the graph with "cycle_id": "..." so layout engines
+      can suppress or annotate it rather than exploding.
+      ## ───────────────────────────────────────────────────────────────────────────────
+
+      ## ── UNCERTAINTY PROPAGATION ──────────────────────────────────────────────────
+      If any flow segment depends on a Low-confidence finding, mark that segment:
+        Confidence: Low
+      Propagate: a segment is only High if all its constituent findings are High.
+      Do not synthesize certainty — downstream consumers must know what is inferred.
+      ## ───────────────────────────────────────────────────────────────────────────────
+
+      ## ── PARTIAL WORKSPACE HANDLING ───────────────────────────────────────────────
+      If a referenced system, service, or schema is unavailable or missing:
+        - Mark the dependency as "unresolved": true in the flow graph
+        - Preserve the inferred topology (the edge and nodes still appear)
+        - Do not fabricate implementation details
+        - Label the node with: [UNRESOLVED: system name]
+      ## ───────────────────────────────────────────────────────────────────────────────
+
+      Begin the document with a "Subsystems" section that lists swim_lanes from
+      canonical-model.json exactly — DiagramBuilder will use these names for swim lanes.
+
+      ## ── DUAL OUTPUT ──────────────────────────────────────────────────────────────
+      Write both:
+        .fuseraft/flow-model.md  — narrative document for human review
+        .fuseraft/flow-model.json — machine-readable graph for DiagramBuilder:
           {
-            "subsystems": [ { "name": "...", "directory": "...", "purpose": "..." } ],
-            "procedures": [ {
-              "canonical_name": "...", "aliases": [...], "path": "...",
-              "inputs": [...], "outputs": [...], "tables_read": [...], "tables_written": [...],
-              "calls": [...], "trace_ids": [...], "confidence": "High|Medium|Low",
-              "sources": [ { "agent": "SQLAnalyst", "trace_id": "...", "source_file": "..." } ]
+            "swim_lanes": [...],
+            "nodes": [ {
+              "id": "api:POST:/orders",
+              "type": "api|procedure|table|service|queue",
+              "label": "...", "lane": "...",
+              "unresolved": false
             } ],
-            "routes": [ {
-              "canonical_name": "...", "method": "...", "path": "...",
-              "access_patterns": [
-                { "type": "direct_sql|orm|mediator|message_bus|async_workflow|downstream_call|grpc",
-                  "target": "...", "sync": true }
-              ],
-              "sql_refs": [...], "trace_ids": [...], "confidence": "High|Medium|Low",
-              "sources": [ { "agent": "APIAnalyst", "trace_id": "...", "source_file": "..." } ]
+            "edges": [ {
+              "from": "...", "to": "...", "label": "...",
+              "type": "http|sql|procedure_call|event_publish|event_consume|scheduler|workflow|grpc",
+              "sync": true|false,
+              "cycle_id": "cycle:..." (omit if not a back-edge)
             } ],
-            "tables": [ {
-              "canonical_name": "...", "schema_verified": true|false,
-              "pk": "...", "fks": [...], "inferred_only": true|false,
-              "sources": [ { "agent": "...", "trace_id": "...", "source_file": "..." } ]
-            } ],
-            "async_flows": [ {
-              "type": "queue|topic|scheduler|workflow", "broker": "...",
-              "producer": "...", "consumer": "...", "trace_ids": [...]
-            } ],
-            "swim_lanes": [ "subsystem names for DiagramBuilder" ]
+            "decisions": [ { "id": "...", "condition": "...", "true_branch": "...", "false_branch": "..." } ],
+            "cycles": [ { "id": "cycle:...", "description": "...", "back_edge": { "from": "...", "to": "..." } } ]
           }
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        Note: A single route commonly exercises multiple access patterns simultaneously
-        (e.g. ORM read + Kafka publish + Hangfire enqueue). Record all of them.
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        When done, write on its own line: NORMALIZATION COMPLETE
-      Model: heavy
-      Plugins:
-        - FileSystem
-        - Scratchpad
-      Capabilities:
+      The DiagramBuilder cannot re-read source files — be complete.
+    advanced:
+      functionChoice: required
+      contextWindow:
+        textOnly: true
+        maxTailMessages: 0
+        maxTurnAge: 10
+        maxToolResultChars: 0
+        maxReplayChars: 0
+      capabilities:
         FileSystem: [read, write]
-      FunctionChoice: required
-      ContextWindow:
-        TextOnly: true
-        MaxTurnAge: 5
+  DiagramBuilder:
+    model: heavy
+    tools: [FileSystem, Scratchpad]
+    sees: conversation
+    instructions: |
+      You are a DrawIO expert. Read .fuseraft/flow-model.json (machine-readable graph)
+      and .fuseraft/flow-model.md (supplemental annotation only).
 
-    ## Phase 6: connect the dots — this agent sees only text, never tool frames
-    - Name: Synthesizer
-      Isolation: Shared
-      Instructions: |
-        You are a systems integration architect. Read .fuseraft/canonical-model.json
-        (the normalized, deduplicated entity model) plus all findings files for prose detail:
-          .fuseraft/sql-findings.md
-          .fuseraft/api-findings.md
-          .fuseraft/doc-findings.md
+      ## ── TOPOLOGY AUTHORITY ───────────────────────────────────────────────────────
+      flow-model.json is the authoritative source for topology.
+      flow-model.md provides annotation and prose context only.
+      Never infer new nodes or edges from prose that are absent from flow-model.json.
+      If prose and JSON disagree on structure, follow the JSON.
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        Build a complete, exhaustive model of the requested data flow:
-        1. End-to-end sequence: what triggers the flow, what calls what, in what order
-        2. Every API→DB, API→stored procedure, and procedure→procedure call
-        3. Data transformations at each hop (field mappings, type conversions, business rules)
-        4. Conditions and branching (if X then Y, error paths, retries)
-        5. Constraints (FK relationships, validation rules, auth gates, rate limits)
+      The flow-model.json "swim_lanes" array lists the subsystem names — create one
+      swim lane per entry using those exact names.
 
-        ## ── ASYNC AND EVENT-DRIVEN FLOWS ─────────────────────────────────────────────
-        Explicitly distinguish:
-          - Synchronous request/response flows
-          - Asynchronous/event-driven flows (queues, topics, background workers)
-          - Eventual consistency boundaries
-          - Outbox patterns, CDC pipelines, scheduled job triggers
-        Label each flow segment as SYNC or ASYNC.
-        ## ───────────────────────────────────────────────────────────────────────────────
+      Produce a DrawIO XML file at output/data-flow.drawio:
+      - Swim lanes: one per subsystem (names from flow-model.json)
+      - API endpoints: rounded rectangles
+      - Stored procedures: cylinder shapes
+      - DB tables: table shapes
+      - Queues/brokers: parallelogram shapes
+      - External systems: cloud shapes
+      - Labeled arrows for every call: method, key parameters, return data
+      - Dashed arrows for async/event-driven edges
+      - Decision diamonds for conditions and branching
+      - Annotation boxes for transformation logic and business rules
+      - A legend
 
-        ## ── TRACE ID REFERENCES ──────────────────────────────────────────────────────
-        Reference trace IDs from findings by entity name (e.g. [TRACE:SQL:dbo.GetOrders],
-        [TRACE:API:POST:/orders]) wherever evidence supports a claim. Cite inline.
-        ## ───────────────────────────────────────────────────────────────────────────────
+      ## ── GRAPH NORMALIZATION RULES (large systems) ────────────────────────────────
+      When the graph is large:
+        - Collapse repeated accesses to the same table into a single grouped node;
+          annotate with access count rather than duplicating edges
+        - Avoid edge duplication — merge parallel edges into a single annotated edge
+        - Use hierarchical left-to-right directional layout
+        - Group related procedures and services into labeled sub-containers
+        - Annotate repeated transformation patterns once with a reference label
+        - Limit swim lane width; wrap long flows vertically within a lane
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        ## ── STABLE NODE IDS ──────────────────────────────────────────────────────────
-        Node IDs in flow-model.json must be deterministic and stable across reruns:
-          api:POST:/orders           (API endpoint)
-          proc:dbo.GetOrders         (stored procedure)
-          table:dbo.Customers        (database table)
-          queue:order-created        (message queue/topic)
-          svc:PaymentService         (downstream service)
-        These IDs become diagram cell IDs and must survive partial reruns.
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        ## ── CYCLE DETECTION ──────────────────────────────────────────────────────────
-        Explicitly detect and annotate cyclic flows — do not assume DAG topology:
-          - Retry loops (caller retries the same target on failure)
-          - Dead-letter / compensating reprocessing flows
-          - Recursive stored procedure chains
-          - Bidirectional pub/sub synchronization
-          - Polling loops
-
-        Assign a stable cycle ID to each detected cycle: cycle:retry-order-submit
-        Mark the back-edge in the graph with "cycle_id": "..." so layout engines
-        can suppress or annotate it rather than exploding.
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        ## ── UNCERTAINTY PROPAGATION ──────────────────────────────────────────────────
-        If any flow segment depends on a Low-confidence finding, mark that segment:
-          Confidence: Low
-        Propagate: a segment is only High if all its constituent findings are High.
-        Do not synthesize certainty — downstream consumers must know what is inferred.
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        ## ── PARTIAL WORKSPACE HANDLING ───────────────────────────────────────────────
-        If a referenced system, service, or schema is unavailable or missing:
-          - Mark the dependency as "unresolved": true in the flow graph
-          - Preserve the inferred topology (the edge and nodes still appear)
-          - Do not fabricate implementation details
-          - Label the node with: [UNRESOLVED: system name]
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        Begin the document with a "Subsystems" section that lists swim_lanes from
-        canonical-model.json exactly — DiagramBuilder will use these names for swim lanes.
-
-        ## ── DUAL OUTPUT ──────────────────────────────────────────────────────────────
-        Write both:
-          .fuseraft/flow-model.md  — narrative document for human review
-          .fuseraft/flow-model.json — machine-readable graph for DiagramBuilder:
-            {
-              "swim_lanes": [...],
-              "nodes": [ {
-                "id": "api:POST:/orders",
-                "type": "api|procedure|table|service|queue",
-                "label": "...", "lane": "...",
-                "unresolved": false
-              } ],
-              "edges": [ {
-                "from": "...", "to": "...", "label": "...",
-                "type": "http|sql|procedure_call|event_publish|event_consume|scheduler|workflow|grpc",
-                "sync": true|false,
-                "cycle_id": "cycle:..." (omit if not a back-edge)
-              } ],
-              "decisions": [ { "id": "...", "condition": "...", "true_branch": "...", "false_branch": "..." } ],
-              "cycles": [ { "id": "cycle:...", "description": "...", "back_edge": { "from": "...", "to": "..." } } ]
-            }
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        The DiagramBuilder cannot re-read source files — be complete.
-
-        When done, write on its own line: SYNTHESIS COMPLETE
-      Model: heavy
-      Plugins:
-        - FileSystem
-        - Changes
-        - Scratchpad
-      Capabilities:
+      Generate valid mxGraphModel XML compatible with draw.io 24.x (current stable).
+      The root element must be: <mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+      followed by shape cells. The file must open and render correctly in draw.io.
+    advanced:
+      functionChoice: required
+      contextWindow:
+        textOnly: true
+        maxTailMessages: 0
+        maxTurnAge: 2
+        maxToolResultChars: 0
+        maxReplayChars: 0
+      capabilities:
         FileSystem: [read, write]
-      FunctionChoice: required
-      ContextWindow:
-        TextOnly: true   # only needs text summaries from all prior agents — no tool frames
-        MaxTurnAge: 10
+  OutputValidator:
+    model: heavy
+    tools: [FileSystem, Scratchpad]
+    sees: conversation
+    instructions: |
+      You are an output validator. Read:
+        .fuseraft/canonical-model.json
+        .fuseraft/flow-model.json
+        output/data-flow.drawio
 
-    ## Phase 7: produce the artifact
-    - Name: DiagramBuilder
-      Isolation: Shared
-      Instructions: |
-        You are a DrawIO expert. Read .fuseraft/flow-model.json (machine-readable graph)
-        and .fuseraft/flow-model.md (supplemental annotation only).
+      Verify the following and write a validation report to .fuseraft/validation-report.md:
 
-        ## ── TOPOLOGY AUTHORITY ───────────────────────────────────────────────────────
-        flow-model.json is the authoritative source for topology.
-        flow-model.md provides annotation and prose context only.
-        Never infer new nodes or edges from prose that are absent from flow-model.json.
-        If prose and JSON disagree on structure, follow the JSON.
-        ## ───────────────────────────────────────────────────────────────────────────────
+      ## ── CHECKS ────────────────────────────────────────────────────────────────────
+      Structural:
+        - All swim_lanes in flow-model.json have a corresponding lane in the DrawIO XML
+        - All node IDs in flow-model.json edges exist as nodes in flow-model.json
+        - No orphan nodes (nodes with no edges) unless they are entry/exit points
+        - All trace IDs referenced in flow-model.json resolve to entries in sql-findings.md,
+          api-findings.md, or doc-findings.md
 
-        The flow-model.json "swim_lanes" array lists the subsystem names — create one
-        swim lane per entry using those exact names.
+      DrawIO:
+        - The mxGraphModel XML is well-formed (parseable)
+        - All mxCell id values are unique
+        - All parent references point to existing cell IDs
 
-        Produce a DrawIO XML file at output/data-flow.drawio:
-        - Swim lanes: one per subsystem (names from flow-model.json)
-        - API endpoints: rounded rectangles
-        - Stored procedures: cylinder shapes
-        - DB tables: table shapes
-        - Queues/brokers: parallelogram shapes
-        - External systems: cloud shapes
-        - Labeled arrows for every call: method, key parameters, return data
-        - Dashed arrows for async/event-driven edges
-        - Decision diamonds for conditions and branching
-        - Annotation boxes for transformation logic and business rules
-        - A legend
+      Semantic:
+        - All procedures in canonical-model.json appear in at least one flow edge
+        - All tables marked schema_verified: false are called out in the report
+        - All findings with Confidence: Low are listed for human review
 
-        ## ── GRAPH NORMALIZATION RULES (large systems) ────────────────────────────────
-        When the graph is large:
-          - Collapse repeated accesses to the same table into a single grouped node;
-            annotate with access count rather than duplicating edges
-          - Avoid edge duplication — merge parallel edges into a single annotated edge
-          - Use hierarchical left-to-right directional layout
-          - Group related procedures and services into labeled sub-containers
-          - Annotate repeated transformation patterns once with a reference label
-          - Limit swim lane width; wrap long flows vertically within a lane
-        ## ───────────────────────────────────────────────────────────────────────────────
+      Flow integrity:
+        - Every entrypoint node (no incoming edges, not a queue consumer) reaches
+          at least one terminal node (no outgoing edges, or explicit exit point)
+        - No disconnected subgraphs exist unless explicitly marked "isolated": true
+        - Every async publish edge (type: event_publish) has at least one corresponding
+          event_consume edge or a DLQ node reachable from it
+        - Every decision node has both true_branch and false_branch connected to
+          existing nodes
+        - All cycle back-edges reference a declared cycle ID in the cycles array
+      ## ───────────────────────────────────────────────────────────────────────────────
 
-        Generate valid mxGraphModel XML compatible with draw.io 24.x (current stable).
-        The root element must be: <mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
-        followed by shape cells. The file must open and render correctly in draw.io.
-
-        When done, write on its own line: DIAGRAM COMPLETE
-      Model: heavy
-      Plugins:
-        - FileSystem
-        - Scratchpad
-      Capabilities:
+      If any check fails, write the failure details clearly with the affected IDs.
+      Do not attempt to fix failures — report them for human review.
+    advanced:
+      functionChoice: required
+      contextWindow:
+        textOnly: true
+        maxTailMessages: 0
+        maxTurnAge: 2
+        maxToolResultChars: 0
+        maxReplayChars: 0
+      capabilities:
         FileSystem: [read, write]
-      FunctionChoice: required
-      ContextWindow:
-        TextOnly: true
-        MaxTurnAge: 2   # only needs the Synthesizer's single output turn
 
-    ## Phase 8: validate all outputs for consistency
-    - Name: OutputValidator
-      Isolation: Shared
-      Instructions: |
-        You are an output validator. Read:
-          .fuseraft/canonical-model.json
-          .fuseraft/flow-model.json
-          output/data-flow.drawio
+flow:
+  start: Archaeologist
+  steps:
+    Archaeologist:
+      - to: SQLAnalyst
+    SQLAnalyst:
+      - to: APIAnalyst
+    APIAnalyst:
+      - to: DocAnalyst
+    DocAnalyst:
+      - to: Normalizer
+    Normalizer:
+      - to: Synthesizer
+    Synthesizer:
+      - to: DiagramBuilder
+    DiagramBuilder:
+      - to: OutputValidator
+    OutputValidator:
+      - to: end
+        when: your work is complete
 
-        Verify the following and write a validation report to .fuseraft/validation-report.md:
+limits:
+  maxTurns: 80
 
-        ## ── CHECKS ────────────────────────────────────────────────────────────────────
-        Structural:
-          - All swim_lanes in flow-model.json have a corresponding lane in the DrawIO XML
-          - All node IDs in flow-model.json edges exist as nodes in flow-model.json
-          - No orphan nodes (nodes with no edges) unless they are entry/exit points
-          - All trace IDs referenced in flow-model.json resolve to entries in sql-findings.md,
-            api-findings.md, or doc-findings.md
+security:
+  fileSystemSandboxPath: .
+  readFileSizeLimit: 60000
 
-        DrawIO:
-          - The mxGraphModel XML is well-formed (parseable)
-          - All mxCell id values are unique
-          - All parent references point to existing cell IDs
-
-        Semantic:
-          - All procedures in canonical-model.json appear in at least one flow edge
-          - All tables marked schema_verified: false are called out in the report
-          - All findings with Confidence: Low are listed for human review
-
-        Flow integrity:
-          - Every entrypoint node (no incoming edges, not a queue consumer) reaches
-            at least one terminal node (no outgoing edges, or explicit exit point)
-          - No disconnected subgraphs exist unless explicitly marked "isolated": true
-          - Every async publish edge (type: event_publish) has at least one corresponding
-            event_consume edge or a DLQ node reachable from it
-          - Every decision node has both true_branch and false_branch connected to
-            existing nodes
-          - All cycle back-edges reference a declared cycle ID in the cycles array
-        ## ───────────────────────────────────────────────────────────────────────────────
-
-        If any check fails, write the failure details clearly with the affected IDs.
-        Do not attempt to fix failures — report them for human review.
-
-        When done, write on its own line: VALIDATION COMPLETE
-      Model: heavy
-      Plugins:
-        - FileSystem
-        - Scratchpad
-      Capabilities:
-        FileSystem: [read, write]
-      FunctionChoice: required
-      ContextWindow:
-        TextOnly: true
-        MaxTurnAge: 2
-
-  Selection:
-    Type: statemachine
-    StateMachine:
-      Initial: Recon
-
-      States:
-        Recon:
-          Agent: Archaeologist
-          Transitions:
-            - To: SQLAnalysis
-              Signal: "RECON COMPLETE"
-
-        SQLAnalysis:
-          Agent: SQLAnalyst
-          Transitions:
-            - To: APIAnalysis
-              Signal: "SQL ANALYSIS COMPLETE"
-
-        APIAnalysis:
-          Agent: APIAnalyst
-          Transitions:
-            - To: DocAnalysis
-              Signal: "API ANALYSIS COMPLETE"
-
-        DocAnalysis:
-          Agent: DocAnalyst
-          Transitions:
-            - To: Normalization
-              Signal: "DOC ANALYSIS COMPLETE"
-
-        Normalization:
-          Agent: Normalizer
-          Transitions:
-            - To: Synthesis
-              Signal: "NORMALIZATION COMPLETE"
-
-        Synthesis:
-          Agent: Synthesizer
-          Transitions:
-            - To: DiagramGeneration
-              Signal: "SYNTHESIS COMPLETE"
-
-        DiagramGeneration:
-          Agent: DiagramBuilder
-          Transitions:
-            - To: OutputValidation
-              Signal: "DIAGRAM COMPLETE"
-
-        OutputValidation:
-          Agent: OutputValidator
-          Terminal: true
-          Transitions: []
-
-  Termination:
-    Type: composite
-    MaxIterations: 80   # safety cap: 8 phases × ~10 turns each
-    Strategies:
-      - Type: regex
-        Pattern: "VALIDATION COMPLETE"
-        AgentNames:
-          - OutputValidator
+advanced:
+  warnTurnTokens: 90000
+  contextBudget:
+    warnAt: 70000
+    cutoverAt: 110000
+  compaction:
+    triggerTurnCount: 40
+    keepRecentTurns: 8
+    mode: intent

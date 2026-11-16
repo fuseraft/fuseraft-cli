@@ -29,11 +29,6 @@ namespace fuseraft.Orchestration.Strategies;
 /// </list>
 /// </para>
 ///
-/// <para>
-/// Signal detection reuses the same line-boundary matching as
-/// <see cref="KeywordSelectionStrategy"/> so existing agent instructions need
-/// minimal changes when migrating from keyword routing to state machine routing.
-/// </para>
 /// </summary>
 public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAgentSelector, IContextSnapshotter
 {
@@ -43,7 +38,11 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     private readonly EventEmitter? _eventEmitter;
     private readonly ILogger<StateMachineSelectionStrategy> _logger;
     private readonly GovernanceKernel? _governance;
-    private readonly ContextAssembler? _handoffResolver;
+    private readonly IHumanApprovalService? _humanApprovalService;
+
+    // Set when a person refuses a parallel transition, so the next SelectAsync re-invokes the
+    // step's agent instead of treating the refused handoff as a missing one.
+    private bool _reinvokeAfterRefusal;
     private string _sessionId = "unknown";
     private IList<ChatMessage>? _history;
 
@@ -97,16 +96,16 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         ILogger<StateMachineSelectionStrategy>? logger = null,
         GovernanceKernel? governanceKernel = null,
         VerifierConfig? verifier = null,
-        ContextAssembler? handoffResolver = null)
+        IHumanApprovalService? humanApprovalService = null)
     {
         _machine         = machine;
+        _humanApprovalService = humanApprovalService;
         _contractEngine  = contractEngine;
         _failureHandling = failureHandling ?? new FailureHandlingConfig();
         _eventEmitter    = eventEmitter;
         _logger          = logger
             ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<StateMachineSelectionStrategy>.Instance;
         _governance      = governanceKernel;
-        _handoffResolver = handoffResolver;
         _currentState    = machine.Initial;
 
         _verifierAgentName         = string.IsNullOrWhiteSpace(verifier?.AgentName) ? null : verifier!.AgentName;
@@ -150,7 +149,6 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     public void SetSessionId(string sessionId)
     {
         _sessionId = sessionId;
-        _handoffResolver?.SetSessionId(sessionId);
     }
 
     public async Task<AIAgent?> SelectAsync(
@@ -178,6 +176,9 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
 
         // Terminal state: no further transitions — re-invoke the current agent so the
         // termination condition (regex/maxiterations) can fire naturally.
+        if (state.Terminal && string.IsNullOrEmpty(state.Agent))
+            return null;
+
         if (state.Terminal)
         {
             _logger.LogDebug("[StateMachine] State '{State}' is terminal — awaiting termination condition",
@@ -185,22 +186,23 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             return FindAgent(agents, state.Agent);
         }
 
+        if (_reinvokeAfterRefusal)
+        {
+            _reinvokeAfterRefusal = false;
+            return FindAgent(agents, state.Agent)
+                   ?? throw new InvalidOperationException(
+                       $"[StateMachine] Agent '{state.Agent}' not found in pool for state '{_currentState}'.");
+        }
+
         // Scan the last few agent messages for signals from the current state's agent.
         foreach (var (i, msg, toolSignal, content, isCurrentAgent) in ScanSignals(history, state))
         {
             foreach (var transition in state.Transitions)
             {
-                // Default signal-source restriction: only the current state's agent can
-                // fire a transition via its message text or HandoffPlugin tool call.
-                // Transitions opt in to accepting other agents' signals via SourceAgents.
-                // Without this guard, periodic meta-agents such as Verifier can accidentally
-                // fire routing transitions when their narrative output contains a signal
-                // phrase (e.g. "REPLAN REQUIRED" written as prose, not as a handoff call).
-                // ChatRole.User messages are intentionally exempt — HITL users need to be
-                // able to inject redirect keywords.
-                if (msg.Role == ChatRole.Assistant
-                    && !isCurrentAgent
-                    && transition.SourceAgents is null or { Count: 0 })
+                // Only the current step's agent can fire its routes, so a meta-agent such as a
+                // Verifier can't route by writing a route name in prose. User messages are
+                // exempt so a HITL user can redirect.
+                if (msg.Role == ChatRole.Assistant && !isCurrentAgent)
                     continue;
 
                 // Signal check.
@@ -210,18 +212,6 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                         : IsSignalOnOwnLine(content, transition.Signal!));
 
                 if (!signalPresent) continue;
-
-                // SourceAgents restriction on the transition itself.
-                if (transition.SourceAgents is { Count: > 0 } &&
-                    !transition.SourceAgents.Any(s =>
-                        string.Equals(s, msg.AuthorName, StringComparison.OrdinalIgnoreCase)))
-                {
-                    _logger.LogDebug(
-                        "[StateMachine] Signal '{Signal}' → '{To}' skipped: SourceAgents [{Allowed}] does not include '{Author}'",
-                        transition.Signal, transition.To,
-                        string.Join(",", transition.SourceAgents), msg.AuthorName ?? "(null)");
-                    continue;
-                }
 
                 // Stale signal guard: skip if a turn-boundary marker already exists after
                 // this message index, indicating the signal was consumed in a prior turn.
@@ -279,7 +269,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
 
                     foreach (var contractName in contractNames)
                     {
-                        var (ok, error) = await _contractEngine.EvaluateAsync(contractName, cancellationToken);
+                        var (ok, error) = await _contractEngine.EvaluateAsync(contractName, history, cancellationToken);
                         if (!ok)
                         {
                             failureError    = error;
@@ -302,6 +292,15 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                                    $"[StateMachine] Agent '{state.Agent}' not found in pool for state '{_currentState}'.");
                     }
                 }
+
+                // A parallel edge whose gates pass is fired by TrySelectParallelAsync, never here.
+                if (transition.Parallel)
+                    continue;
+
+                if (!await ApprovedAsync(state, transition, cancellationToken))
+                    return FindAgent(agents, state.Agent)
+                           ?? throw new InvalidOperationException(
+                               $"[StateMachine] Agent '{state.Agent}' not found in pool for state '{_currentState}'.");
 
                 // All contracts satisfied — transition.
                 var targetState = transition.To;
@@ -359,8 +358,8 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                             (objections.Length > 0
                                 ? $"Outstanding objections from the last review:\n{objections.Trim()}\n\n"
                                 : string.Empty) +
-                            $"Produce a revised brief that explicitly addresses each objection above, " +
-                            $"or emit \"REPLAN REQUIRED\" if the task is not achievable as specified.";
+                            $"Produce a revision that explicitly addresses each objection above, " +
+                            $"or say in your handoff why the task is not achievable as specified.";
 
                         _history.Add(new ChatMessage(ChatRole.User, escalation));
 
@@ -374,32 +373,22 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 _transitionFailure = null;
                 _noSignalFailure   = null;
 
-                // Inject turn-boundary marker when agent changes, followed by any
-                // handoff context assembled from durable artifacts.
+                // A terminal state with no agent ends the run as soon as its gates pass.
+                if (nextState.Terminal && string.IsNullOrEmpty(nextState.Agent))
+                {
+                    _logger.LogDebug("[StateMachine] Transition '{From}' → '{To}' reached the end of the flow",
+                        _currentState, targetState);
+                    _visitedStates.Add(_currentState);
+                    _currentState = targetState;
+                    return null;
+                }
+
+                // Inject the turn-boundary marker when the agent changes.
                 if (_history is not null &&
                     !string.Equals(state.Agent, nextState.Agent, StringComparison.OrdinalIgnoreCase))
                 {
                     _history.Add(new ChatMessage(ChatRole.User,
                         $"[fuseraft: {state.Agent} → {nextState.Agent}]"));
-
-                    if (transition.HandoffContext is { Count: > 0 } hcSources
-                        && _handoffResolver is not null)
-                    {
-                        try
-                        {
-                            var hcText = await _handoffResolver.ResolveAsync(
-                                nextState.Agent, hcSources, cancellationToken);
-                            if (hcText is not null)
-                                _history.Add(new ChatMessage(ChatRole.User, hcText));
-                        }
-                        catch (OperationCanceledException) { throw; }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex,
-                                "[StateMachine] HandoffContext resolution failed for transition '{From}' → '{To}' — continuing without injected context.",
-                                _currentState, targetState);
-                        }
-                    }
                 }
 
                 _logger.LogDebug(
@@ -470,7 +459,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 consecutiveFailures: noSigCount,
                 lastValidatorError:
                     $"Agent '{state.Agent}' completed {noSigCount} consecutive turns in state '{_currentState}' " +
-                    $"without emitting a routing signal. Required signal(s): {validSignals}. " +
+                    $"without handing off. Valid route(s): {validSignals}. " +
                     $"The agent may have completed its work but is not calling handoff correctly.");
         }
 
@@ -483,16 +472,42 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                    $"[StateMachine] Agent '{state.Agent}' not found in pool for state '{_currentState}'.");
     }
 
+    // Asks a person to approve a transition whose gates passed. A refusal tells the agent and
+    // blocks the handoff that asked, so it isn't re-read; the agent must hand off again.
+    private async Task<bool> ApprovedAsync(StateConfig state, TransitionConfig transition, CancellationToken ct)
+    {
+        if (!transition.RequireHumanApproval || _humanApprovalService is null)
+            return true;
+
+        var target = transition.Parallel && transition.Targets is { Count: > 0 } branches
+            ? string.Join(", ", branches)
+            : transition.To;
+        ct.ThrowIfCancellationRequested();
+        if (await _humanApprovalService.PromptRouteApprovalAsync(transition.Signal ?? transition.To, state.Agent, target))
+            return true;
+
+        _logger.LogDebug("[StateMachine] Transition '{From}' → '{To}' refused by the operator", _currentState, transition.To);
+        if (_history is not null)
+        {
+            _history.Add(new ChatMessage(ChatRole.User,
+                $"The operator didn't approve the handoff to {target}.\n" +
+                $"1. Keep working on this step, or ask what to change if it isn't clear.\n" +
+                $"2. Call handoff again when the work is ready for another review."));
+            _history.Add(new ChatMessage(ChatRole.User, $"[fuseraft:blocked {_currentState}→{transition.To}]"));
+        }
+        return false;
+    }
+
     // IParallelAgentSelector ──────────────────────────────────────────────────
 
     /// <inheritdoc/>
-    public Task<ParallelAgentBatch?> TrySelectParallelAsync(
+    public async Task<ParallelAgentBatch?> TrySelectParallelAsync(
         IReadOnlyList<AIAgent> agents,
         IList<ChatMessage> history,
         CancellationToken cancellationToken = default)
     {
         if (!_machine.States.TryGetValue(_currentState, out var state) || state.Terminal)
-            return Task.FromResult<ParallelAgentBatch?>(null);
+            return null;
 
         foreach (var (i, msg, toolSignal, content, isCurrentAgent) in ScanSignals(history, state))
         {
@@ -500,11 +515,8 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             {
                 if (!transition.Parallel || transition.Targets is null or { Count: 0 }) continue;
 
-                // Same source restriction as SelectAsync: only the current state's agent
-                // can fire a parallel transition unless SourceAgents is explicitly set.
-                if (msg.Role == ChatRole.Assistant
-                    && !isCurrentAgent
-                    && transition.SourceAgents is null or { Count: 0 })
+                // Same source restriction as SelectAsync.
+                if (msg.Role == ChatRole.Assistant && !isCurrentAgent)
                     continue;
 
                 bool signalPresent = string.IsNullOrWhiteSpace(transition.Signal)
@@ -520,6 +532,19 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                         "[StateMachine] Parallel signal '{Signal}' → '{Join}' already consumed — skipping",
                         transition.Signal, transition.To);
                     continue;
+                }
+
+                // Gates run before the fan-out. On a failure, decline: SelectAsync evaluates the
+                // same gates and runs the correction and failure handling.
+                if (_contractEngine is not null)
+                    foreach (var contractName in transition.AllContracts)
+                        if (!(await _contractEngine.EvaluateAsync(contractName, history, cancellationToken)).Item1)
+                            return null;
+
+                if (!await ApprovedAsync(state, transition, cancellationToken))
+                {
+                    _reinvokeAfterRefusal = true;
+                    return null;
                 }
 
                 // Resolve branch agents.
@@ -561,12 +586,11 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 if (toolSignal is not null)
                     _lastConsumedHandoffOrdinal = CountHandoffOrdinal(history, i);
 
-                return Task.FromResult<ParallelAgentBatch?>(
-                    new ParallelAgentBatch(branches, transition.Merge ?? new MergeConfig(), joinState));
+                return new ParallelAgentBatch(branches, transition.Merge ?? new MergeConfig(), joinState);
             }
         }
 
-        return Task.FromResult<ParallelAgentBatch?>(null);
+        return null;
     }
 
     // Handles a transition contract failure: classifies it, emits events, injects
@@ -648,7 +672,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 lastValidatorError:  errorMessage);
         }
 
-        // Recovery agent activation — mirrors KeywordSelectionStrategy behavior.
+        // Recovery agent activation (the edge's onStuck agent).
         // Fires when ActivateRecovery is the configured action, or after 2+ consecutive
         // failures on a transition that declares a RecoveryAgent. At most once per
         // state/transition pair to prevent infinite recovery loops.
@@ -673,7 +697,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                         $"failed {newCount}× on transition '{_currentState}' → '{transition.To}'.\n\n" +
                         $"  1. changes_read_latest — review what was attempted.\n" +
                         $"  2. Fix the problem described below.\n" +
-                        $"  3. Emit '{transition.Signal}' when resolved.\n\n" +
+                        $"  3. Call handoff with route_keyword '{transition.Signal}' when resolved.\n\n" +
                         $"Failure ({failureType}): {errorMessage}"));
                 }
 
@@ -690,7 +714,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         }
 
         // Threshold-based abort. Reinstruct and Abort both escalate once the classified
-        // failure type's per-type Threshold is reached — matching KeywordSelectionStrategy
+        // failure type's per-type Threshold is reached
         // (this used to check `Action == Abort` only, which silently made Threshold dead for
         // every type that defaults to Reinstruct — MissingEvidence, InvalidTransition,
         // ConflictingEvidence all default to Reinstruct with a non-zero Threshold, so relying
@@ -769,28 +793,28 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         return failureType switch
         {
             FailureType.NoProgress =>
-                $"CRITICAL: You re-emitted the signal to transition from '{fromState}' to '{toState}' " +
+                $"CRITICAL: You handed off again from '{fromState}' to '{toState}' " +
                 $"without calling any tools. Your next response MUST begin with a tool call. " +
-                $"Do not re-emit the signal until the contract below is satisfied.\n\n" +
+                $"Do not hand off again until the check below passes.\n\n" +
                 errorMessage,
 
             FailureType.MissingEvidence =>
-                $"{prefix}MISSING ARTIFACT — Transition '{fromState}' → '{toState}' is blocked " +
-                $"because contract '{contractName}' requires an artifact that does not exist yet.\n\n" +
+                $"{prefix}MISSING ARTIFACT — Handoff '{fromState}' → '{toState}' is blocked " +
+                $"because a required artifact does not exist yet.\n\n" +
                 $"Steps to resolve:\n" +
-                $"  1. Read {FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalBrief, sessionId)} to identify the required artifacts.\n" +
-                $"  2. Create the missing artifact using write_file or the appropriate tool.\n" +
-                $"  3. Re-emit the signal once the artifact exists.\n\n" +
+                $"  1. Read the message below for the exact file or field that is missing.\n" +
+                $"  2. Create it using write_file or the appropriate tool.\n" +
+                $"  3. Hand off again once it exists.\n\n" +
                 errorMessage,
 
             FailureType.ConflictingEvidence =>
-                $"{prefix}EVIDENCE AUDIT REQUIRED — Transition '{fromState}' → '{toState}' is blocked " +
-                $"because contract '{contractName}' detected an inconsistency.\n\n" +
+                $"{prefix}EVIDENCE AUDIT REQUIRED — Handoff '{fromState}' → '{toState}' is blocked " +
+                $"because a check detected an inconsistency.\n\n" +
                 $"Mandatory audit steps:\n" +
                 $"  1. Call changes_read_latest to review what was actually recorded.\n" +
                 $"  2. Re-run any commands whose results you referenced.\n" +
                 $"  3. Re-read all artifacts you claim to have produced.\n" +
-                $"  4. Re-emit the signal only after you have verified every piece of evidence.\n\n" +
+                $"  4. Hand off again only after you have verified every piece of evidence.\n\n" +
                 errorMessage,
 
             _ => // InvalidTransition
@@ -806,7 +830,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     }
 
     // Injects a missing-signal nudge when the agent's last turn ended without a
-    // recognisable signal. Mirrors the equivalent behaviour in KeywordSelectionStrategy.
+    // recognisable signal.
     private void InjectMissingSignalCorrectionIfNeeded(
         IList<ChatMessage> history,
         StateConfig state)
@@ -856,20 +880,20 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             {
                 // Targeted correction: name the wrong signal so the model knows exactly what to fix.
                 correction =
-                    $"You called handoff with '{fccSignal}' but that signal is not valid in " +
-                    $"state '{_currentState}'. Do NOT use '{fccSignal}'. " +
-                    $"The valid signals for this state are: {signalList}. " +
-                    $"Complete your work and emit one of those signals.";
+                    $"You called handoff with '{fccSignal}' but that route is not valid for " +
+                    $"'{_currentState}'. Do NOT use '{fccSignal}'. " +
+                    $"The valid routes are: {signalList}. " +
+                    $"Complete your work and call handoff with one of them.";
             }
             else
             {
                 correction =
-                    $"Your last turn ended without emitting a required transition signal. " +
-                    $"If your work in state '{_currentState}' is complete, emit one of the " +
-                    $"following signals as the last line of your response: " +
+                    $"Your last turn ended without a handoff. " +
+                    $"If your work as '{_currentState}' is complete, call handoff with " +
+                    $"route_keyword set to one of: " +
                     $"{signalList}. " +
                     $"If work remains, complete it first (one tool call at a time), " +
-                    $"then end your response with the appropriate signal.";
+                    $"then call handoff.";
             }
 
             _history.Add(new ChatMessage(ChatRole.User, correction));
@@ -889,10 +913,10 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
                 $"LOOP WARNING: {agentName} has been invoked {consecutive} consecutive turns " +
                 $"in state '{_currentState}' without completing the required task. " +
                 $"You appear to be stuck. Take these steps:\n" +
-                $"  1. Call read_file on {FuseraftPaths.ExpandSessionId(FuseraftPaths.LocalBrief, _sessionId)} to restore the task brief.\n" +
+                $"  1. Re-read the task and any artifacts in your context.\n" +
                 $"  2. Call changes_read_latest to see what has already been done.\n" +
                 $"  3. Identify the single blocking action and execute it now.\n" +
-                $"  4. Emit the correct transition signal once that action is complete."));
+                $"  4. Call handoff once that action is complete."));
         }
     }
 
@@ -908,7 +932,6 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
     // this scaffolding; only the per-transition matching logic differs between them.
     private static IEnumerable<ScannedSignal> ScanSignals(IList<ChatMessage> history, StateConfig state)
     {
-        bool hasSourceAgentsTransitions = state.Transitions.Any(t => t.SourceAgents is { Count: > 0 });
         int scanned = 0;
         for (int i = history.Count - 1; i >= 0 && scanned < OrchestratorHelpers.AgentMessageLookback; i--)
         {
@@ -937,7 +960,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
             bool isCurrentAgent = string.Equals(
                 msg.AuthorName, state.Agent, StringComparison.OrdinalIgnoreCase);
 
-            if (msg.Role == ChatRole.Assistant && !isCurrentAgent && !hasSourceAgentsTransitions)
+            if (msg.Role == ChatRole.Assistant && !isCurrentAgent)
                 continue;
 
             if (msg.Role == ChatRole.Assistant) scanned++;
@@ -946,7 +969,7 @@ public sealed class StateMachineSelectionStrategy : IAgentSelector, IParallelAge
         }
     }
 
-    // Returns true when a keyword appears alone on its own line (same rules as KeywordSelectionStrategy).
+    // Returns true when a route name appears alone on its own line (how a remote agent hands off).
     private static bool IsSignalOnOwnLine(string content, string signal)
     {
         foreach (var line in content.Split('\n'))

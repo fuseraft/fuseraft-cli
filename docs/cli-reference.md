@@ -31,11 +31,11 @@ fuseraft run [task] [options]
 | `--no-banner` | off | Skip the ASCII banner. Useful for CI or piped output. |
 | `--ci` | off | CI mode. After the session ends, reads `.fuseraft/artifacts/test-report.json` and exits with code `2` if any criterion has `status: FAIL`. Exits `0` if the report is absent or all criteria pass. |
 | `--devui` | off | Start a local web server and print a URL for real-time session visualization. See [DevUI](#devui) below. |
-| `--work-dir <path>` | — | Set the working directory for the session. Priority: flag > `Security.FileSystemSandboxPath` in the config > current directory. |
+| `--work-dir <path>` | — | Set the working directory for the session. Priority: flag > `security.fileSystemSandboxPath` in the config > current directory. |
 | `--context-file <path>` | — | Attach a file as context. Its content is appended to the task. PDF, DOCX, PPTX, and XLSX files are extracted to plain text automatically; other files are read as UTF-8. Repeatable — specify once per file. Ignored when resuming. |
 | `--spec <path>` | — | Path to a spec file (Markdown, plain text, or JSON) that anchors all agents to an agreed specification. The spec is injected into every agent's system prompt as the authoritative source of truth and appended to the task at turn 0. Ignored when resuming. See [Spec-Driven Development](spec-driven.md). |
 | `--snapshot` | off | Capture per-turn postmortem snapshots to `~/.fuseraft/snapshots/<project>/<session>/`. Writes `turns.jsonl` (one record per agent turn: content, tool calls, token usage) and `manifest.json` (run summary: task, success/failure, elapsed). Useful for debugging and postmortem analysis. |
-| `--json` | off | Suppress the banner, turn panels, and spinner; send all human-readable status to stderr; print one JSON summary object to stdout when the session ends. For scripted/automated invocations. Same effect as `Output.Json: true` in the config (this flag always wins). See [`--json` output](#--json-output) below. |
+| `--json` | off | Suppress the banner, turn panels, and spinner; send all human-readable status to stderr; print one JSON summary object to stdout when the session ends. For scripted/automated invocations. Same effect as `output.json: true` in the config (this flag always wins). See [`--json` output](#--json-output) below. |
 | `--bridge` | off | Stream the session as JSONL events on stdout and read approvals and interrupts on stdin, for tools built on fuseraft. Shell commands, file writes and other mutating actions wait for an `approval_response`. Human-readable status goes to stderr. Can't be combined with `--hitl`. See [Wire Protocol — Live sessions](protocol.md#live-sessions). |
 | `--vscode` | off | VS Code mode. Reads the API key from the `FUSERAFT_API_KEY` environment variable (injected by the fuseraft VS Code extension) instead of the OS keychain. Automatically passed by the extension — not intended for manual use. |
 
@@ -47,7 +47,7 @@ fuseraft run "Add pagination to the user list endpoint"
 
 # Read the task from a file (useful for long or multi-line tasks)
 fuseraft run -f task.md
-fuseraft run -f task.md -c my-team.json -o transcript.md
+fuseraft run -f task.md -c my-team.yaml -o transcript.md
 
 # Use a custom config — JSON or YAML both work
 fuseraft run -c configs/research-team.json "Summarise recent papers on diffusion models"
@@ -121,9 +121,7 @@ The task file is read as plain UTF-8 text. Leading and trailing whitespace is tr
 
 ### Human-in-the-loop controls
 
-There are two ways human approval can pause a session:
-
-**1. `--hitl` mode — after every agent turn**
+**`--hitl` mode pauses after every agent turn.**
 
 When `--hitl` is active, after each agent turn you see a prompt:
 
@@ -174,34 +172,9 @@ This approval gate only applies in `--hitl` mode. In normal runs, these calls ex
 
 The REPL has its own toggle for the same approval gate — see `/hitl` under `fuseraft repl` below. Unlike this flag, it has no "pause after every turn" behavior.
 
-**2. Per-route approval gates — before a specific route fires**
-
-Individual routes can require explicit approval by setting `RequireHumanApproval: true` in the route config. This works independently of `--hitl` — approval gates fire even in normal (non-HITL) mode.
-
-```yaml
-- Keyword: "HANDOFF TO REVIEWER"
-  Agent: Reviewer
-  Validator: TestReportValid
-  RequireHumanApproval: true
-```
-
-When the keyword fires and all validators pass, the session pauses:
-
-```
-⏸ Route approval required.
-  From:    Tester
-  To:      Reviewer
-  Keyword: HANDOFF TO REVIEWER
-
-Approve? (y/N):
-```
-
-- **y / yes** — the route fires and the target agent is invoked
-- **Enter / anything else** — the route is blocked; a "route blocked by operator" message is injected and the source agent is re-invoked so it can continue working or await further instructions
-
 **Stuck-agent escalation**
 
-If an agent fails the same validator enough consecutive times — the configured `FailureHandling` threshold for `keyword`/`statemachine` sessions (default 3, or `Selection.Graph.MaxRetries` for `graph` sessions, default 4) — the session pauses regardless of `--hitl` mode:
+If an agent fails the same gate enough consecutive times — the `advanced.failureHandling` threshold, 3 by default — the session pauses regardless of `--hitl` mode:
 
 ```
 ⚠ HITL intervention required.
@@ -217,11 +190,11 @@ Redirect Developer (Enter to abort session):
 
 ### `--json` output
 
-For scripts and event-driven invocations that need a structured result instead of parsing the transcript or console output. Enable it per-invocation with `--json`, or set `Output.Json: true` in the config to make it the default for every run of that orchestration (see [Output](configuration.md#output)) — the CLI flag always takes precedence. See [Scripting & Automation](scripting.md) for a full walkthrough with wrapper-script examples.
+For scripts and event-driven invocations that need a structured result instead of parsing the transcript or console output. Enable it per-invocation with `--json`, or set `output.json: true` in the config to make it the default for every run of that orchestration (see [Output](configuration.md#output)) — the CLI flag always takes precedence. See [Scripting & Automation](scripting.md) for a full walkthrough with wrapper-script examples.
 
 **Stream contract:** stdout carries *only* the final JSON summary — no banner, no turn panels, no spinner. Every human-readable status line, including setup diagnostics (bad config, missing work dir, spec file not found) is written to stderr instead, regardless of whether JSON mode is even active — this makes `stdout` safe to pipe straight into `jq` or `json.loads()` in every case, never just the happy path.
 
-**Early failures** (before a session starts — bad `--work-dir`, unresolvable `--resume`, missing `--spec` file, or the config itself failing to load) also emit a JSON summary (`succeeded: false`, `error_message` set) whenever `--json` was passed, since the flag makes JSON mode known from the first line of the command. The one case that can't produce a JSON summary: JSON mode enabled *only* via `Output.Json` (not `--json`), failing *before* the config finishes loading — `Output.Json` genuinely cannot be read from a config that hasn't loaded yet. That case still guarantees stdout stays completely empty (never wrong, never mixed with plain text); the failure is reported via exit code and a stderr message only. Scripts should treat "stdout didn't parse as JSON" as its own failure case, not just check the JSON body — pass `--json` explicitly if you want a JSON summary for every outcome, not just successful ones.
+**Early failures** (before a session starts — bad `--work-dir`, unresolvable `--resume`, missing `--spec` file, or the config itself failing to load) also emit a JSON summary (`succeeded: false`, `error_message` set) whenever `--json` was passed, since the flag makes JSON mode known from the first line of the command. The one case that can't produce a JSON summary: JSON mode enabled *only* via `output.json` (not `--json`), failing *before* the config finishes loading — `output.json` genuinely cannot be read from a config that hasn't loaded yet. That case still guarantees stdout stays completely empty (never wrong, never mixed with plain text); the failure is reported via exit code and a stderr message only. Scripts should treat "stdout didn't parse as JSON" as its own failure case, not just check the JSON body — pass `--json` explicitly if you want a JSON summary for every outcome, not just successful ones.
 
 **Example:**
 
@@ -450,7 +423,7 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 | `/tools enable <category\|tool>` | Turn it back on. Optional plugins (`Http`, `Extended`, `Scratchpad`, …) can be turned on mid-chat this way too. A tool in a category that's off stays unavailable until the category is on. |
 | `/tools save` | Make new chats start with the tools this chat has on now (writes `repl.plugins` and `repl.disabledTools`) |
 | `/tools reset` | Put this chat's tools back to the saved defaults |
-| `/tools restrict <plugin> <tag…>` | Allow only tools tagged with one of `<tag…>` for that plugin (e.g. `/tools restrict Git read`), using the same capability vocabulary as orchestration's [`Capabilities`](configuration.md#capabilities) |
+| `/tools restrict <plugin> <tag…>` | Allow only tools tagged with one of `<tag…>` for that plugin (e.g. `/tools restrict Git read`), using the same capability vocabulary as orchestration's [`capabilities`](configuration.md#capabilities) |
 | `/tools unrestrict <plugin>` | Remove a plugin's capability restriction |
 | `/undo` | Revert files written, patched, copied, moved, or deleted in the most recent turn. Repeatable — walks back one turn at a time. Only affects the filesystem; use `/rewind` to also roll back conversation history. |
 | `/copy [code]` | Copy the last reply to the clipboard as the Markdown the model wrote, or with `code` one of its code blocks without the fences (pick one when there are several). Uses OSC 52, which works over SSH and in most terminals (in tmux, `set -g set-clipboard on`), plus `wl-copy`, `xclip`, `xsel`, `pbcopy` or `clip.exe` when one is there. |
@@ -529,7 +502,7 @@ Reasoning effort support and accepted values vary by provider and model — e.g.
 
 These three, along with `/max-tokens`, are runtime settings applied to every request's `ChatOptions` for the rest of the session (or until changed again). A session starts from the `sampling` defaults in `~/.fuseraft/config`, if any are set (`fuseraft settings set sampling.temperature 0.7`, etc. — see [`fuseraft settings`](#fuseraft-settings)); these four commands only ever change the *current session's* values in memory and never write back to that file. Run with no argument to see the current value; `reset` clears it back to the provider's default (unset for `/seed`, since there's no "default" seed to restore). Some models reject `temperature` or `top_p` outright (e.g. reasoning models tuned to always sample at a fixed setting) — the provider's error surfaces immediately on the next turn if so.
 
-This is distinct from `fuseraft run`, where `Temperature` is set per-model in `orchestration.yaml`'s `Models` registry (see [`fuseraft run`](#fuseraft-run) above) — the REPL has no equivalent registry and does not read that file.
+This is distinct from `fuseraft run`, where `temperature` is set per-model in `orchestration.yaml`'s `models` registry (see [`fuseraft run`](#fuseraft-run) above) — the REPL has no equivalent registry and does not read that file.
 
 **Connecting an MCP server (`/mcp`)**
 
@@ -554,7 +527,7 @@ For an `http` server, `/mcp add` also asks how to authenticate: a static header 
 
 Servers saved before this file was sectioned lived in a standalone `~/.fuseraft/repl-mcp-servers.json` — it's folded into `~/.fuseraft/config` and deleted automatically the next time any `fuseraft` command runs, no action needed.
 
-This is the REPL's interactive alternative to hand-editing `McpServers` in an orchestration config — see [MCP Integration](mcp.md) for the config-file approach used by `fuseraft run`.
+This is the REPL's interactive alternative to hand-editing `mcpServers` in a team file — see [MCP Integration](mcp.md) for the config-file approach used by `fuseraft run`.
 
 **Subagent model (`/explore`, `/locate`, `/delegate`)**
 
@@ -572,7 +545,7 @@ fuseraft settings set subagent.endpoint https://litellm.example/v1   # reuses th
 fuseraft settings set subagent.apiKeyEnvVar LITELLM_KEY              # …unless you name another
 ```
 
-`subagent.provider` (`openai`, `anthropic`, …) overrides the detected provider. These three only take effect together with `subagent.model`; `""` clears each. See [`fuseraft settings`](#fuseraft-settings). This mirrors `SubagentModel` in orchestration YAML (see [Agent configuration](configuration.md#agent-configuration)), which does the same for `fuseraft run` agents.
+`subagent.provider` (`openai`, `anthropic`, …) overrides the detected provider. These three only take effect together with `subagent.model`; `""` clears each. See [`fuseraft settings`](#fuseraft-settings). This mirrors `subagentModel` in orchestration YAML (see [Agent configuration](configuration.md#advanced-agent-fields)), which does the same for `fuseraft run` agents.
 
 **Subagent round caps and timeouts**
 
@@ -583,7 +556,7 @@ fuseraft settings set subagent.exploreMaxIterations 30
 fuseraft settings set subagent.delegateMaxIterations 60
 ```
 
-Each accepts 1–100, or `""` to go back to the default. A run that hits its cap stops with a `stopped after N rounds without finishing` notice and any partial output rather than passing itself off as done. Custom subagents set their own cap with `max_iterations` ([Subagents](subagents.md)); the orchestration equivalent is `SubagentMaxToolCalls`.
+Each accepts 1–100, or `""` to go back to the default. A run that hits its cap stops with a `stopped after N rounds without finishing` notice and any partial output rather than passing itself off as done. Custom subagents set their own cap with `max_iterations` ([Subagents](subagents.md)); the orchestration equivalent is `subagentMaxToolCalls`.
 
 Each subagent also has a wall-clock limit, separate from the round cap — on a slow model a run can hit the clock long before it runs out of rounds. Defaults are 8 minutes for `/explore`, 2 for `/locate` and 15 for `/delegate` (custom subagents use the `/delegate` limit):
 
@@ -677,7 +650,7 @@ Safe mode itself (`/safe-mode`, distinct from HITL) is off by default; engage it
 
 **Capability restriction (`/tools restrict`)**
 
-`/safe-mode` and `/tools disable` work at the category level — a category is either fully on or fully off. `/tools restrict <plugin> <tag…>` is finer-grained: it filters a plugin's tools down to only those tagged with one of the given capability tags, using the exact tag vocabulary and enforcement function (`PluginCapabilityMap.IsAllowed`) that orchestration's per-agent [`Capabilities`](configuration.md#capabilities) config is filtered through.
+`/safe-mode` and `/tools disable` work at the category level — a category is either fully on or fully off. `/tools restrict <plugin> <tag…>` is finer-grained: it filters a plugin's tools down to only those tagged with one of the given capability tags, using the exact tag vocabulary and enforcement function (`PluginCapabilityMap.IsAllowed`) that orchestration's per-agent [`capabilities`](configuration.md#capabilities) config is filtered through.
 
 ```
 1> /tools restrict Git read
@@ -1010,7 +983,7 @@ Automatic saving is off by default. Turn it on with `fuseraft settings set memor
 - when the session ends (via `/exit` or Ctrl+C), giving up after 60 seconds;
 - before the conversation is discarded: `/clear`, `/switch`, `/provider setup`, and compaction (`/compact` or automatic), which extracts from the older turns while it summarizes them.
 
-The extractor is told to save only what will still be true later: standing preferences you state as general rules, lessons about what worked, and decisions or constraints the code doesn't show. It skips task progress, descriptions of the code, and instructions meant for one reply. It also keeps the set small: it updates an existing memory on the same topic rather than adding a near-duplicate, and removes memories it merged into another, that the conversation showed wrong, or that only tracked finished work. Saves and removals are both reported, e.g. `Memory: 2 entries saved, 1 removed.`
+The extractor is told to save only what will still be true later: standing preferences you state as general rules, lessons about what worked, and decisions or constraints the code doesn't show. It skips task progress, descriptions of the code, and instructions meant for one reply. It also keeps the set small: it updates an existing memory on the same topic rather than adding a near-duplicate, and removes memories it merged into another, that the conversation showed wrong, or that only tracked finished work. Saves and removals are both reported, e.g. `memory: 2 entries saved, 1 removed.`
 
 With automatic saving on, extraction runs only when there are turns it hasn't seen, so resuming a session and exiting without a new turn doesn't extract it again. When the extraction call fails, the REPL says so and tries again at the next of these points.
 
@@ -1020,7 +993,7 @@ This extraction call uses the REPL's main chat model by default. Set `memory.mod
 fuseraft settings set memory.model gpt-4o-mini
 ```
 
-Provider selection follows the same rules as the subagent model above: by ID prefix, falling back to the main provider's connection for an unrecognized ID, with `memory.provider` / `memory.endpoint` / `memory.apiKeyEnvVar` for a gateway that serves a recognized name. See [Memory](configuration.md#memory) for details.
+Provider selection follows the same rules as the subagent model above: by ID prefix, falling back to the main provider's connection for an unrecognized ID, with `memory.provider` / `memory.endpoint` / `memory.apiKeyEnvVar` for a gateway that serves a recognized name. See [Memory](configuration.md#pluggable-memory-provider) for details.
 
 ```
 > /memory
@@ -1258,7 +1231,7 @@ fuseraft validate <path> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `<path>` | Path to the orchestration config file. JSON (`.json`) and YAML (`.yaml` / `.yml`) are both accepted. |
+| `<path>` | Path to the team file. JSON (`.json`) and YAML (`.yaml` / `.yml`) are both accepted. |
 
 **Options**
 
@@ -1271,23 +1244,15 @@ fuseraft validate <path> [options]
 
 **Checks performed**
 
-1. File exists and contains valid JSON or YAML (syntax checked based on extension)
-2. Top-level `Orchestration` key is present
-3. Every agent has a non-empty `Name`, `Instructions`, and `ModelId`
-4. Agent names are unique within the config
-5. `FunctionChoice` values are `auto`, `required`, or `none`
-6. Selection strategy type is `sequential`, `llm`, `keyword`, `structured`, or `magentic`
-7. If LLM selection: `Selection.Model` is configured
-8. If keyword selection: `Routes` array is non-empty
-9. If magentic selection: `Selection.Magentic.Model` is configured; warns if a non-default `Termination` section is present (it is ignored for Magentic)
-10. Termination strategy type is `regex`, `structured`, `tokenbudget`, `maxiterations`, or `composite`
-11. Regex termination: `Pattern` is non-empty
-12. Structured termination: `Condition` is present and its `Field` is non-empty
-13. Token budget termination: `MaxTokens` is positive; warns if it is not lower than the top-level `MaxTotalTokens`
-14. Agent names referenced in termination strategies exist in the agents list
-15. If `Telemetry` is set: `OtlpEndpoint` is a valid absolute URI
-16. With `--strict`: every plugin name in any agent's `Plugins` list is registered
-17. For every `ApiKeyEnvVar` referenced: the environment variable is set in the current shell (warning if missing). Note: agents that rely on the OS keychain rather than an env var skip this check — keychain auth is verified only when `--check-connectivity` is used.
+1. The file exists and is valid YAML or JSON.
+2. It loads as a team file: every field is known, every agent, artifact and step a flow names is declared, every gate is a real check with valid options, artifact shapes are well formed, and the flow can reach `end`. A file in the old `Orchestration:` format is reported with a pointer to `fuseraft migrate`.
+3. Every agent has a model, or a default model is set in `~/.fuseraft/config`; a model ID with no known provider prefix has an `endpoint`.
+4. `functionChoice`, `trustScore` and `contextWindow` values are in range.
+5. Pattern flows have sensible limits (e.g. `magentic` `maxRoundCount` ≥ 1, `mapreduce` `maxSplitterRetries` ≥ 1).
+6. `advanced` sections are consistent (e.g. `contextBudget.cutoverAt` needs `compaction`; `telemetry.otlpEndpoint` is a valid URI).
+7. MCP servers are complete for their transport, and `security.shellPolicy.AllowMode` is valid.
+8. With `--strict`: every tool group in an agent's `tools` is registered.
+9. For every `apiKeyEnvVar` referenced: the environment variable is set in this shell (warning if not). Keys held in the OS keychain are only checked with `--check-connectivity`.
 
 **Exit codes**
 
@@ -1312,14 +1277,13 @@ Sample output:
 
 Failures are counted as errors and reflected in the exit code. The check has a 15-second timeout per endpoint. **Each call costs approximately 1 input + 1 output token** — negligible, but non-zero.
 
-Models with no resolvable API key (env var unset and no literal `ApiKey`) are skipped; the missing-key warning from the static checks already covers them.
+Models with no resolvable API key (env var unset and no literal `apiKey`) are skipped; the missing-key warning from the static checks already covers them.
 
 **`--diagram` output**
 
-Prints a Mermaid `flowchart LR` to stdout after the validation result. Each keyword route becomes a labelled edge; validators appear as additional lines in the label. Terminal routes (the self-routing convention, e.g. `APPROVED` from Reviewer → Reviewer) point to a `Done` node rather than looping back.
+Prints a Mermaid `flowchart LR` after the validation result. Each flow edge becomes an arrow labelled with its gates; an edge's route name is shown only when it differs from the target.
 
 ```bash
-fuseraft validate .fuseraft/config/orchestration.yaml --diagram
 fuseraft validate config/examples/orchestration.yaml --diagram
 ```
 
@@ -1331,28 +1295,47 @@ flowchart LR
   Developer["Developer"]
   Tester["Tester"]
   Reviewer["Reviewer"]
-  Done(["✓ Done"])
+  n_end(["end ✓"])
 
   Task --> Planner
-
-  Planner -->|"HANDOFF TO DEVELOPER<br/>RequireBrief"| Developer
-  Developer -->|"HANDOFF TO TESTER<br/>RequireWriteFile<br/>RequireShellPass"| Tester
-  Tester -->|"HANDOFF TO REVIEWER<br/>TestReportValid"| Reviewer
-  Tester -->|"BUGS FOUND"| Developer
-  Reviewer -->|"REVISION REQUIRED"| Developer
-  Reviewer -->|"REPLAN REQUIRED"| Planner
-  Reviewer -->|"APPROVED<br/>RequireShellPass<br/>RequireReviewJudgement"| Done
+  Planner -->|"brief"| Developer
+  Developer -->|"CommandSucceeded brief.verify_command"| Tester
+  Developer --> Planner
+  Tester -->|"TestReport testResults"| Reviewer
+  Tester --> Developer
+  Reviewer --> n_end
+  Reviewer --> Developer
+  Reviewer --> Planner
 ```
 
-Paste the output into [mermaid.live](https://mermaid.live) to render it. The diagram is printed regardless of whether validation passed or failed, so it can be used to visually debug a broken config.
+Paste the output into [mermaid.live](https://mermaid.live) to render it. The diagram is printed whether or not validation passed, so it helps debug a broken flow.
 
-For sequential configs the diagram renders as a simple linear chain: `Task → Agent1 → Agent2 → …`.
+---
+
+## `fuseraft migrate`
+
+Convert a config in the old `Orchestration:` format into a team file.
+
+```
+fuseraft migrate <path> [--write]
+```
+
+| Argument / flag | Description |
+|-----------------|-------------|
+| `<path>` | The old config file (YAML or JSON). |
+| `-w`, `--write` | Overwrite the file in place. Without it, the converted team file is printed to stdout. |
+
+The converter maps routes and state machines to `flow.steps`, validators and contracts to `requires:` gates, the brief and test report paths to `artifacts`, and the optional sections to `advanced`. It rewrites quoted routing keywords in agent instructions to the new route names, and checks that the result loads before printing it.
+
+Anything it had to approximate is printed to stderr as a `note:`, for example a termination keyword that agents should now replace with a handoff to `end`. The leading comment block is kept; comments inside the file are not.
+
+`llm` selection and graph sub-graphs have no direct equivalent; the converter stops and says so, and those configs need converting by hand.
 
 ---
 
 ## `fuseraft config`
 
-Display or list *project* orchestration config files (`orchestration.yaml`/`.json`). For the machine-wide `~/.fuseraft/config` (provider, sampling, REPL, telemetry, and skill-curation defaults), see [`fuseraft settings`](#fuseraft-settings) instead.
+Display or list *project* team files (`orchestration.yaml`/`.json`). For the machine-wide `~/.fuseraft/config` (provider, sampling, REPL, telemetry, and skill-curation defaults), see [`fuseraft settings`](#fuseraft-settings) instead.
 
 ```
 fuseraft config [path] [options]
@@ -1379,7 +1362,7 @@ fuseraft config [path] [options]
 fuseraft config
 
 # Display a specific config
-fuseraft config configs/devops-team.json
+fuseraft config config/examples/devops-team.yaml
 
 # List all configs in the configs/ directory
 fuseraft config --list
@@ -1389,7 +1372,7 @@ fuseraft config --list
 
 ## `fuseraft init`
 
-Generate a ready-to-run YAML orchestration config from an interactive wizard or explicit flags.
+Generate a ready-to-run team file from an interactive wizard or explicit flags.
 
 ```
 fuseraft init [output] [options]
@@ -1407,7 +1390,7 @@ fuseraft init [output] [options]
 |------|---------|-------------|
 | `-t, --template <name>` | interactive | Team template to use. See templates below. |
 | `-m, --model <id>` | auto-detected | Model ID to use for all agents. Auto-detected from your API keys if omitted. |
-| `-e, --endpoint <url>` | `~/.fuseraft/config` | Provider API endpoint URL. Defaults to the endpoint saved in `~/.fuseraft/config` if present. At run time, agents without an explicit `Endpoint` also inherit this value automatically. |
+| `-e, --endpoint <url>` | `~/.fuseraft/config` | Provider API endpoint URL. Defaults to the endpoint saved in `~/.fuseraft/config` if present. At run time, agents without an explicit `endpoint` also inherit this value automatically. |
 | `--no-interactive` | off | Skip all prompts and generate with the supplied options and defaults. |
 | `--no-boilerplate` | off | Skip `architecture.yaml` and `knowledge/lifecycle.yaml` — for small or single-purpose projects that won't use `fuseraft arch check` or `fuseraft knowledge gc`. |
 | `-f, --force` | off | Overwrite the config and all agent files without prompting, even if they already exist. |
@@ -1436,7 +1419,7 @@ Before writing anything, `init` checks whether the config file or any of its age
 
 **Model auto-detection**
 
-If `--model` is not provided, `init` first checks the `ModelId` saved in `~/.fuseraft/config`. If no model is saved there, it inspects environment variables in this order and picks the default model for the first provider that has a key set:
+If `--model` is not provided, `init` first checks the `modelId` saved in `~/.fuseraft/config`. If no model is saved there, it inspects environment variables in this order and picks the default model for the first provider that has a key set:
 
 | Environment variable | Default model |
 |---------------------|---------------|
@@ -1627,7 +1610,7 @@ Unknown values fall back to `csharp`. Relative imports (e.g. `./foo`, `../bar`) 
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `Name` | yes | Display name used in violation reports. |
+| `name` | yes | Display name used in violation reports. |
 | `Paths` | yes | Source path prefixes owned by this layer, relative to project root. |
 | `Namespaces` | no | Module/namespace prefixes owned by this layer. For `csharp`, defaults to `fuseraft.<Name>` when omitted. For all other languages, must be declared explicitly. |
 | `MayDependOn` | no | Names of other layers this layer may import from. Omit or leave empty to forbid all cross-layer imports. |
@@ -2326,7 +2309,7 @@ fuseraft serve [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-c, --config <path>` | `.fuseraft/config/orchestration.yaml` | Orchestration config the daemon runs for its whole lifetime. |
-| `--work-dir <path>` | config's `Security.FileSystemSandboxPath`, else current directory | Working directory for the daemon's whole lifetime. |
+| `--work-dir <path>` | config's `security.fileSystemSandboxPath`, else current directory | Working directory for the daemon's whole lifetime. |
 | `--http-port <port>` | derived from the project path (like `--socket`) | Port for the MCP (streamable-HTTP) endpoint at `/mcp`. Fixed rather than OS-assigned because another agent needs a stable address to configure ahead of time, unlike a human who can read a printed URL — but per-project rather than one hardcoded number for every project, so two daemons for two different projects don't collide on the same default port. |
 | `--bind <address>` | `localhost` | Address the HTTP listener (MCP at `/mcp`, attach WebSocket at `/attach`) listens on: `localhost`, an interface IP, or `0.0.0.0` for every interface. Anything but loopback requires the `FUSERAFT_SERVE_TOKEN` environment variable. When it's set, every request to `/mcp` and `/attach` must send `Authorization: Bearer <token>`. |
 | `--socket <path>` | `~/.fuseraft/run/<project-hash>.sock` | Unix domain socket `fuseraft attach` connects to. Lives in a short, flat directory (not under the per-project state tree) because AF_UNIX socket paths are capped at 108 bytes on Linux. |
@@ -2336,10 +2319,10 @@ fuseraft serve [options]
 | `--reconnect-grace <seconds>` | `60` | How long a running task's approval waits for its client to reconnect after the connection drops, before `--unattended-policy` decides. Applies to WebSocket clients that send a `Fuseraft-Client-Id` header (fuseraft-web does); such a client also gets the results that finished while it was away. `0` decides at once. |
 | `--unattended-policy <deny\|allow>` | `deny` | What happens to a mutating tool call (shell/write/git-push/etc.) when nobody is attached. `deny` — a task dispatched by another agent with no human watching is denied by default. `allow` — auto-approve, for trusted unattended pipelines. |
 | `--auto-objective <id>` | — | Objective ID (e.g. `OBJ-0001`, from `fuseraft objective list`) whose `RemainingTasks` the daemon pulls from and runs on its own whenever idle, instead of only running tasks it's explicitly dispatched. Repeatable. |
-| `--a2a` | off | Also host the config's agents over A2A, one endpoint per agent at `/{AgentName}`, so another fuseraft team can add them as `RemoteAgent` members. A call runs only that agent, under `--unattended-policy`. See [Serve — Hosting agents over A2A](serve.md#hosting-agents-over-a2a). |
+| `--a2a` | off | Also host the config's agents over A2A, one endpoint per agent at `/{AgentName}`, so another fuseraft team can add them as `remoteAgent` members. A call runs only that agent, under `--unattended-policy`. See [Serve — Hosting agents over A2A](serve.md#hosting-agents-over-a2a). |
 | `--a2a-port <port>` | MCP port + 1 | Port for the A2A endpoints. |
 | `--a2a-bind <address>` | `localhost` | Address the A2A endpoints listen on: `localhost`, an interface IP, or `0.0.0.0` for every interface. Anything but loopback requires the `FUSERAFT_A2A_TOKEN` environment variable; every request must then send `Authorization: Bearer <token>`. |
-| `--a2a-agent <name>` | every local agent | Agent to host over A2A. Repeatable. An agent that is itself a `RemoteAgent` can't be hosted. |
+| `--a2a-agent <name>` | every local agent | Agent to host over A2A. Repeatable. An agent that is itself a `remoteAgent` can't be hosted. |
 
 Only one daemon may run per project at a time, enforced by a pidfile at `~/.fuseraft/state/{project}/serve.pid`; a second `fuseraft serve` in the same working directory refuses to start while the first is alive. `Ctrl+C` shuts the daemon down gracefully — it finishes the in-flight task (if any), then removes the pidfile and socket.
 

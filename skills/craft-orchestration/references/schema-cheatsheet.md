@@ -1,190 +1,186 @@
-# Orchestration Schema Cheat Sheet
+# Team File Schema Cheatsheet
 
-Quick reference for crafting fuseraft orchestration configs. All fields are YAML; JSON is also accepted with identical keys.
-
----
+Quick reference for writing a fuseraft team file. Full reference: `docs/configuration.md`. Unknown fields are load errors; `fuseraft validate <file>` names the exact field.
 
 ## Top-level structure
 
 ```yaml
-Orchestration:
-  Name: <string>
-  Description: <string>           # optional, shown at startup
+team: <name>                      # required
+description: <one line>
 
-  Models:                         # named aliases — reference by alias in agent Model.ModelId
-    fast:
-      ModelId: grok-4.3
-      Endpoint: https://api.x.ai/v1
-      ApiKeyEnvVar: XAI_API_KEY
-      ReasoningEffort: none       # provider-specific, passed through as-is — common: none | minimal | low | medium | high | xhigh | max
-    reasoning:
-      ModelId: grok-4.3
-      Endpoint: https://api.x.ai/v1
-      ApiKeyEnvVar: XAI_API_KEY
-      ReasoningEffort: low
+models:                           # aliases, referenced by name
+  fast:      { modelId: grok-4.3, endpoint: https://api.x.ai/v1, apiKeyEnvVar: XAI_API_KEY, reasoningEffort: none }
+  reasoning: { modelId: grok-4.3, endpoint: https://api.x.ai/v1, apiKeyEnvVar: XAI_API_KEY, reasoningEffort: low }
 
-  Agents: [...]                   # at least one required
-  Selection: { ... }              # routing strategy
-  Termination: { ... }            # stop conditions
+artifacts:                        # files agents hand each other, declared once
+  brief:
+    path: .fuseraft/artifacts/brief.json
+    shape:
+      goal: string
+      files_to_change: [string]
+      acceptance_criteria: [string]
+      verify_command: string
+  testResults:
+    path: .fuseraft/artifacts/test-report.json
+    shape:
+      results:
+        - criterion: string
+          status: PASS|FAIL
+          command: string
 
-  ChangeTracking:                 # enables Changes plugin + validator cross-reference
-    Path: .fuseraft/changes.json
+agents:                           # required; a map keyed by agent name
+  Planner:
+    role: Scopes the task and writes the brief.
+    model: fast
+    tools: [FileSystem, Search, Subagent]
+    writes: [brief]
+    instructions: |
+      Explore the codebase, then write a focused brief for the task.
 
-  EvidenceStore:                  # enables evidence contracts + lossless compaction
-    Path: .fuseraft/evidence.json
+flow:                             # required
+  start: Planner
+  steps:
+    Planner:
+      - to: end
+        requires: [brief]
 
-  Validation:                     # required for TestReportValid, RequireBrief, RequireAllFilesWritten
-    BriefPath: .fuseraft/brief.json
-    TestReportPath: .fuseraft/test-report.json
-    ChangeLogPath: .fuseraft/changes.json
-    TestAssertionPatterns:
-      - "tester::assert"
-      - "if .+ throw"
-      - "\\bassert\\b"
-      - "\\bexpect\\b"
+limits:
+  maxTurns: 40
+  maxTokens: 2000000
 
-  Contracts:                      # named evidence contracts reusable across routes/states
-    - Name: BriefExists
-      Requires:
-        - Type: FileExists
-          Path: .fuseraft/brief.json
-    - Name: ImplementationComplete
-      Requires:
-        - Type: FilesWritten
-          Source: .fuseraft/brief.json
-          Field: files_to_change
-        - Type: CommandSucceeded
-          Pattern: "build|compile|test|check"
-    - Name: TestsValid
-      Requires:
-        - Type: FileExists
-          Path: .fuseraft/test-report.json
-        - Type: TestReport
-          NoFailures: true
-          HasAssertions: true
+security:
+  fileSystemSandboxPath: .
 
-  FailureHandling:                # auto-reinstruct or abort on repeated failures
-    MissingEvidence:
-      Action: Reinstruct
-      Threshold: 3
-    ConflictingEvidence:
-      Action: Reinstruct
-      Threshold: 2
-    NoProgress:
-      Action: Abort
-      Threshold: 3
-    MaxConsecutiveContractFailures: 6   # backstop: HITL after N contract failures (any type)
-    MaxConsecutiveTurnsWithoutSignal: 8 # backstop: HITL after N turns with no signal emitted
+mcpServers: []
 
-  Verifier:                       # optional meta-agent that audits evidence graph
-    AgentName: Verifier
-    EveryNTurns: 5
-    TriggerOnSuspiciousTransition: true
-    FindingsKeyword: INCONSISTENCY
-
-  Compaction:
-    TriggerTurnCount: 25
-    KeepRecentTurns: 10
-    Mode: lossless                # or: intent, hybrid, llm, window
-
-  WarnTurnTokens: 60000           # warn when a single turn's input exceeds this (keep < CutoverAt)
-
-  ContextBudget:                  # per-agent token budget; requires Compaction
-    WarnAt: 60000
-    CutoverAt: 100000
-    MaxSingleTurnInputTokens: 200000  # compact before next turn if single turn exceeded this
-
-  Checkpoint:
-    Mode: json
-    Path: .fuseraft/checkpoints
-
-  Events:
-    Path: .fuseraft/events.jsonl
+advanced: {}
 ```
-
----
 
 ## Agent fields
 
+| Field | Notes |
+|-------|-------|
+| `role` | One-line description. |
+| `model` | Alias, model ID, or map (`{ modelId: fast, maxTokens: 8192 }`). Omit to use the user's default model. |
+| `tools` | Plugin names or MCP server names. `Handoff` is added automatically for flow agents. |
+| `reads` / `writes` | Artifact names. Reads are included in context; writes get their path and shape in the prompt. |
+| `sees` | `handoff` (default), `conversation`, `fork`. Magentic agents default to `conversation`. |
+| `instructions` | Required. Describe the work, not the routing. |
+| `agentFile` | Load fields from another YAML file; inline fields win. |
+| `remoteAgent` | `{ url, timeoutSeconds, headers }`. Can't be combined with `model`, `tools`, `sees`, `advanced`. |
+| `advanced` | `functionChoice` (auto/required/none), `maxInTurnToolPairs`, `maxToolCallsPerTurn`, `maxInTurnContextTokens`, `capabilities`, `contextWindow`, `context`, `trustScore`, `subagentModel`, `subagentPlugins`, `subagentMaxToolCalls`, `skipExecutionState`, `knowledgeWeight`. |
+
+## Sees
+
+| Value | The agent gets |
+|-------|----------------|
+| `handoff` | The task or the previous agent's `handoff` goal/background/constraints, its `reads` artifacts, its own last 4 turns, corrections addressed to it, and any `advanced.context` sources. Never other agents' transcripts. |
+| `conversation` | The whole shared conversation (filtered by `advanced.contextWindow`). |
+| `fork` | The shared conversation plus the handoff directive. Use for a Verifier that audits other agents' claims. |
+
+`advanced.context` sources: `session_context`, `changes_recent:N`, `brief_field:FIELD`, `file:PATH`, `own_history:N`, `execution_state`, `investigation_log`.
+
+## Shape syntax
+
+| Sketch | Matches |
+|--------|---------|
+| `string`, `int`, `number`, `bool`, `any` | That type |
+| `A\|B` | One of those strings |
+| `[T]` | A list of `T` |
+| nested map | An object with those fields (extra fields allowed) |
+| trailing `?` | Optional field |
+
+## Flow: Steps
+
 ```yaml
-- Name: Developer
-  Description: Senior software engineer who implements features.
-  Instructions: |
-    You are an expert software developer.
-    ...
-    Call handoff(route_keyword: "HANDOFF TO TESTER").
-  Model:
-    ModelId: fast                 # alias from Models, or a literal model ID string
-    MaxTokens: 16384
-  FunctionChoice: required        # forces at least one tool call per turn
-  MaxInTurnToolPairs: 12         # sliding window: keep only last 12 tool results per inner LLM call (deterministic)
-  MaxInTurnContextTokens: 40000  # budget-reactive: trim oldest tool results when total exceeds this (soft cap)
-  Plugins:
-    - FileSystem
-    - Shell
-    - Handoff
-  Isolation: Fresh                 # Fresh (default) | Shared | Fork — see "Isolation" below
-  ContextWindow:
-    TextOnly: true                # strip tool-call results from context window; ignored when Isolation: Fresh
-  Context:                            # this agent's own inputs — always used under Isolation: Fresh
-    - Source: session_context         # handoff summary from session_context_write
-    - Source: changes_recent:5        # last 5 change-log entries
-    - Source: brief_field:test_targets # field from brief.json
-    - Source: file:.fuseraft/artifacts/test-report.json
-      MaxChars: 3000
-    - Source: own_history:4           # agent's own last 4 turns, text-only, bounded to 8k chars
-      MaxChars: 8000                  # override default (8000 chars ≈ 2000 tokens)
-  SubagentModel: claude-haiku-4-5-20251001   # cheaper model for subagent exploration
-  SubagentMaxToolCalls: 20        # cap on subagent iterations
-  SubagentPlugins:                # custom plugin list for subagent (defaults to read-only set)
-    - FileSystem
-    - Search
+flow:
+  start: Planner
+  steps:
+    Planner:
+      - to: Developer
+        requires: [brief]
+    Developer:
+      - to: Tester
+        requires:
+          - filesWritten: brief.files_to_change
+          - commandSucceeded: brief.verify_command
+      - to: Planner
+        when: the plan needs rethinking
+    Tester:
+      - to: Reviewer
+        when: every criterion passes
+        requires:
+          - testReport: testResults
+        onStuck: Developer
+      - to: Developer
+        when: a criterion fails
+    Reviewer:
+      - to: end
+        when: every criterion is verified
+        requires: [reviewJudgement]
+      - to: Developer
+        when: the code needs fixing
+      - to: Planner
+        when: the plan is fundamentally wrong
 ```
 
----
+| Edge field | Notes |
+|------------|-------|
+| `to` | Agent, `end`, or `[A, B]` for parallel branches. |
+| `when` | When to take the edge; shown to the agent. |
+| `requires` | Gates; all must pass. |
+| `onStuck` | Agent called in after two consecutive gate failures on this edge, or `abort`. |
+| `name` | Route name; defaults to the target. Needed only for two edges to the same target. |
+| `join` | Required with a parallel `to`: the agent that runs after the branches. |
+| `merge` | Parallel only: `{ strategy: union }` (default), `ranked` or `semantic_diff` (both need `agent`). |
+| `maxRevisits` | On a loop, escalate after N repeats, quoting the step agent's first `writes` artifact. |
+| `approve` | `true`: a person approves the handoff after its gates pass; a refusal sends the work back. |
 
-## Isolation
+Rules: every agent an edge targets needs its own `steps` entry (except parallel branches); at least one edge must go to `end`; an agent can only hand off on its own step's routes.
 
-Controls whether an agent sees the shared session transcript other agents have been writing
-to, or only a synthesized handoff directive plus its own declared `Context:` sources — the
-same fresh-by-default, fork-by-explicit-choice split Claude Code uses for its own subagents.
+## Flow: Patterns
 
-| Mode | What the agent receives | Use for |
-|---|---|---|
-| `Fresh` (default) | The synthesized `AgentDirective` (see below) + its own `Context:` sources only. Never `SharedHistory` — even with an empty/absent `Context:` block. | Most agents. No inherited reasoning, dead ends, or another agent's tool-call noise. |
-| `Shared` | `Context:` block if declared, else the windowed shared transcript (`ContextWindow`). Pre-overhaul behavior. | Conversational round-robin/keyword group chats; anything whose prompts assume prior turns are visible. |
-| `Fork` | `Shared` behavior **plus** the synthesized directive layered on top. | Meta-agents that genuinely need the full transcript AND a clear statement of what to do with it — a Verifier auditing the session, a RecoveryAgent diagnosing a failure. |
-
-**`Selection.Type: magentic` requires every agent to be `Shared` or `Fork`** — the manager's
-ledger loop depends on shared visibility of progress across all participants; config load fails
-with `Isolation: Fresh` under Magentic.
-
-A `Fresh` agent with no `Context:` sources at all still runs — it just receives nothing but the
-directive each turn. Fine for a terminal/leaf agent; a load-time warning flags this for anything
-that looks like it needs durable state.
-
-### The directive: how a `Fresh` agent learns what to do
-
-Extend the `handoff()` call with optional structured fields instead of leaving the receiving
-agent to infer intent from a bare routing keyword:
-
-```
-handoff(
-  route_keyword: "HANDOFF TO DEVELOPER",
-  goal: "Add pagination to GET /users.",
-  background: "Explored the handler in src/api/users.py — no existing page param. " +
-              "Auth middleware already extracts the caller; don't touch it.",
-  constraints: "Do not change the existing response shape for callers that omit ?page."
-)
+```yaml
+flow: { pattern: magentic, model: reasoning, maxRoundCount: 20, maxStallCount: 3, maxResetCount: 2 }
+flow: { pattern: mapreduce, splitter: S, mapper: M, reducer: R, itemsJsonPath: items, maxConcurrency: 4 }
+flow: { pattern: scattergather, participants: [A, B, C], synthesizer: Lead }
+flow: { pattern: adversarial, rounds: 3, passKeyword: APPROVED, stages: [{ generator: Dev, critic: Reviewer }] }
 ```
 
-`goal`/`background`/`constraints` are optional — a bare `handoff(route_keyword: ...)` still
-works exactly as before. When present, they become the receiving agent's task message under
-`Isolation: Fresh` (and are layered onto the transcript under `Fork`). Write them the way you'd
-brief a colleague who wasn't in the room: state what's already been learned or ruled out, don't
-assume they can see your reasoning.
+Pattern agents never call `handoff`; patterns end on their own.
 
----
+## Gates (`requires`)
+
+| Item | Passes when |
+|------|-------------|
+| `<artifact>` | File exists and matches its `shape`. |
+| `fileExists: <path>` | File exists. |
+| `filesWritten: <artifact>.<field>` | Every path listed in that field was written this run. |
+| `checklistComplete: <artifact>.<field>` | Every file-writing step in that field was written. |
+| `commandSucceeded: <artifact>.<field>` or `"<pattern>"` | A matching shell command exited 0 this run. Option `fallback: <pattern>`. |
+| `testReport: <artifact>` | Report exists; options `noFailures` and `hasAssertions` (both default `true`: no FAIL, every PASS names a command that ran). |
+| `relatedTestsPass` | Tests for changed files pass. Needs `advanced.testSelector`. |
+| `acceptanceCriteriaPassed: <brief>` | Criteria with `expected_output_contains` were met by real command output. |
+| `reviewJudgement` | The agent's reply has a ```` ```json {"review": [...]} ```` block, no FAIL, one entry per brief criterion, and a successful shell run this turn if any PASS. |
+| `anyFileWritten` | The agent wrote a file this turn. Option `fallback: <pattern>`. |
+| `noRepeatedShellFailures: <pattern>` | Matching commands aren't failing turn after turn. |
+| `sessionContextWritten` | The agent called `session_context_write` this turn. |
+| `architecture` | Changes follow the project's architecture rules. |
+
+## Advanced
+
+| Key | Purpose |
+|-----|---------|
+| `compaction` | `{ triggerTurnCount: 30, keepRecentTurns: 8, mode: lossless\|intent\|hybrid\|llm\|window, model: <alias> }` |
+| `contextBudget` | `{ warnAt: 60000, cutoverAt: 100000, maxSingleTurnInputTokens: 200000 }`; `cutoverAt` needs `compaction`. |
+| `failureHandling` | `{ missingEvidence: { action: Reinstruct, threshold: 3 }, conflictingEvidence: { action: Reinstruct, threshold: 2 }, noProgress: { action: Abort, threshold: 3 }, maxConsecutiveContractFailures: 6, maxConsecutiveTurnsWithoutSignal: 8 }` |
+| `verifier` | `{ agentName: Verifier, everyNTurns: 5, triggerOnSuspiciousTransition: true, findingsKeyword: INCONSISTENCY }` |
+| `brownfield` | `{ entryPoints, discoveryBriefPath, conventionProfilePath, seedEnvelopeFromBrief }` |
+| `testSelector` | `{ findRelatedCommand: "... {file} ...", fullSuiteCommand: "..." }` |
+| `systemPrompt` / `systemPromptPath` | Replace the base prompt. |
+| `warnTurnTokens`, `memory`, `skillCuration`, `telemetry`, `checkpoint`, `output`, `apiProfiles`, `scratchpad`, `chatroom` | See `docs/configuration.md#advanced`. |
+
+Change tracking, the evidence graph, events and checkpoints are always on; there is nothing to configure.
 
 ## All plugin names
 
@@ -198,316 +194,27 @@ assume they can see your reasoning.
 | `Json` | json_format, json_get, json_keys, json_merge, json_validate |
 | `Scratchpad` | scratchpad_write, scratchpad_read, scratchpad_read_all, scratchpad_search |
 | `Chatroom` | chatroom_send, chatroom_read |
-| `Changes` | changes_read, changes_read_latest — requires `ChangeTracking` in config |
-| `Subagent` | subagent_explore, subagent_locate |
-| `Handoff` | handoff(route_keyword) — terminates tool loop immediately |
+| `Changes` | changes_read, changes_read_latest |
+| `Subagent` | subagent_explore, subagent_explore_many, subagent_locate |
 | `Probe` | probe_code, probe_assert_output, probe_compare_outputs, probe_run_hypothesis |
 | `CodeExecution` | code_execution_sandbox_run, code_execution_repl_start/exec/stop |
 | `Compaction` | compact_conversation |
 | `Document` | document_extract_text, document_get_info, document_list_sheets |
-| `Session` | repl_session_current, repl_session_list, repl_session_read_log |
-| `Decision` | decision_search, decision_read (capability: read); decision_create, decision_supersede (capability: write) |
-| `Graph` | graph_search, graph_refs, graph_dependents — all read-only; requires `fuseraft graph build` |
+| `Investigation` | investigation_create_hypothesis, investigation_reject_hypothesis, … |
+| `Decision` | decision_search, decision_read (read); decision_create, decision_supersede (write) |
+| `Graph` | graph_search, graph_refs, graph_dependents — read-only; needs `fuseraft graph build` |
 | `Objective` | objective_create, objective_read, objective_update, objective_list, objective_link_task |
-
----
-
-## Routing: keyword
-
-```yaml
-Selection:
-  Type: keyword
-  Routes:
-    - Keyword: "HANDOFF TO DEVELOPER"
-      Agent: Developer
-      SourceAgents: [Planner]
-      Validator: RequireBrief           # single validator
-      # OR multiple (AND semantics):
-      Validators: [RequireWriteFile, RequireShellPass]
-      Contracts: [BriefExists]
-      RequiredCommandPattern: "go build|go test"   # optional, for RequireShellPass
-      ShellFallbackPattern: "npm install|pip install"  # optional, for RequireWriteFile
-
-    - Keyword: "HANDOFF TO TESTER"
-      Agent: Tester
-      SourceAgents: [Developer]
-      Validators: [RequireWriteFile, RequireShellPass]
-
-    - Keyword: "HANDOFF TO REVIEWER"
-      Agent: Reviewer
-      SourceAgents: [Tester]
-      Validator: TestReportValid
-
-    - Keyword: APPROVED
-      Agent: Reviewer
-      SourceAgents: [Reviewer]
-      Validators: [RequireShellPass, RequireReviewJudgement]
-```
-
----
-
-## Routing: state machine
-
-```yaml
-Selection:
-  Type: statemachine
-  StateMachine:
-    Initial: Planning
-
-    States:
-      Planning:
-        Agent: Planner
-        Transitions:
-          - To: Implementation
-            Signal: "HANDOFF TO DEVELOPER"
-            Contract: BriefExists
-
-      Implementation:
-        Agent: Developer
-        Transitions:
-          - To: Testing
-            Signal: "HANDOFF TO TESTER"
-            Contract: ImplementationComplete
-            HandoffContext:                   # inject targeted artifacts when transition fires
-              - Source: session_context       # NOTE: only takes effect for Shared/Fork agents —
-              - Source: changes_recent        # a Fresh agent never reads SharedHistory, so this
-              - Source: brief_field:test_targets # never reaches it. Put the same sources in the
-                                                  # target agent's own Context: block instead.
-          - To: Planning
-            Signal: "REPLAN REQUIRED"
-
-      Testing:
-        Agent: Tester
-        Transitions:
-          - To: Review
-            Signal: "HANDOFF TO REVIEWER"
-            Contract: TestsValid
-            RecoveryAgent: Developer    # invoked after N consecutive failures on this transition
-          - To: Implementation
-            Signal: "BUGS FOUND"
-
-      Review:
-        Agent: Reviewer
-        Transitions:
-          - To: Done
-            Signal: APPROVED
-          - To: Implementation
-            Signal: "REVISION REQUIRED"
-          - To: Planning
-            Signal: "REPLAN REQUIRED"
-
-      Done:
-        Agent: Reviewer
-        Terminal: true
-```
-
----
-
-## Routing: state machine with parallel fan-out
-
-Branch states run concurrently (one turn each, isolated history snapshots). Outputs are merged and control passes to the join state.
-
-```yaml
-Selection:
-  Type: statemachine
-  StateMachine:
-    Initial: Planning
-
-    States:
-      Planning:
-        Agent: Planner
-        Transitions:
-          - To: Integration          # fan-in join state (entered after merge)
-            Targets:                 # branch states run in parallel
-              - BackendWork
-              - FrontendWork
-              - MigrationWork
-            Parallel: true
-            Signal: "IMPLEMENT"
-            Merge:
-              Strategy: union        # concatenate all branch outputs (default)
-              # Strategy: ranked     # scoring agent picks/synthesises best output
-              # Strategy: semantic_diff  # resolver agent reconciles conflicts
-              # Agent: Integrator    # required for ranked / semantic_diff
-
-      BackendWork:
-        Agent: BackendDev
-        # No transitions — branch agents run one turn only; signals are not evaluated.
-
-      FrontendWork:
-        Agent: FrontendDev
-
-      MigrationWork:
-        Agent: MigrationDev
-
-      Integration:
-        Agent: Integrator
-        Transitions:
-          - To: Done
-            Signal: APPROVED
-
-      Done:
-        Agent: Integrator
-        Terminal: true
-```
-
-**Key rules:**
-- `To` is the join state — where control goes after all branches finish and outputs are merged.
-- `Targets` are the branch states — each runs one turn; their own transitions are not evaluated.
-- Branch agents do **not** need `Handoff` and should **not** be instructed to emit a signal.
-- For `ranked` / `semantic_diff`, add the merge agent to `Agents` with appropriate instructions; it receives all branch outputs as context and returns the merged result.
-
-**Merge strategies:**
-
-| Strategy | Behaviour | Merge.Agent required? |
-|---|---|---|
-| `union` | Concatenate all outputs in declaration order | No |
-| `consensus` | Pass if all branches agree on final statement; otherwise union | No |
-| `vote` | Pick the output agreed by the most branches; tie → union | No |
-| `ranked` | Scoring agent selects or synthesises the best output | Yes |
-| `semantic_diff` | Resolver agent reconciles agreements and conflicts | Yes |
-
----
-
-## Routing: graph
-
-Nodes bind agents to named positions; edges declare control flow explicitly. Forward edges advance the graph; back-edges return to earlier nodes (cycles allowed). `Compaction.Mode: lossless` and `hybrid` are not supported — use `intent` or `llm`.
-
-```yaml
-Selection:
-  Type: graph
-  Graph:
-    EntryNode: planner        # defaults to first node if omitted
-    MaxRetries: 4             # consecutive validator failures per node before HITL (default 4)
-    Nodes:
-      - Id: planner
-        Agent: Planner
-      - Id: developer
-        Agent: Developer
-      - Id: tester
-        Agent: Tester
-      - Id: reviewer
-        Agent: Reviewer
-        Terminal: true        # session ends after this agent runs once
-        Validators: [RequireReviewJudgement]   # checked before terminal exit
-    Edges:
-      - From: planner
-        To: developer
-        Keyword: "HANDOFF TO DEVELOPER"
-        Validators: [RequireBrief]
-      - From: developer
-        To: tester
-        Keyword: "HANDOFF TO TESTER"
-        Validators: [RequireWriteFile]
-        RecoveryAgent: Planner   # one-turn intervention after 2+ consecutive failures
-      - From: tester
-        To: reviewer
-        Keyword: "HANDOFF TO REVIEWER"
-        Validators: [TestReportValid]
-      - From: tester
-        To: developer
-        Keyword: "BUGS FOUND"          # back-edge
-      - From: reviewer
-        To: developer
-        Keyword: "REVISION REQUIRED"   # back-edge
-```
-
-**Key rules:**
-- Node `Id` must be unique (case-insensitive), lowercase, and stable — appears in event log payloads.
-- `Agent` must match a name in `Orchestration.Agents`.
-- Edges are evaluated in declaration order — the first matching edge fires.
-- A `Keyword`-less edge fires unconditionally — only safe on nodes with exactly one outgoing edge.
-- `Terminal: true` ends the session after the agent runs once; attach `Validators` to the node (not an edge) to gate the exit.
-- `Compaction.Mode: lossless` and `hybrid` are unsupported — use `Mode: intent` (with `ChangeTracking`) or `Mode: llm`.
-
-**Parallel fan-out (graph):** Mark destination nodes `Parallel: true` and use the same `Keyword` on all edges from the source node. All parallel nodes run concurrently with isolated history snapshots; their outputs are merged before control passes to the common forward-edge target. Parallel nodes do not need `Handoff` and should not emit a handoff signal.
-
-```yaml
-    Nodes:
-      - Id: coordinator
-        Agent: Coordinator
-      - Id: analyzer_a
-        Agent: AnalyzerA
-        Parallel: true
-      - Id: analyzer_b
-        Agent: AnalyzerB
-        Parallel: true
-      - Id: synthesizer
-        Agent: Synthesizer
-        Terminal: true
-    Edges:
-      - From: coordinator
-        To: analyzer_a
-        Keyword: "BEGIN PARALLEL ANALYSIS"
-      - From: coordinator
-        To: analyzer_b
-        Keyword: "BEGIN PARALLEL ANALYSIS"
-      - From: analyzer_a
-        To: synthesizer
-        Keyword: "ANALYSIS COMPLETE"
-      - From: analyzer_b
-        To: synthesizer
-        Keyword: "ANALYSIS COMPLETE"
-```
-
----
-
-## Termination
-
-```yaml
-Termination:
-  Type: composite
-  MaxIterations: 40
-  Strategies:
-    - Type: regex
-      Pattern: '(?m)^\s*APPROVED\s*$'
-      AgentNames: [Reviewer]
-    - Type: maxiterations
-      MaxIterations: 40             # hard cap — always fires regardless of validators
-```
-
----
-
-## Built-in validators
-
-| Name | Attach to | What it enforces |
-|------|-----------|-----------------|
-| `RequireBrief` | Planner → Developer | `brief.json` exists with non-empty goal, files_to_change, acceptance_criteria |
-| `RequireWriteFile` | Developer → Tester | At least one `write_file` or `patch_file` call this turn |
-| `RequireAllFilesWritten` | Developer → Tester | Every file in `brief.json`'s `files_to_change` written this session |
-| `RequireShellPass` | Any | At least one successful `shell_run` this turn |
-| `TestReportValid` | Tester → Reviewer | `test-report.json` exists, no FAILs, non-empty commands, no fake tests |
-| `RequireReviewJudgement` | Reviewer → Done | Reviewer emitted `{"review":[...]}` with all PASS verdicts + shell run |
-| `RequireRelatedTestsPass` | Developer → Tester | Targeted tests for changed files pass (needs `TestSelector`) |
-| `RequireAcceptanceCriteriaPassedValidator` | Developer → Reviewer | Machine-testable criteria verified by real shell output |
-| `RequireSessionContextWrite` | Any route/edge/transition whose source agent is `Isolation: Fresh` | At least one `session_context_write` call this turn — not auto-attached; add it explicitly so a `Fresh` agent that forgets to write a summary fails loudly instead of silently handing the next agent nothing |
-
----
-
-## Evidence contract predicates
-
-| Type | Key fields | What it checks |
-|------|-----------|----------------|
-| `FileExists` | `Path` | File exists on disk |
-| `FilesWritten` | `Source`, `Field` | Files from a JSON array field were all written |
-| `CommandSucceeded` | `Pattern` or `PatternField` | A shell command matching pattern exited 0 |
-| `TestReport` | `NoFailures`, `HasAssertions` | `test-report.json` has no FAILs and real assertions |
-| `RelatedTestsPass` | — | Tests for changed files pass (needs `TestSelector`) |
-
----
 
 ## Common providers
 
-| Provider | ModelId example | Endpoint | ApiKeyEnvVar | Notes |
+| Provider | `modelId` example | `endpoint` | `apiKeyEnvVar` | Notes |
 |----------|----------------|----------|-------------|-------|
-| xAI | `grok-4.3` | `https://api.x.ai/v1` | `XAI_API_KEY` | Set `ReasoningEffort` (provider-specific; common: none/minimal/low/medium/high/xhigh/max) |
+| xAI | `grok-4.3` | `https://api.x.ai/v1` | `XAI_API_KEY` | Set `reasoningEffort` (none/low/medium/high/…) |
 | Anthropic | `claude-sonnet-4-6` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | |
 | OpenAI | `gpt-4o` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | |
 | Ollama (local) | `llama3.1` | `http://localhost:11434/v1` | *(none needed)* | |
 
----
-
-## Brief schema (written by Planner to `.fuseraft/brief.json`)
+## Brief (written by the Planner)
 
 ```json
 {
@@ -515,42 +222,34 @@ Termination:
   "files_to_change": ["src/api/users.py", "tests/test_users.py"],
   "acceptance_criteria": [
     "GET /users?page=2&limit=10 returns the correct slice",
-    "Invalid page values return 400 with a descriptive error",
-    "Test files contain real assertions that can fail"
+    "Invalid page values return 400 with a descriptive error"
   ],
-  "constraints": ["Do not change existing endpoint response shape"]
+  "constraints": ["Do not change the existing response shape"],
+  "verify_command": "pytest tests/test_users.py"
 }
 ```
 
-## Test report schema (written by Tester to `.fuseraft/test-report.json`)
+## Test report (written by the Tester)
 
 ```json
 {
   "results": [
-    {
-      "criterion": "<exact criterion text from brief.json>",
-      "status": "PASS",
-      "command": "<exact shell_run command used>",
-      "exit_code": 0
-    }
-  ],
-  "fake_test_files": []
-}
-```
-
-`command` must be non-empty for every PASS entry — an empty command is rejected as fabricated.
-
----
-
-## Reviewer judgement block (emitted before APPROVED)
-
-```json
-{
-  "review": [
-    { "criterion": "<exact criterion text>", "verdict": "PASS", "evidence": "ran go test ./... exit 0" },
-    { "criterion": "<another criterion>",    "verdict": "FAIL", "evidence": "output missing has_next field" }
+    { "criterion": "<criterion text from the brief>", "status": "PASS", "command": "<exact shell_run command>", "exit_code": 0 }
   ]
 }
 ```
 
-Every acceptance criterion from `brief.json` must have an entry. At least one successful `shell_run` must have been called in the same turn as any PASS verdict.
+`command` must name a command that actually ran this run for every PASS.
+
+## Review judgement block (for `reviewJudgement`)
+
+```json
+{
+  "review": [
+    { "criterion": "<criterion text>", "verdict": "PASS", "evidence": "ran pytest, exit 0" },
+    { "criterion": "<another>",        "verdict": "FAIL", "evidence": "has_next is missing" }
+  ]
+}
+```
+
+One entry per acceptance criterion; a successful shell run is needed in the same turn as any PASS.

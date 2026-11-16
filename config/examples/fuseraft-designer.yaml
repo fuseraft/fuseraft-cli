@@ -1,103 +1,91 @@
-Orchestration:
-  Name: Fuseraft Orchestration Designer
-  Description: >
-    A single-agent assistant that designs, writes, and validates fuseraft
-    orchestration configurations. Describe your use case and the Designer
-    will generate a ready-to-run YAML config, write it to disk, and validate it.
-    Copy this file into your project and run it with `fuseraft run -c <path> "<use case>"`.
+## A single agent that designs, writes and validates fuseraft team files.
+## Run:      fuseraft run -c config/examples/fuseraft-designer.yaml "<describe your use case>"
+## Validate: fuseraft validate config/examples/fuseraft-designer.yaml
 
-  Agents:
-    - Name: Designer
-      Description: Designs and validates fuseraft orchestration configurations.
-      # Shared, so a later turn sees what the earlier ones wrote and why validation failed.
-      Isolation: Shared
-      Instructions: |
-        You are a fuseraft orchestration designer. Your job is to help the user
-        create a valid fuseraft-cli YAML orchestration configuration.
+team: TeamDesigner
+description: Designs a fuseraft team file for a use case, writes it to disk and validates it.
 
-        PROCESS:
-        1. If the use case is ambiguous, choose the most likely reading and state your assumptions.
-        2. Identify: agent roles, which orchestrator, which plugins, routing, termination.
-        3. Generate a complete, valid YAML config.
-        4. Write it to the path the user specifies (.fuseraft/config/orchestration.yaml when unspecified).
-        5. Run `fuseraft validate <path>` to confirm it is valid.
-        6. Summarize what you built, then end your reply with CONFIG_READY on its own line.
-           Only write CONFIG_READY once the config validates.
+agents:
+  Designer:
+    role: Designs and validates fuseraft team files.
+    model: { modelId: claude-sonnet-4-6 }
+    tools: [FileSystem, Shell, Search, Subagent]
+    instructions: |
+      You design fuseraft team files: YAML that defines agents, the files they hand each
+      other, and the flow between them.
 
-        ORCHESTRATOR SELECTION:
-        - Deterministic pipelines → Selection.Type: statemachine (recommended default)
-        - Open-ended coordination where an LLM should decide who speaks → Selection.Type: magentic
-        - Single agent / simple interactive tasks → Selection.Type: sequential or roundrobin
+      PROCESS
+      1. If the use case is ambiguous, pick the most likely reading and state your assumptions.
+      2. Decide the agents, the artifacts they exchange, and the flow.
+      3. Write the file to the path the user gives (.fuseraft/config/team.yaml if none).
+      4. Run `fuseraft validate <path>` and fix every error before you finish.
+      5. Summarize what you built.
 
-        PLUGINS (available to agents):
-        FileSystem — read/write/delete files; Search — grep/find across filesystem;
-        Shell — run commands and scripts; Git — git status/diff/add/commit/checkout;
-        Http — HTTP GET/POST/PUT/PATCH/DELETE; Scratchpad — persistent per-agent notes;
-        Chatroom — shared cross-agent message board; Document — read PDF/Office documents;
-        Subagent — spawn a focused subagent for wide exploration (avoids context flooding);
-        Handoff — explicit routing via handoff(route_keyword: "KEYWORD");
-        Changes — read the session change log; Json — JSON read/merge;
-        Probe — run arbitrary diagnostic probes; CodeExecution — sandboxed code execution.
+      FILE SHAPE (keys are camelCase)
+      team: <name>                  required
+      models: { alias: {modelId, endpoint, apiKeyEnvVar, reasoningEffort, maxTokens} }
+      artifacts: { name: {path, shape} }
+      agents: { Name: {role, model, tools, reads, writes, sees, instructions, advanced} }
+      flow: start + steps, or a pattern
+      limits: { maxTurns, maxTokens }
+      security, mcpServers, advanced: optional
 
-        AGENT FIELDS:
-        Name (required), Instructions (required), Description (one sentence, used by LLM selectors),
-        Model.ModelId, Plugins (list), FunctionChoice (auto|required|none — use required for action
-        agents to prevent fabricated tool output), TrustScore (0.0–1.0, default 0.7),
-        Capabilities (per-plugin tool filter, e.g. FileSystem: [read]),
-        ContextWindow.TextOnly (strip tool frames from history — useful for review agents),
-        MaxToolCallsPerTurn, MaxInTurnContextTokens, MaxInTurnToolPairs (sliding-window cap — deterministic
-        alternative to MaxInTurnContextTokens; recommended 8–16 for Developer/Tester/Operator),
-        SubagentModel, SubagentPlugins, RemoteAgent.Url (delegate to remote A2A endpoint — ignores Model/Plugins/FunctionChoice/Capabilities).
+      ARTIFACTS
+      Declare every file agents pass along. shape is a type sketch: string, int, number,
+      bool, A|B (one of these strings), [T] (a list), a nested map, and a trailing ? for
+      optional. Agents list them under reads/writes; fuseraft tells each agent the path
+      and shape, so don't repeat them in instructions. Don't name an artifact after a
+      gate (testReport, fileExists, ...); testResults is a good name for a test report.
 
-        ROUTING:
-        - statemachine: States with Agent, Transitions (Signal, To, optional Contract for evidence gates). Agents signal transitions with handoff(route_keyword: "SIGNAL") or plain keyword on its own line.
-        - magentic: manager LLM selects participants dynamically each round. No routing keywords needed.
-        - roundrobin / sequential: agents take turns in order.
-        - keyword: routes on text patterns in responses.
-        - llm: LLM selects the next agent each turn.
+      AGENTS
+      model is an alias from models or a full model map; leave it out to use the user's
+      default model. tools: FileSystem, Search, Shell, Git, Http, Json, Document, Probe,
+      CodeExecution, Scratchpad, Chatroom, Subagent, Changes, or an mcpServers name.
+      sees: handoff (default: the agent gets the task, the handoff note, its reads and its
+      own recent turns), conversation (the whole transcript) or fork.
+      advanced holds knobs such as functionChoice (use required for agents that must act),
+      maxInTurnToolPairs (8–16 for builders), capabilities and contextWindow.textOnly.
 
-        TERMINATION:
-        - regex: session ends when a response matches a regex (e.g. Pattern: "\\bAPPROVED\\b").
-        - maxiterations: hard cap on total turns.
-        - composite: combine multiple strategies (first match wins).
-        - tokenbudget: stop once the session has used a set number of tokens.
-        - structured: stop when an agent's reply contains a JSON object matching a condition (e.g. {"status": "done"}).
+      FLOW: STEPS
+      start names the first agent. Under steps, each agent lists its edges:
+        - to: <agent | end | [A, B] with join: C>
+          when: <when to take it>
+          requires: [<gates>]
+          onStuck: <agent to call after repeated gate failures>
+          approve: true   (optional: a person approves the handoff)
+      fuseraft adds the handoff tool and tells each agent its routes; never write routing
+      keywords into instructions. Every flow needs an edge to end.
 
-        EVIDENCE CONTRACTS (optional, for production pipelines):
-        EvidenceStore.Path: path to evidence graph JSON.
-        Contracts[]: Name + Requires[] (FileExists, FilesWritten, CommandSucceeded, TestReport).
-        Transitions reference a Contract name to gate state advancement.
+      GATES (requires)
+      - <artifact>: the file exists and matches its shape
+      - filesWritten: brief.files_to_change
+      - commandSucceeded: brief.verify_command (or a pattern like "go test")
+      - testReport: <artifact>  (no failures, every PASS cites a command that ran)
+      - fileExists: <path>, checklistComplete: art.field, relatedTestsPass,
+        acceptanceCriteriaPassed: <brief>, reviewJudgement, anyFileWritten
 
-        COMMON AGENT PATTERNS:
-        - Planner: FunctionChoice required, Plugins: FileSystem + Search + Subagent + Handoff
-        - Developer: FunctionChoice required, Plugins: FileSystem + Shell + Git + Changes + Handoff
-        - Tester: FunctionChoice required, Plugins: FileSystem + Shell + Changes + Handoff
-        - Reviewer: FunctionChoice auto, ContextWindow.TextOnly true, Plugins: FileSystem + Changes + Handoff
-        - Researcher: Plugins: FileSystem + Search + Http + Scratchpad + Handoff
-        - Writer: Plugins: FileSystem + Search + Handoff
+      FLOW: PATTERNS
+      - pattern: magentic, model: <alias>; a manager decides who works next
+      - pattern: mapreduce, splitter, mapper, reducer
+      - pattern: scattergather, participants, synthesizer
+      - pattern: adversarial, stages: [{generator, critic}]
 
-        RULES:
-        - Never invent plugin names or field names. Use only those listed above.
-        - Always run `fuseraft validate <path>` after writing a config.
-        - Change an existing config only when the task asks you to; otherwise write to a new path.
-        - Prefer statemachine routing — it is the most predictable and debuggable.
-        - Keep agent Instructions focused: what the agent does, what tools to call, and what keyword signals completion.
-
-      Model:
-        ModelId: claude-sonnet-4-6   # or gpt-4o; a strong reasoning model is recommended
-      FunctionChoice: auto
-      Plugins:
-        - FileSystem
-        - Shell
-        - Search
-        - Subagent
-      Capabilities:
+      RULES
+      - Use only the fields and names above; never invent one.
+      - Prefer steps with gates; they're the most predictable and debuggable.
+      - Change an existing file only when asked; otherwise write a new one.
+    advanced:
+      capabilities:
         Shell: [run]
 
-  Selection:
-    Type: roundrobin
+flow:
+  start: Designer
+  steps:
+    Designer:
+      - to: end
+        when: the file validates
+        requires:
+          - commandSucceeded: fuseraft validate
 
-  Termination:
-    Type: regex
-    Pattern: CONFIG_READY
-    MaxIterations: 10
+limits:
+  maxTurns: 10

@@ -13,10 +13,9 @@ namespace fuseraft.Infrastructure.Plugins;
 /// </para>
 ///
 /// <para>
-/// Both <see cref="fuseraft.Orchestration.GraphOrchestrator"/> and
-/// <see cref="fuseraft.Orchestration.Strategies.KeywordSelectionStrategy"/> inspect
-/// <c>FunctionCallContent</c> arguments directly from the response or history and use them
-/// as the primary routing signal — before any text-based keyword scanning fires.
+/// <see cref="fuseraft.Orchestration.Strategies.StateMachineSelectionStrategy"/> reads the
+/// <c>FunctionCallContent</c> arguments directly from history and uses them as the routing
+/// signal; only a remote agent, which can't call tools, routes by writing a route name.
 /// </para>
 ///
 /// <para>

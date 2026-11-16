@@ -176,8 +176,6 @@ internal sealed class CompactionCoordinator(
             return (checkpoint, ShouldBreak: true, ShouldContinue: false, ErrorMessage: $"Compaction failed: {ex.Message}");
         }
 
-        if (checkpoint.ResumeExecutorId is not null)
-            orchestrator.SetResumeExecutorId(checkpoint.ResumeExecutorId);
         if (checkpoint.CurrentStateName is not null)
             orchestrator.SetResumeStateName(checkpoint.CurrentStateName);
 
@@ -197,28 +195,6 @@ internal sealed class CompactionCoordinator(
         ConversationCompactor compactor,
         CancellationToken cancellationToken)
     {
-        // Capture which executor is active before discarding full history so the next
-        // StreamAsync starts from the correct agent. Skip for Magentic: the last assistant
-        // message there is often a manager tag like "[MagenticManager:Final]" which would
-        // write a misleading executor ID into the checkpoint.
-        string? lastAssistantAgent = null;
-        if (orchestrator is not MagenticOrchestrator)
-        {
-            var lastAssistantMsg = checkpoint.Messages
-                .LastOrDefault(m => m.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(m.AgentName));
-
-            // If that turn already completed a validated handoff to a different node (e.g. a
-            // Developer turn that ended in a successful "HANDOFF TO REVIEWER"), resume there —
-            // not at the speaker, which is stale the instant its own turn routed onward. See
-            // IOrchestrator.ResolveResumeExecutorId / GraphTopology.ResolveHandoffTarget.
-            lastAssistantAgent = (lastAssistantMsg is not null
-                    ? orchestrator.ResolveResumeExecutorId(lastAssistantMsg)
-                    : null)
-                ?? lastAssistantMsg?.AgentName?.ToLowerInvariant();
-
-            checkpoint.ResumeExecutorId = lastAssistantAgent;
-        }
-
         string modifiedFilesNote = BuildModifiedFilesNote(checkpoint.Messages);
 
         var snapshotter = (orchestrator as AgentOrchestrator)?.CurrentSnapshotter;
@@ -248,7 +224,7 @@ internal sealed class CompactionCoordinator(
             _ = eventEmitter.EmitAsync(EventTypes.CompactionResumeCandidate,
                 payload: new
                 {
-                    last_assistant_agent = lastAssistantAgent,
+                    last_assistant_agent = checkpoint.Messages.LastOrDefault(m => m.Role == MessageRole.Assistant)?.AgentName,
                     current_state_name   = checkpoint.CurrentStateName,
                     reason               = _pendingCompactionReason,
                     total_messages       = checkpoint.Messages.Count,
@@ -282,7 +258,7 @@ internal sealed class CompactionCoordinator(
                         reason         = _pendingCompactionReason,
                         turns_dropped  = dropped,
                         turns_retained = trimmed.Count,
-                        resume_from    = checkpoint.ResumeExecutorId ?? "planner"
+                        resume_from    = checkpoint.CurrentStateName ?? "start"
                     });
 
             await sessionStore.SaveAsync(checkpoint, cancellationToken);
@@ -319,7 +295,7 @@ internal sealed class CompactionCoordinator(
                     turns_compacted = turnsBefore - retained.Count,
                     turns_retained  = retained.Count,
                     reason          = _pendingCompactionReason,
-                    resume_from     = checkpoint.ResumeExecutorId ?? "planner"
+                    resume_from     = checkpoint.CurrentStateName ?? "start"
                 });
 
         await sessionStore.SaveAsync(checkpoint, cancellationToken);

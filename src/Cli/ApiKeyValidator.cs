@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using fuseraft.Core.Models;
+using fuseraft.Infrastructure.Chat;
 
 namespace fuseraft.Cli;
 
@@ -29,9 +30,6 @@ public static class ApiKeyValidator
         // Resolve aliases against the Models registry first so agents that reference
         // a named alias (e.g. "fast") get the endpoint and API key from the alias.
         var models = config.Agents.Select(a => ResolveAlias(a.Model, config.Models))
-            .Concat(config.Selection.Model is not null
-                ? [ResolveAlias(config.Selection.Model, config.Models)]
-                : Array.Empty<ModelConfig>())
             .Concat(config.Selection.Magentic?.Model is not null
                 ? [ResolveAlias(config.Selection.Magentic.Model, config.Models)]
                 : Array.Empty<ModelConfig>())
@@ -49,14 +47,9 @@ public static class ApiKeyValidator
                 throw new InvalidOperationException(
                     $"API key variable '{model.ApiKeyEnvVar}' is not set.");
 
-            // Strip /chat/completions (or any path) to get the provider base URL.
-            var uri    = new Uri(model.Endpoint.TrimEnd('/'));
-            var baseUrl = $"{uri.Scheme}://{uri.Host}{(uri.IsDefaultPort ? string.Empty : $":{uri.Port}")}";
-
-            // Use a per-request message so keys from different providers don't bleed
-            // across iterations via DefaultRequestHeaders.
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/v1/models");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            using var request = BuildProbe(model, apiKey);
+            if (request is null) continue;
+            var baseUrl = request.RequestUri!.GetLeftPart(UriPartial.Authority);
 
             HttpResponseMessage response;
             try
@@ -74,6 +67,26 @@ public static class ApiKeyValidator
                     $"API key from '{model.ApiKeyEnvVar}' was rejected by the provider (HTTP 401). " +
                     $"Verify the key is current and has the correct permissions.");
         }
+    }
+
+    /// <summary>The <c>GET /v1/models</c> request that checks <paramref name="apiKey"/>, or null when the model's endpoint can't be worked out.</summary>
+    internal static HttpRequestMessage? BuildProbe(ModelConfig model, string apiKey)
+    {
+        var endpoint = ChatClientFactory.EndpointFor(model.ModelId, model.Provider, model.Endpoint);
+        if (!Uri.TryCreate(endpoint.TrimEnd('/'), UriKind.Absolute, out var uri)) return null;
+
+        var baseUrl = uri.GetLeftPart(UriPartial.Authority);
+        var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/v1/models");
+        var anthropic = model.Provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
+            || (string.IsNullOrWhiteSpace(model.Provider) && uri.Host.Equals("api.anthropic.com", StringComparison.OrdinalIgnoreCase));
+        if (anthropic)
+        {
+            request.Headers.Add("x-api-key", apiKey);
+            request.Headers.Add("anthropic-version", "2023-06-01");
+        }
+        else
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        return request;
     }
 
     private static ModelConfig ResolveAlias(

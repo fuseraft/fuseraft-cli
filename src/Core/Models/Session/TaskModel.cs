@@ -9,8 +9,7 @@ namespace fuseraft.Core.Models.Session;
 /// Replaces the single-string <see cref="SessionCheckpoint.Task"/> with a typed schema
 /// that selection strategies and routing validators can interrogate without parsing
 /// free-form prose. The <see cref="ActiveTargets"/> list is the primary integration point:
-/// it drives <see cref="fuseraft.Orchestration.ContextWindowFilter"/> semantic projection
-/// and tells <c>LlmSelectionStrategy</c> which files are currently in scope.
+/// it drives <see cref="fuseraft.Orchestration.ContextWindowFilter"/> semantic projection.
 /// </para>
 /// </summary>
 public record TaskModel

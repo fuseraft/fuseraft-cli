@@ -29,15 +29,16 @@ public sealed class ShowConfigCommandTests : IDisposable
     public void ListJson_SummarisesConfigs_SkipsAgentFiles_ReportsLoadErrors()
     {
         File.WriteAllText(Path.Combine(_dir, "team.yaml"), """
-            Orchestration:
-              Name: Team
-              Agents:
-                - Name: Dev
-                  Instructions: build
-                  Model:
-                    ModelId: gpt-4o
-              Selection:
-                Type: sequential
+            Team: Team
+            Agents:
+              Dev:
+                Instructions: build
+                Model: { ModelId: gpt-4o }
+            Flow:
+              Start: Dev
+              Steps:
+                Dev:
+                  - To: end
             """);
         File.WriteAllText(Path.Combine(_dir, "broken.json"), "{ nope");
         File.WriteAllText(Path.Combine(_dir, "agents", "dev.yaml"), "Name: Dev");
