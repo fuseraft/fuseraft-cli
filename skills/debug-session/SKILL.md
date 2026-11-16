@@ -48,20 +48,19 @@ Call `read_file` on `~/.fuseraft/sessions/<sessionId>.json`. The checkpoint cont
 | `StateHistory` | Non-null for Graph runs — shows which node was active at each turn |
 
 **Read the last 5–10 messages.** For each message look at:
-- `AgentName` — which agent spoke
-- `Content` — what they said; look for validator error injections (lines starting with `Handoff blocked:` or `APPROVED blocked:`)
+- `agentName` — which agent spoke
+- `Content` — what they said; look for gate failure corrections (lines starting with `Handoff blocked:`, `Approval blocked:`, `MISSING ARTIFACT` or `EVIDENCE AUDIT REQUIRED`)
 - `TurnIndex` — spot large gaps (compaction may have fired)
 - `IsCompactionSummary: true` — if present, a compaction happened here
 
 ### Step 3: Read the Config
 
 Call `read_file` on the `ConfigPath` from the checkpoint. Note:
-- Which selection strategy is used (`keyword`, `statemachine`, `magentic`, `graph`)
-- The `MaxIterations` cap and how many turns the session ran
-- `MaxTotalTokens` — compare against cumulative token counts in the messages
-- Which validators are on which routes
-- `FailureHandling` presence (missing on a 3+ agent pipeline is a common cause of infinite reinstruct loops)
-- `Compaction` settings — if present, check `TriggerTurnCount` vs. the turn count at failure
+- The flow: `steps` (and which gates are on which edges) or a `pattern`
+- `limits.maxTurns` and how many turns the session ran
+- `limits.maxTokens` — compare against cumulative token counts in the messages
+- `advanced.failureHandling` presence (missing on a 3+ agent pipeline is a common cause of long reinstruct loops)
+- `advanced.compaction` settings — if present, check `triggerTurnCount` vs. the turn count at failure
 
 ### Step 4: Read the Events Log
 
@@ -76,10 +75,10 @@ Call `read_file` on it (or `shell_run("tail -n 100 .fuseraft/logs/events.jsonl")
 | `tool_blocked` | Sandbox or injection detector denied a tool call |
 | `session_started` / `session_completed` | Bookends for normal runs |
 | `compaction` | Compaction triggered — check if context loss may have caused drift; repeated `compaction` events with no progress between them signal thrashing |
-| `budget_exceeded` | `MaxTotalTokens` was hit |
+| `budget_exceeded` | `limits.maxTokens` was hit |
 | `circuit_breaker_open` | 5 consecutive model API failures |
-| `context_budget_warn` | Agent's cumulative input tokens crossed `WarnAt` |
-| `context_budget_cutover` | Compaction fired due to budget: cumulative tokens ≥ `CutoverAt`, or `reason: "single_turn_limit"` if a single turn exceeded `MaxSingleTurnInputTokens` |
+| `context_budget_warn` | Agent's cumulative input tokens crossed `warnAt` |
+| `context_budget_cutover` | Compaction fired due to budget: cumulative tokens ≥ `cutoverAt`, or `reason: "single_turn_limit"` if a single turn exceeded `maxSingleTurnInputTokens` |
 | `keyword_not_found` | State machine turn with no matching routing signal — repeated occurrences across compaction boundaries mean a silently stuck agent |
 
 ### Step 5: Check for Crash Dumps
@@ -90,7 +89,7 @@ ls -lt ~/.fuseraft/crashdump/ | head -10
 
 If a crash dump exists for the session's timeframe, call `read_file` on the most recent one. Look at:
 - `ExceptionType` and `Message` — the C# exception that caused the crash
-- `AgentName` and `TurnIndex` — where in the run it happened
+- `agentName` and `TurnIndex` — where in the run it happened
 - `StackTrace` — needed only for runtime bugs; skip for logic/config issues
 
 ### Step 6: Diagnose
@@ -99,20 +98,20 @@ Match the evidence to a root cause using this table:
 
 | Symptom | Root cause | Fix |
 |---------|------------|-----|
-| Same validator error 3× in a row → `validator_stuck` event | Agent can't satisfy the validator (missing tool call, wrong keyword, fabricating output) | Tighten agent instructions: name the exact tool to call and the exact keyword to emit; or add `FailureHandling` to reroute after N failures |
-| Agent emits the right keyword but validator still blocks | Validator requires evidence that wasn't produced this turn (e.g. `RequireShellPass` but `shell_run` was in a prior turn) | Clarify in instructions that the required tool call must happen in the same turn as the handoff keyword |
-| Agent emits no routing keyword | Instructions don't match the keyword exactly, or model ignored instructions | Check instructions for exact keyword text; set `FunctionChoice: required` if the agent should always call a tool |
-| Session stopped at `MaxIterations` | Pipeline needs more turns than allowed | Raise `MaxIterations`; or add `FailureHandling` to detect loops early |
-| `budget_exceeded` event | Token budget too low for the task | Raise `MaxTotalTokens`; or enable compaction to reduce context size |
+| Same gate failure 3× in a row → `validator_stuck` event | Agent can't satisfy the gate (missing tool call, wrong file, fabricated output) | Tighten agent instructions: name the exact tool to call and file to write; add `onStuck` on the edge so another agent can fix it |
+| Agent hands off but a turn-scoped gate still blocks | The check needs evidence from this turn (e.g. `reviewJudgement` needs a shell run in the same turn as a PASS verdict) | Clarify in instructions that the required tool call must happen in the same turn as the handoff |
+| Agent finishes turns without handing off | The model ignored the generated routes, or keeps working | Set `advanced.functionChoice: required` if the agent should always act; add `advanced.failureHandling.maxConsecutiveTurnsWithoutSignal` |
+| Session stopped at `limits.maxTurns` | Pipeline needs more turns than allowed | Raise `limits.maxTurns`; or add `advanced.failureHandling` to detect loops early |
+| `budget_exceeded` event | Token budget too low for the task | Raise `limits.maxTokens`; or enable compaction to reduce context size |
 | `circuit_breaker_open` event | Model API is returning 5+ consecutive errors | Check API key env var, provider endpoint, and model ID; look at `.fuseraft/logs/provider_errors.jsonl` |
-| Compaction fired and agent lost track of what was done | Compaction mode `llm` hallucinated progress; or lossless compaction dropped the resumption note | Switch to `intent` mode (requires `ChangeTracking`) or `lossless` mode (requires `EvidenceStore` + state machine); ensure `ChangeTracking` is configured so the resumption note points agents to `changes.json` |
-| Agent repeats same work after compaction (duplicate commits, re-running tests) | Resumption note absent from the compaction summary — agent had no "don't redo ✓ work" anchor | Ensure `ChangeTracking` is configured; confirm `Compaction.Mode` is `lossless` or `intent`, not `llm` |
+| Compaction fired and agent lost track of what was done | Compaction mode `llm` summarized away real progress | Switch `advanced.compaction.mode` to `lossless` (Steps flows) or `intent` |
+| Agent repeats same work after compaction (duplicate commits, re-running tests) | The summary gave no "don't redo ✓ work" anchor | Use `advanced.compaction.mode: lossless` or `intent`, which list completed operations from the change log |
 | `StallCount` or `ResetCount` high in `MagenticState` | Magentic orchestrator repeatedly re-planned without making progress | Lower the stall threshold or add more concrete subtask hints in the initial task string |
-| `StateHistory` shows same node repeating in Graph run | Back-edge loop without a progress condition | Add a `MaxPhaseIterations` guard on the looping node, or change the back-edge condition |
-| `keyword_not_found` events repeat across multiple compaction cycles for the same agent | Agent completed work but never called `handoff()` — "silent stuck" case. Loop-warning counter resets on compaction so standard warnings do not accumulate | Add `FailureHandling.MaxConsecutiveTurnsWithoutSignal` (e.g. `8`) — this counter lives in strategy state and survives compaction; will escalate to HITL after N silent turns |
-| Repeated `compaction` events with no agent progress between them | Post-compaction budget thrashing: first turn after compaction exceeds `CutoverAt`, triggering another immediate compaction | Raise `CutoverAt`, lower the per-agent token usage (enable `ContextWindow.TextOnly` + `MaxTurnAge` on the expensive agent), or add `MaxSingleTurnInputTokens` to catch single-turn explosions |
-| Single turn burned nearly all of `MaxTotalTokens` | Agent read many large files in one turn; no per-turn ceiling was set | Add `ContextBudget.MaxSingleTurnInputTokens` — compaction fires before the *next* turn when a single turn exceeds this, preventing inherited bloat |
-| Tool call denied (`tool_blocked`) | Agent's `TrustScore` < 0.60 (Ring 3 — no write/shell access) | Raise `TrustScore` to ≥ 0.60 for agents that need write access |
+| The same two agents hand work back and forth | A back-edge with no exit condition | Add `maxRevisits` to the back-edge, or `onStuck` on the forward edge |
+| `keyword_not_found` events repeat across multiple compaction cycles for the same agent | Agent completed work but never called `handoff()` — "silent stuck" case. Loop-warning counter resets on compaction so standard warnings do not accumulate | Add `failureHandling.maxConsecutiveTurnsWithoutSignal` (e.g. `8`) — this counter lives in strategy state and survives compaction; will escalate to HITL after N silent turns |
+| Repeated `compaction` events with no agent progress between them | Post-compaction budget thrashing: first turn after compaction exceeds `cutoverAt`, triggering another immediate compaction | Raise `cutoverAt`, lower the per-agent token usage (use `sees: handoff`, or `advanced.contextWindow.textOnly` + `maxTurnAge` on the expensive agent), or add `maxSingleTurnInputTokens` to catch single-turn explosions |
+| Single turn burned nearly all of `limits.maxTokens` | Agent read many large files in one turn; no per-turn ceiling was set | Add `contextBudget.maxSingleTurnInputTokens` — compaction fires before the *next* turn when a single turn exceeds this, preventing inherited bloat |
+| Tool call denied (`tool_blocked`) | Agent's `advanced.trustScore` < 0.60 (Ring 3 — no write/shell access) | Raise `advanced.trustScore` to ≥ 0.60 for agents that need write access |
 
 ### Step 7: Report and Recommend
 

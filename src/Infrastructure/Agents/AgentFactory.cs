@@ -78,8 +78,7 @@ public sealed class AgentFactory(
     // Lazy (not a field initializer) because the constructor needs _logger, itself an
     // instance field rather than a primary-constructor parameter — CS0236 blocks field
     // initializers from referencing other instance members, but a property getter runs
-    // after construction completes, so it's unrestricted. Same reasoning as
-    // GraphOrchestrator's _services/_subGraphExecutor/_parallelFanOut fields.
+    // after construction completes, so it's unrestricted.
     private AgentMiddlewareBuilder? _middlewareBuilderLazy;
     private AgentMiddlewareBuilder _middlewareBuilder =>
         _middlewareBuilderLazy ??= new(_logger, changeTracker, securityConfig, governanceKernel, adaptiveTrimTracker);

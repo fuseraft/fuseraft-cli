@@ -4,18 +4,20 @@ namespace fuseraft.Cli.Commands;
 
 public static partial class InitTemplates
 {
-    /// <summary>
-    /// Generates the <c>research</c> template: Researcher → Critic → Writer state-machine pipeline.
-    /// The Critic adversarially reviews research findings before the Writer begins — preventing
-    /// hollow or unsupported research from reaching the final document. A <c>ResearchComplete</c>
-    /// contract gates the Critic; a <c>ReviewComplete</c> contract gates the Writer.
-    /// </summary>
-    private static GeneratedConfig Research(string model, string? endpoint)
-    {
-        var researcher = $"""
-            Name: Researcher
-            Description: Gathers information and writes structured findings with inline citations.
-            Instructions: |
+    private static GeneratedConfig Research(string model, string? endpoint) => GeneratedConfig.Inline($$"""
+        team: Research Team
+        description: Researcher gathers information with cited sources; Critic adversarially reviews findings before the Writer begins; Writer synthesises the final document.
+
+        models:
+          default:
+            modelId: {{model}}{{Ep(endpoint, "    ")}}
+
+        agents:
+          Researcher:
+            role: Gathers information and writes structured findings with inline citations.
+            model: default
+            tools: [Http, Search, FileSystem, ResearchFindings]
+            instructions: |
               You are a diligent researcher. Your job is to:
               1. Break the topic into focused questions — list them before you start.
               2. For each question: search, read sources, and record findings with citations.
@@ -29,33 +31,28 @@ public static partial class InitTemplates
               4. Every claim must be backed by a cited source. Do not assert conclusions
                  you did not verify.
               When research is thorough and every original question is answered (or documented
-              as unanswerable), call handoff(route_keyword: "HANDOFF TO CRITIC").
+              as unanswerable), call handoff(route_keyword: "Critic").
 
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_research_findings is the only way to
               persist your findings.
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - Http
-              - Search
-              - FileSystem
-              - ResearchFindings
-              - Handoff
-            Capabilities:
-              FileSystem: [read]
-            FunctionChoice: required
-            {AgentFileOptions}
-            """;
-
-        var critic = $"""
-            Name: Critic
-            Description: Adversarially reviews research findings for gaps, unsupported claims, and contradictions.
-            Instructions: |
+            advanced:
+              functionChoice: required
+              context:
+                - source: file:.fuseraft/docs/research-review.json
+                  maxChars: 0
+                  label: null
+              capabilities:
+                FileSystem: [read]
+          Critic:
+            role: "Adversarially reviews research findings for gaps, unsupported claims, and contradictions."
+            model: default
+            tools: [FileSystem, ResearchReview]
+            instructions: |
               You are an adversarial research critic. Find reasons the findings will MISLEAD —
               not reasons they are correct.
 
-              Read {FuseraftPaths.LocalResearchFindings}.
+              Read .fuseraft/docs/research-findings.md.
 
               AUDIT for these specific failure modes:
               1. COVERAGE GAPS — questions raised in the findings but not answered; topics
@@ -78,36 +75,34 @@ public static partial class InitTemplates
               A blocking issue is one where the Writer would produce an inaccurate or misleading
               document if they relied on the current findings. Stylistic issues are not blocking.
 
-              If there are NO blocking issues, call handoff(route_keyword: "FINDINGS APPROVED").
-              If there are blocking issues, call handoff(route_keyword: "FINDINGS REJECTED").
+              If there are NO blocking issues, call handoff(route_keyword: "Writer").
+              If there are blocking issues, call handoff(route_keyword: "Researcher").
 
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_research_review is the only way to
               persist your review; revising the findings is the Researcher's job, not yours.
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - ResearchReview
-              - Handoff
-            Capabilities:
-              FileSystem: [read]
-            FunctionChoice: required
-            Context:
-              - Source: session_context
-              - Source: file:.fuseraft/docs/research-findings.md
-                MaxChars: 8000
-              - Source: own_history:2
-            {AgentFileOptions}
-            """;
-
-        var writer = $"""
-            Name: Writer
-            Description: Synthesises approved research findings into a polished final document.
-            Instructions: |
+            advanced:
+              functionChoice: required
+              context:
+                - source: session_context
+                  maxChars: 0
+                  label: null
+                - source: file:.fuseraft/docs/research-findings.md
+                  maxChars: 8000
+                  label: null
+                - source: own_history:2
+                  maxChars: 0
+                  label: null
+              capabilities:
+                FileSystem: [read]
+          Writer:
+            role: Synthesises approved research findings into a polished final document.
+            model: default
+            tools: [FileSystem]
+            instructions: |
               You are a skilled technical writer. Your job is to:
-              1. Read {FuseraftPaths.LocalResearchFindings} — the approved research.
-              2. Read {FuseraftPaths.LocalResearchReview} — note any optional improvements
+              1. Read .fuseraft/docs/research-findings.md — the approved research.
+              2. Read .fuseraft/docs/research-review.json — note any optional improvements
                  and incorporate the straightforward ones.
               3. Synthesise a clear, well-structured document that answers the original question.
                  - Lead with the answer, not the methodology.
@@ -115,95 +110,37 @@ public static partial class InitTemplates
                  - Cite sources inline for factual claims.
                  - Acknowledge uncertainty explicitly; do not present low-confidence findings
                    as established fact.
-              4. Write the final document to {FuseraftPaths.LocalDocs}/report.md.
-              When done, call handoff(route_keyword: "DOCUMENT COMPLETE").
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Handoff
-            FunctionChoice: required
-            {AgentFileOptions}
-            """;
+              4. Write the final document to .fuseraft/docs/report.md.
+              When done, call handoff(route_keyword: "end").
+            advanced:
+              functionChoice: required
 
-        var mainConfig = $"""
-            Orchestration:
-              Name: Research Team
-              Description: >-
-                Researcher gathers information with cited sources; Critic adversarially reviews
-                findings before the Writer begins; Writer synthesises the final document.
+        flow:
+          start: Researcher
+          steps:
+            Researcher:
+              - to: Critic
+                requires:
+                  - fileExists: .fuseraft/docs/research-findings.md
+            Critic:
+              - to: Writer
+                when: findings approved
+                requires:
+                  - fileExists: .fuseraft/docs/research-review.json
+              - to: Researcher
+                when: findings rejected
+                maxRevisits: 2
+            Writer:
+              - to: end
+                when: document complete
 
-              EvidenceStore:
-                Path: {FuseraftPaths.LocalEvidence}
+        limits:
+          maxTurns: 30
 
-              Contracts:
-                - Name: ResearchComplete
-                  Requires:
-                    - Type: FileExists
-                      Path: {FuseraftPaths.LocalResearchFindings}
-
-                - Name: ReviewComplete
-                  Requires:
-                    - Type: FileExists
-                      Path: {FuseraftPaths.LocalResearchReview}
-
-              # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
-              # them independently across configs.
-              Agents:
-                - AgentFile: agents/researcher.yaml
-                - AgentFile: agents/critic.yaml
-                - AgentFile: agents/writer.yaml
-
-              Selection:
-                Type: statemachine
-                StateMachine:
-                  Initial: Research
-
-                  States:
-                    Research:
-                      Agent: Researcher
-                      Transitions:
-                        - To: CriticalReview
-                          Signal: "HANDOFF TO CRITIC"
-                          Contract: ResearchComplete
-
-                    CriticalReview:
-                      Agent: Critic
-                      Transitions:
-                        - To: Writing
-                          Signal: "FINDINGS APPROVED"
-                          Contract: ReviewComplete
-                        - To: Research
-                          Signal: "FINDINGS REJECTED"
-                          MaxRevisits: 2
-                          HandoffContext:
-                            - Source: file:{FuseraftPaths.LocalResearchReview}
-
-                    Writing:
-                      Agent: Writer
-                      Transitions:
-                        - To: Done
-                          Signal: "DOCUMENT COMPLETE"
-
-                    Done:
-                      Agent: Writer
-                      Terminal: true
-
-              Termination:
-                Type: composite
-                Strategies:
-                  - Type: regex
-                    Pattern: "DOCUMENT COMPLETE"
-                    AgentNames: [Writer]
-                  - Type: maxiterations
-                    MaxIterations: 30
-            {OptionalSections(model, endpoint)}
-            """;
-
-        return new GeneratedConfig(mainConfig, [
-            ("agents/researcher.yaml", researcher),
-            ("agents/critic.yaml",     critic),
-            ("agents/writer.yaml",     writer),
-        ]);
-    }
+        advanced:
+          compaction:
+            triggerTurnCount: 30
+            keepRecentTurns: 8
+            mode: lossless
+        """);
 }

@@ -130,7 +130,13 @@ internal sealed class AgentToolResolver(
                 lock (resettablesLock) turnResettables.Add(tr);
         }
 
-        return McpToolNames.Disambiguate(tools);
+        var resolved = McpToolNames.Disambiguate(tools);
+        if (config.HandoffRoutes.Count > 0)
+        {
+            var i = resolved.FindIndex(f => f.Name == HandoffPlugin.FunctionName);
+            if (i >= 0) resolved[i] = new HandoffRouteFunction(resolved[i], config.HandoffRoutes);
+        }
+        return resolved;
     }
 
     /// <summary>

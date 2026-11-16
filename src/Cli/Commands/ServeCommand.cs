@@ -12,11 +12,11 @@ namespace fuseraft.Cli.Commands;
 public sealed class ServeSettings : CommandSettings
 {
     [CommandOption("-c|--config")]
-    [Description("Path to the orchestration config. Defaults to .fuseraft/config/orchestration.yaml.")]
+    [Description("Path to the team file. Defaults to .fuseraft/config/orchestration.yaml.")]
     public string? ConfigPath { get; set; }
 
     [CommandOption("--work-dir")]
-    [Description("Working directory for the daemon's whole lifetime (one daemon serves one project). Falls back to the config's Security.FileSystemSandboxPath, then the current directory.")]
+    [Description("Working directory for the daemon's whole lifetime (one daemon serves one project). Falls back to the team file's security.fileSystemSandboxPath, then the current directory.")]
     public string? WorkDir { get; set; }
 
     [CommandOption("--http-port")]

@@ -175,4 +175,10 @@ public record ContractPredicate
     /// Used when <see cref="Type"/> is <c>TestReport</c>.
     /// </summary>
     public bool? HasAssertions { get; init; }
+
+    /// <summary>JSON text of an artifact shape sketch; used when <see cref="Type"/> is <c>Shape</c>.</summary>
+    public string? Shape { get; init; }
+
+    /// <summary>Routing validator name; used when <see cref="Type"/> is <c>Validator</c>.</summary>
+    public string? Validator { get; init; }
 }

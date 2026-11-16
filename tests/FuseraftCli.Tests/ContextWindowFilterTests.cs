@@ -533,10 +533,10 @@ public sealed class ContextWindowFilterTests
     // a validator error that doesn't match a known prefix is silently invisible to them.
 
     [Theory]
-    [InlineData("VALIDATION FAILED — Contract 'TestsValid' failed.")]
+    [InlineData("Transition 'Tester' → 'Reviewer' is blocked by contract 'testReport testResults':")]
     [InlineData("CRITIQUE ESCALATION: You have received the same critique 4 times.")]
-    [InlineData("APPROVED blocked: response has no structured review block.")]
-    [InlineData("APPROVED rejected: no successful shell_run tool call found.")]
+    [InlineData("MISSING ARTIFACT — Handoff 'Planner' → 'Developer' is blocked")]
+    [InlineData("The operator didn't approve the handoff to end.")]
     public void IsCorrectionMessage_RecognizesKnownPrefixes(string text)
     {
         Assert.True(ContextWindowFilter.IsCorrectionMessage(User(text)));
@@ -551,6 +551,6 @@ public sealed class ContextWindowFilterTests
     [Fact]
     public void IsCorrectionMessage_FalseForAssistantMessage()
     {
-        Assert.False(ContextWindowFilter.IsCorrectionMessage(Text("Dev", "VALIDATION FAILED — not a correction, wrong role.")));
+        Assert.False(ContextWindowFilter.IsCorrectionMessage(Text("Dev", "MISSING ARTIFACT — not a correction, wrong role.")));
     }
 }

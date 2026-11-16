@@ -211,7 +211,7 @@ internal static class SystemPromptBuilder
             && string.IsNullOrEmpty(config.Security.FileSystemSandboxPath))
         {
             loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Security.ChangeEnvelope is configured but Security.FileSystemSandboxPath is not set. " +
+                "security.changeEnvelope is configured but security.fileSystemSandboxPath is not set. " +
                 "The change envelope will not be enforced. Add a FileSystemSandboxPath to enable it.");
         }
 
@@ -220,7 +220,7 @@ internal static class SystemPromptBuilder
             && string.IsNullOrEmpty(config.Security.FileSystemSandboxPath))
         {
             loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Security.FileSystemPermissions is configured but Security.FileSystemSandboxPath is not set. " +
+                "security.fileSystemPermissions is configured but security.fileSystemSandboxPath is not set. " +
                 "Filesystem permission globs will not be enforced. Add a FileSystemSandboxPath to enable them.");
         }
 

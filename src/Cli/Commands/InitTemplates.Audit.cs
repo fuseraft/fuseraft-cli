@@ -4,18 +4,20 @@ namespace fuseraft.Cli.Commands;
 
 public static partial class InitTemplates
 {
-    /// <summary>
-    /// Generates the <c>audit</c> template: Auditor → Prioritizer → Developer → Verifier directed
-    /// graph for security, quality, and compliance audits. The Auditor writes a machine-readable
-    /// findings report; the Prioritizer triages by severity; the Developer applies fixes in priority
-    /// order with hypothesis tracking; the Verifier confirms each finding is addressed.
-    /// </summary>
-    private static GeneratedConfig Audit(string model, string? endpoint)
-    {
-        var auditor = $"""
-            Name: Auditor
-            Description: Scans the codebase for security, quality, correctness, and compliance issues.
-            Instructions: |
+    private static GeneratedConfig Audit(string model, string? endpoint) => GeneratedConfig.Inline($$"""
+        team: Audit Pipeline
+        description: "Auditor scans for security, quality, and compliance issues; Prioritizer triages by severity; Developer applies fixes with hypothesis tracking; Verifier confirms. Unresolved findings go back to Prioritizer for replanning."
+
+        models:
+          default:
+            modelId: {{model}}{{Ep(endpoint, "    ")}}
+
+        agents:
+          Auditor:
+            role: "Scans the codebase for security, quality, correctness, and compliance issues."
+            model: default
+            tools: [FileSystem, Search, Shell, Subagent, Investigation, AuditFindings]
+            instructions: |
               You are a security and quality auditor. You are read-only with respect to the
               project's own source — an auditor that can also patch the code it is auditing is
               a conflict of interest and a security risk in its own right. write_file_audit_findings
@@ -43,29 +45,18 @@ public static partial class InitTemplates
                    description    — what the issue is
                    recommendation — what to do about it
               5. Verify the file is written and non-empty before routing.
-              When the scan is complete, call handoff(route_keyword: "AUDIT COMPLETE").
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Search
-              - Shell
-              - Subagent
-              - Investigation
-              - AuditFindings
-              - Handoff
-            Capabilities:
-              FileSystem: [read]
-            FunctionChoice: required
-            {AgentFileOptions}
-            """;
-
-        var prioritizer = $"""
-            Name: Prioritizer
-            Description: Triages audit findings by severity and writes an ordered remediation plan.
-            Instructions: |
+              When the scan is complete, call handoff(route_keyword: "Prioritizer").
+            advanced:
+              functionChoice: required
+              capabilities:
+                FileSystem: [read]
+          Prioritizer:
+            role: Triages audit findings by severity and writes an ordered remediation plan.
+            model: default
+            tools: [FileSystem, RemediationPlan]
+            instructions: |
               You are a triage engineer. Your job is to:
-              1. Read {FuseraftPaths.LocalAuditFindings} and understand every finding.
+              1. Read .fuseraft/artifacts/audit-findings.json and understand every finding.
               2. Group findings by severity: critical → high → medium → low.
               3. Within each severity group, order by: security > correctness > compliance > quality.
               4. Call write_file_remediation_plan(content: ..., format: "json"). content must
@@ -77,34 +68,32 @@ public static partial class InitTemplates
                    approach    — specific steps: file, method, what to change
                    verify_hint — how to confirm the fix worked
               5. Verify the file is written and non-empty before routing.
-              When the plan is ready, call handoff(route_keyword: "PLAN READY").
+              When the plan is ready, call handoff(route_keyword: "Developer").
 
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_remediation_plan is the only way to
               persist this plan; fixing the findings yourself is the Developer's job, not yours.
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - RemediationPlan
-              - Handoff
-            Capabilities:
-              FileSystem: [read]
-            FunctionChoice: required
-            Context:
-              - Source: session_context
-              - Source: file:.fuseraft/artifacts/audit-findings.json
-                MaxChars: 6000
-              - Source: own_history:2
-            {AgentFileOptions}
-            """;
-
-        var developer = $"""
-            Name: Developer
-            Description: Applies fixes in remediation-plan priority order with hypothesis tracking.
-            Instructions: |
+            advanced:
+              functionChoice: required
+              context:
+                - source: session_context
+                  maxChars: 0
+                  label: null
+                - source: file:.fuseraft/artifacts/audit-findings.json
+                  maxChars: 6000
+                  label: null
+                - source: own_history:2
+                  maxChars: 0
+                  label: null
+              capabilities:
+                FileSystem: [read]
+          Developer:
+            role: Applies fixes in remediation-plan priority order with hypothesis tracking.
+            model: default
+            tools: [FileSystem, Shell, Git, Changes, Investigation]
+            instructions: |
               You are a developer remediating audit findings. Your job is to:
-              1. Read {FuseraftPaths.LocalRemediationPlan} to get the ordered action items.
+              1. Read .fuseraft/artifacts/remediation-plan.json to get the ordered action items.
               2. Read the Execution State and Investigation Log in your context — do not repeat
                  any approach listed under "Rejected Paths".
               3. For each action item, in priority order:
@@ -119,173 +108,82 @@ public static partial class InitTemplates
                     explicitly deferred with a documented reason.
               4. You MUST NOT call handoff with any open hypotheses.
               5. Commit all fixes with git_add and git_commit.
-              When all actionable items are addressed, call handoff(route_keyword: "FIXES APPLIED").
+              When all actionable items are addressed, call handoff(route_keyword: "Verifier").
               If you are blocked on an item (requires infrastructure changes, out of scope, etc.),
-              document the reason in the remediation plan and call handoff(route_keyword: "FIXES APPLIED")
+              document the reason in the remediation plan and call handoff(route_keyword: "Verifier")
               for the completed items, noting what was skipped and why.
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Shell
-              - Git
-              - Changes
-              - Investigation
-              - Handoff
-            FunctionChoice: required
-            MaxInTurnToolPairs: 12
-            {DeveloperContextWindow}
-            {AgentFileOptions}
-            """;
-
-        var verifier = $"""
-            Name: Verifier
-            Description: Confirms each finding is addressed; routes back for any that remain open.
-            Instructions: |
+            advanced:
+              functionChoice: required
+              contextWindow:
+                textOnly: true
+                maxTailMessages: 0
+                maxTurnAge: 5
+                maxToolResultChars: 0
+                maxReplayChars: 0
+              maxInTurnContextTokens: 60000
+              maxInTurnToolPairs: 12
+          Verifier:
+            role: Confirms each finding is addressed; routes back for any that remain open.
+            model: default
+            tools: [FileSystem, Shell, Changes]
+            instructions: |
               You are a verification engineer. Your job is to:
-              1. Read {FuseraftPaths.LocalAuditFindings} to get the original finding list.
-              2. Read {FuseraftPaths.LocalRemediationPlan} to get the action items and verify hints.
+              1. Read .fuseraft/artifacts/audit-findings.json to get the original finding list.
+              2. Read .fuseraft/artifacts/remediation-plan.json to get the action items and verify hints.
               3. For each action item that the Developer addressed:
                  - Run the verify_hint command (or a targeted check) with shell_run.
                  - Record: finding_id, check performed, exit code, relevant output.
               4. Produce a verification report:
                  - VERIFIED: finding_id — what was checked and confirmed
                  - UNRESOLVED: finding_id — what the check found and why the fix didn't hold
-              If all addressed findings are verified, call handoff(route_keyword: "VERIFIED").
-              If any findings remain unresolved, call handoff(route_keyword: "ISSUES REMAIN")
+              If all addressed findings are verified, call handoff(route_keyword: "end").
+              If any findings remain unresolved, call handoff(route_keyword: "Prioritizer")
               so the Prioritizer can update the plan and the Developer can retry.
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Shell
-              - Changes
-              - Handoff
-            Capabilities:
-              FileSystem: [read]
-            FunctionChoice: required
-            Context:
-              - Source: session_context
-              - Source: file:.fuseraft/artifacts/remediation-plan.json
-                MaxChars: 6000
-              - Source: changes_recent:5
-              - Source: own_history:2
-            {AgentFileOptions}
-            """;
+            advanced:
+              functionChoice: required
+              context:
+                - source: session_context
+                  maxChars: 0
+                  label: null
+                - source: file:.fuseraft/artifacts/remediation-plan.json
+                  maxChars: 6000
+                  label: null
+                - source: changes_recent:5
+                  maxChars: 0
+                  label: null
+                - source: own_history:2
+                  maxChars: 0
+                  label: null
+              capabilities:
+                FileSystem: [read]
 
-        var mainConfig = $"""
-            Orchestration:
-              Name: Audit Pipeline
-              Description: >-
-                Auditor scans for security, quality, and compliance issues; Prioritizer triages
-                by severity; Developer applies fixes with hypothesis tracking; Verifier confirms.
-                ISSUES REMAIN back-edges return to Prioritizer for replanning.
+        flow:
+          start: Auditor
+          steps:
+            Auditor:
+              - to: Prioritizer
+                when: audit complete
+                requires: [anyFileWritten]
+            Prioritizer:
+              - to: Developer
+                when: plan ready
+                requires: [anyFileWritten]
+            Developer:
+              - to: Verifier
+                when: fixes applied
+                requires: [anyFileWritten]
+            Verifier:
+              - to: end
+              - to: Prioritizer
+                when: issues remain
 
-              Security:
-                FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
+        security:
+          fileSystemSandboxPath: .
 
-              EvidenceStore:
-                Path: {FuseraftPaths.LocalEvidence}
-
-              Contracts:
-                - Name: AuditComplete
-                  Requires:
-                    - Type: FileExists
-                      Path: {FuseraftPaths.LocalAuditFindings}
-
-                - Name: PlanComplete
-                  Requires:
-                    - Type: FileExists
-                      Path: {FuseraftPaths.LocalRemediationPlan}
-
-              ChangeTracking:
-                Path: {FuseraftPaths.LocalChanges}
-
-              Events:
-                Path: {FuseraftPaths.LocalEventsLog}
-
-              # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
-              # them independently across configs.
-              Agents:
-                - AgentFile: agents/auditor.yaml
-                - AgentFile: agents/prioritizer.yaml
-                - AgentFile: agents/developer.yaml
-                - AgentFile: agents/verifier.yaml
-
-              Selection:
-                Type: graph
-                Graph:
-                  EntryNode: audit
-                  MaxRetries: 3
-
-                  Nodes:
-                    - Id: audit
-                      Agent: Auditor
-                    - Id: prioritizer
-                      Agent: Prioritizer
-                    - Id: developer
-                      Agent: Developer
-                    - Id: verifier
-                      Agent: Verifier
-                    - Id: done
-                      Agent: Verifier
-                      Terminal: true
-
-                  Edges:
-                    # Forward edges
-                    - From: audit
-                      To: prioritizer
-                      Keyword: "AUDIT COMPLETE"
-                      Validators: [RequireWriteFile]       # blocks until audit-findings.json exists
-
-                    - From: prioritizer
-                      To: developer
-                      Keyword: "PLAN READY"
-                      Validators: [RequireWriteFile]       # blocks until remediation-plan.json exists
-
-                    - From: developer
-                      To: verifier
-                      Keyword: "FIXES APPLIED"
-                      Validators: [RequireWriteFile]       # blocks until at least one file is patched
-
-                    - From: verifier
-                      To: done
-                      Keyword: "VERIFIED"
-
-                    # Back-edge
-                    - From: verifier
-                      To: prioritizer
-                      Keyword: "ISSUES REMAIN"             # update plan and retry Developer
-
-              Termination:
-                Type: composite
-                Strategies:
-                  - Type: regex
-                    Pattern: "\\bVERIFIED\\b"
-                    AgentNames: [Verifier]
-                  - Type: maxiterations
-                    MaxIterations: 40
-
-              Compaction:
-                TriggerTurnCount: 30
-                KeepRecentTurns: 8
-                Mode: lossless
-
-              # ContextBudget: per-agent cumulative input-token thresholds.
-              # ContextBudget:
-              #   WarnAt: 60000
-              #   CutoverAt: 100000
-
-              # Checkpoint:
-              #   Mode: json
-              #   Path: {FuseraftPaths.LocalCheckpoints}
-            """;
-
-        return new GeneratedConfig(mainConfig, [
-            ("agents/auditor.yaml",     auditor),
-            ("agents/prioritizer.yaml", prioritizer),
-            ("agents/developer.yaml",   developer),
-            ("agents/verifier.yaml",    verifier),
-        ]);
-    }
+        advanced:
+          compaction:
+            triggerTurnCount: 30
+            keepRecentTurns: 8
+            mode: lossless
+        """);
 }

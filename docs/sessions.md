@@ -89,7 +89,7 @@ REPL snapshots are stored at `~/.fuseraft/repl-sessions/repl-<id>.json` with own
 | Field | Description |
 |-------|-------------|
 | `SessionId` | 8-character hex identifier shown in the REPL header |
-| `ModelId` | Model used for the session |
+| `modelId` | Model used for the session |
 | `Cwd` | Working directory when the session was started |
 | `StartedAt` | UTC timestamp when the session was first created |
 | `LastUpdatedAt` | UTC timestamp of the most recent save |
@@ -170,7 +170,6 @@ All REPL events are tagged with the session ID (`session` field in the JSONL), s
 | `session_summary` | Post-run summary written |
 | `turn_start` | Agent turn begins |
 | `turn_end` | Agent turn completes |
-| `turn_timeout` | Agent turn exceeded its time limit |
 
 *Checkpointing / resume*
 
@@ -192,7 +191,6 @@ All REPL events are tagged with the session ID (`session` field in the JSONL), s
 | `agent_end` | Individual agent turn completes |
 | `agent_error` | Agent threw an unhandled error |
 | `agent_timeout` | Agent exceeded its time limit |
-| `agent_routed` | Routing selected the next agent |
 | `agent_blocked` | Agent declared an unrecoverable blocker |
 
 *Model invocation*
@@ -290,12 +288,13 @@ fuseraft saves a checkpoint after every agent turn. If a session is interrupted 
 fuseraft run --resume <sessionId>
 ```
 
-**Context window exceeded with no compactor** — if the model's context window fills and no `Compaction` section is configured, fuseraft shows an actionable error message and saves the checkpoint. Resume after adding compaction to your config:
+**Context window exceeded with no compactor** — if the model's context window fills and no `advanced.compaction` section is configured, fuseraft shows an actionable error message and saves the checkpoint. Resume after adding compaction to your config:
 
 ```yaml
-Compaction:
-  Mode: window        # simplest option — no LLM cost
-  TokenBudget: 80000  # optional
+advanced:
+  compaction:
+    mode: window        # simplest option — no LLM cost
+    tokenBudget: 80000  # optional
 ```
 
 Then:
@@ -316,25 +315,23 @@ Sessions are stored at `~/.fuseraft/sessions/<sessionId>.json` with owner-only r
 |-------|-------------|
 | `SessionId` | 8-character hex identifier |
 | `Task` | Original task string |
-| `ConfigPath` | Path to the orchestration config used |
+| `ConfigPath` | Path to the team file used |
 | `Messages` | All agent messages produced so far |
 | `StartedAt` | UTC timestamp when session was first created |
 | `LastUpdatedAt` | UTC timestamp of the most recent update |
 | `IsComplete` | `true` once the session has run to completion |
-| `ResumeExecutorId` | Hint for `GraphOrchestrator` identifying which node was active when the session was last checkpointed; `null` for non-`GraphOrchestrator` sessions |
 | `MagenticState` | `MagenticCheckpointState` snapshot (`CurrentPlan`, `RoundIndex`, `StallCount`, `ResetCount`, `AwaitingPlanReview`) used to resume the Magentic inner loop; `null` for non-Magentic sessions |
-| `StateHistory` | Ordered list of `AgentState` snapshots produced during the session; `null` for non-`GraphOrchestrator` sessions |
 | `StructuredTask` | `TaskModel` snapshot (`Goal`, `Constraints`, `ActiveTargets`, `Phase`) injected into agent context at session start. Populated automatically from the task string; can be enriched by the orchestrator as agents write files. |
 
 **Message fields:**
 
 | Field | Description |
 |-------|-------------|
-| `AgentName` | Agent name, or `"Human"` for HITL injections |
+| `agentName` | Agent name, or `"Human"` for HITL injections |
 | `Content` | Text content of the response |
 | `Timestamp` | UTC timestamp |
 | `TurnIndex` | Zero-based turn index within the session |
-| `Role` | `"assistant"` for agent turns, `"user"` for HITL injections |
+| `role` | `"assistant"` for agent turns, `"user"` for HITL injections |
 | `Usage` | Token counts and estimated cost (null for HITL turns) |
 | `IsCompactionSummary` | `true` if this message is a compaction summary |
 
@@ -365,7 +362,7 @@ fuseraft sessions --cleanup
 fuseraft sessions --cleanup --older-than 2w --project brewer
 ```
 
-A session is **orphaned** when its `ConfigPath` points to an orchestration config file that no longer exists — for example, after a project directory is deleted or the `.fuseraft/` workspace is reset. Orphaned sessions cannot be resumed and accumulate silently over time. `--prune` removes all of them in one pass.
+A session is **orphaned** when its `ConfigPath` points to a team file that no longer exists — for example, after a project directory is deleted or the `.fuseraft/` workspace is reset. Orphaned sessions cannot be resumed and accumulate silently over time. `--prune` removes all of them in one pass.
 
 **Age-based cleanup (`--cleanup`)**
 
@@ -395,7 +392,7 @@ After each turn you see:
 | Any text | Inject that text as a user message, then continue |
 | `q` | Save checkpoint and exit cleanly |
 
-Injected messages are saved in the session checkpoint with `Role: "user"` and `AgentName: "Human"`. They are re-injected on resume so the conversation context is complete.
+Injected messages are saved in the session checkpoint with `role: "user"` and `agentName: "Human"`. They are re-injected on resume so the conversation context is complete.
 
 ---
 
@@ -412,10 +409,11 @@ Token counts appear in `--verbose` mode and in the `--output` transcript. The se
 | `InputTokens` | Tokens in the model's input (prompt + history) |
 | `OutputTokens` | Tokens in the model's output |
 
-**Token budget:** Set `MaxTotalTokens` in the config to stop the run before the next turn if the cumulative token count (input + output combined) exceeds the limit. The session is saved and can be resumed later.
+**Token budget:** Set `limits.maxTokens` in the team file to stop the run before the next turn if the cumulative token count (input + output combined) exceeds the limit. The session is saved and can be resumed later.
 
 ```yaml
-MaxTotalTokens: 200000
+limits:
+  maxTokens: 200000
 ```
 
 Token counts are always exact — reported directly by the provider API.
@@ -427,24 +425,25 @@ Token counts are always exact — reported directly by the provider API.
 Long-running sessions will eventually exceed the model's context window. Compaction automatically reduces old turns to keep the session alive indefinitely.
 
 ```yaml
-Compaction:
-  TriggerTurnCount: 30
-  KeepRecentTurns: 8
-  Mode: intent      # or "llm" (default), "lossless", "hybrid", or "window"
+advanced:
+  compaction:
+    triggerTurnCount: 30
+    keepRecentTurns: 8
+    mode: intent      # or "llm" (default), "lossless", "hybrid", or "window"
 ```
 
 **How it works (llm / lossless / hybrid / intent):**
 
-1. When the assistant-turn count reaches `TriggerTurnCount`, compaction fires.
-2. All turns except the most recent `KeepRecentTurns` are replaced by a single context message.
+1. When the assistant-turn count reaches `triggerTurnCount`, compaction fires.
+2. All turns except the most recent `keepRecentTurns` are replaced by a single context message.
 3. The checkpoint is saved with the compacted history.
 4. The session continues with the context message providing background for older work.
 
-`TriggerTurnCount` must be greater than `KeepRecentTurns`. An error is thrown at startup if this constraint is violated.
+`triggerTurnCount` must be greater than `keepRecentTurns`. An error is thrown at startup if this constraint is violated.
 
 **How it works (window):**
 
-1. After each checkpoint save, the estimated token count of the full history (characters ÷ 4) is compared against `TokenBudget`.
+1. After each checkpoint save, the estimated token count of the full history (characters ÷ 4) is compared against `tokenBudget`.
 2. When over budget, the oldest user+assistant pairs are dropped one at a time until the count falls within the budget.
 3. No LLM call is made and no summary message is injected — only the tail of the conversation is kept.
 4. Prior compaction summaries (from an earlier `llm`/`lossless`/`hybrid` run) are pinned and never dropped.
@@ -454,12 +453,12 @@ Compaction:
 | Mode | Behavior |
 |------|----------|
 | `llm` | Default. An LLM call summarises the compacted turns using conversation history and `changes.json`. Requires a model. |
-| `lossless` | Reconstructs context from durable disk artifacts only — the evidence graph, all contract evaluations, and the current state machine position. No LLM call is made. No hallucination is possible because every fact is read directly from disk. Falls back to `llm` when no state machine strategy with evidence store is active. |
+| `lossless` | Reconstructs context from durable disk artifacts only — the evidence graph, every gate's current result, and the current step. No LLM call is made. No hallucination is possible because every fact is read directly from disk. Falls back to `llm` for pattern flows. |
 | `hybrid` | Prepends the lossless reconstruction before the LLM summary. Agents get authoritative ground-truth (what was actually done) plus narrative context (how it unfolded). |
-| `window` | Sliding window: drops the oldest user+assistant pairs until the estimated token count is within `TokenBudget` (default 80,000). No LLM call; no summary message is injected. `TriggerTurnCount` and `KeepRecentTurns` are ignored. |
-| `intent` | Reconstructs context from the intent log (`intents.json`). Produces a `✓`/`✗`/`⧖` per-operation block covering every tracked tool call in the compacted range. No LLM call; no hallucination. Requires `ChangeTracking` to be configured. Falls back to `lossless` then `llm` when the intent log is unavailable. Works with any selection strategy. |
+| `window` | Sliding window: drops the oldest user+assistant pairs until the estimated token count is within `tokenBudget` (default 80,000). No LLM call; no summary message is injected. `triggerTurnCount` and `keepRecentTurns` are ignored. |
+| `intent` | Reconstructs context from the intent log (`intents.json`). Produces a `✓`/`✗`/`⧖` per-operation block covering every tracked tool call in the compacted range. No LLM call; no hallucination. Falls back to `lossless` then `llm` when the intent log is unavailable. Works with any flow. |
 
-**Intent compaction** is the recommended mode for most sessions when `ChangeTracking` is configured. It doesn't require a state machine or evidence store. The reconstructed context looks like:
+**Intent compaction** is a good default for most runs. It works with any flow. The reconstructed context looks like:
 
 ```
 [INTENT-DERIVED RECONSTRUCTION — covers turns 1–20]
@@ -474,17 +473,17 @@ Do not re-execute operations marked ✓ (applied).
 Operations marked ✗ (failed) should be retried if the task requires them.
 ```
 
-**Lossless compaction** is recommended for `statemachine` sessions with an `EvidenceStore`. The reconstructed context message looks like:
+**Lossless compaction** is recommended for `steps` flows. The reconstructed context message looks like:
 
 ```
 [CONTEXT RECONSTRUCTION — derived from durable evidence, not summarised by LLM]
 
-STATE MACHINE POSITION: Testing
+CURRENT STEP: Tester
 
-CONTRACT STATUS:
-  ✓ BriefExists
-  ✓ ImplementationComplete
-  ✗ TestsValid
+GATE STATUS:
+  ✓ brief
+  ✓ CommandSucceeded brief.verify_command
+  ✗ TestReport testResults
       Reason: test-report.json has 2 FAIL results
 
 RECENT EVIDENCE (newest first):
@@ -492,34 +491,35 @@ RECENT EVIDENCE (newest first):
   [FileWrite] wrote src/api/users.go (turn 13, agent Developer)
   ...
 
-RESUMPTION NOTE: History compacted. Continue from state 'Testing'.
-Satisfy all ✗ contracts before emitting a transition signal.
+RESUMPTION NOTE: History compacted. ... Continue from step 'Tester'.
 ```
 
-This is structurally superior to an LLM summary: the state machine position cannot drift, contract status is re-evaluated fresh at compaction time, and every evidence item is a real disk record.
+This is structurally superior to an LLM summary: the current step cannot drift, gate status is re-evaluated fresh at compaction time, and every evidence item is a real disk record.
 
-**Change log grounding (`llm` and `hybrid` modes):** When `ChangeTracking` or `Validation.ChangeLogPath` is configured, the compactor reads `changes.json` at compaction time and injects it into the LLM summary prompt as authoritative ground truth. Fabricated progress reports are corrected before they are carried forward as fact.
+**Change log grounding (`llm` and `hybrid` modes):** The compactor reads the run's `changes.json` at compaction time and injects it into the LLM summary prompt as authoritative ground truth. Fabricated progress reports are corrected before they are carried forward as fact.
 
-**Compaction model:** By default, the first agent's model is used for generating summaries (`llm` and `hybrid` only). Override with `Compaction.Model`:
+**Compaction model:** By default, the first agent's model is used for generating summaries (`llm` and `hybrid` only). Override with `advanced.compaction.model`:
 
 ```yaml
-Compaction:
-  TriggerTurnCount: 50
-  KeepRecentTurns: 10
-  Mode: hybrid
-  Model:
-    ModelId: gpt-4o-mini
+advanced:
+  compaction:
+    triggerTurnCount: 50
+    keepRecentTurns: 10
+    mode: hybrid
+    model:
+      modelId: gpt-4o-mini
 ```
 
 **Window mode example:**
 
 ```yaml
-Compaction:
-  Mode: window
-  TokenBudget: 60000   # optional — defaults to 80000
+advanced:
+  compaction:
+    mode: window
+    tokenBudget: 60000   # optional — defaults to 80000
 ```
 
-`TriggerTurnCount` and `KeepRecentTurns` have no effect in `window` mode and can be omitted.
+`triggerTurnCount` and `keepRecentTurns` have no effect in `window` mode and can be omitted.
 
 **Cost accounting:** The summary message's cumulative cost includes all the turns it replaced, so budget tracking remains accurate after compaction. `lossless`, `intent`, and `window` modes incur no LLM cost at compaction time.
 

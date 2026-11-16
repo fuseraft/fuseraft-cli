@@ -12,7 +12,7 @@ Add an MCP server to an orchestration config, verify the connection, and wire th
 Use this skill when:
 - The user wants to use an off-the-shelf MCP server (npm package, Python package, etc.)
 - The user wants to connect to a running HTTP MCP server
-- An existing config uses `McpServers` but the connection is failing at startup
+- An existing config uses `mcpServers` but the connection is failing at startup
 - The user wants to know which agents should receive MCP tools
 
 Do **not** use this skill to build a custom MCP server from scratch — this skill covers wiring, not server authorship.
@@ -71,21 +71,21 @@ If the command or endpoint is not available, stop and tell the user what to inst
 ### Step 3: Read the Config
 
 Call `read_file` on the config. Note:
-- Whether a `McpServers` block already exists (add to it, do not replace)
-- The `Agents` section — identify which agents will receive the MCP plugin
+- Whether a `mcpServers` block already exists (add to it, do not replace)
+- The `agents` section — identify which agents will receive the MCP plugin
 - Any existing `Plugins` lists on those agents
 
-### Step 4: Build the McpServers Entry
+### Step 4: Build the `mcpServers` Entry
 
 Choose the right template based on transport.
 
 **stdio — npm package:**
 ```yaml
-McpServers:
-  - Name: <PluginName>
-    Transport: stdio
-    Command: npx
-    Args:
+mcpServers:
+  - name: <PluginName>
+    transport: stdio
+    command: npx
+    args:
       - "-y"
       - "<npm-package-name>"
       - <optional-arg-1>   # e.g. a directory path the server needs
@@ -93,29 +93,29 @@ McpServers:
 
 **stdio — Python module:**
 ```yaml
-McpServers:
-  - Name: <PluginName>
-    Transport: stdio
-    Command: python
-    Args:
+mcpServers:
+  - name: <PluginName>
+    transport: stdio
+    command: python
+    args:
       - "-m"
       - "<module-name>"
-    WorkingDirectory: /path/to/server   # only if the module requires a specific cwd
-    Env:
+    workingDirectory: /path/to/server   # only if the module requires a specific cwd
+    env:
       MY_API_KEY: "${MY_API_KEY}"        # reference env var; never hardcode secrets
 ```
 
 **http — running server:**
 ```yaml
-McpServers:
-  - Name: <PluginName>
-    Transport: http
-    Url: <sse-endpoint-url>
+mcpServers:
+  - name: <PluginName>
+    transport: http
+    url: <sse-endpoint-url>
 ```
 
 **Naming rules:**
-- `Name` becomes the plugin identifier agents use in their `Plugins` list — pick a short PascalCase name (e.g. `Puppeteer`, `SearchAPI`, `MyServer`).
-- `Name` must be unique across all entries in `McpServers`.
+- `name` becomes the plugin identifier agents use in their `Plugins` list — pick a short PascalCase name (e.g. `Puppeteer`, `SearchAPI`, `MyServer`).
+- `name` must be unique across all entries in `mcpServers`.
 - Do not use a name that collides with built-in plugins: `FileSystem`, `Shell`, `Git`, `Http`, `Search`, `Scratchpad`, `Handoff`, `Changes`, `Git`.
 
 **Secrets:** Never put API keys in the config. Reference them as env vars. Tell the user to export them in their shell before running:
@@ -126,17 +126,15 @@ fuseraft run --config <path> "..."
 
 ### Step 5: Add the Plugin to Agents
 
-For each agent that needs access to the MCP server's tools, add the `Name` from Step 4 to its `Plugins` list:
+For each agent that needs access to the MCP server's tools, add the `name` from Step 4 to its `tools`:
 
 ```yaml
-- Name: Developer
-  Plugins:
-    - FileSystem
-    - Shell
-    - Puppeteer    # ← MCP server name added here
+agents:
+  Developer:
+    tools: [FileSystem, Shell, Puppeteer]    # ← MCP server name added here
 ```
 
-Agents that do not need the server's tools should not list it — keeping plugin lists lean reduces context and avoids confusion.
+Agents that do not need the server's tools should not list it — keeping tool lists lean reduces context and avoids confusion.
 
 If agent instructions need to reference specific MCP tool names, the tool names are determined by the server. To discover them, run the dry-run in Step 6 first, then update instructions.
 
@@ -144,8 +142,8 @@ If agent instructions need to reference specific MCP tool names, the tool names 
 
 Patch the config using `patch_file` (preferred for surgical edits) or `write_file`:
 
-1. Add the `McpServers` block (or new entry) at the top level under `Orchestration`.
-2. Add the plugin name to the relevant agents' `Plugins` lists.
+1. Add the `mcpServers` block (or new entry) at the top level of the team file.
+2. Add the server name to the relevant agents' `tools`.
 
 Then validate:
 ```bash
@@ -167,7 +165,7 @@ Look for:
 - The agent listing tool names from the MCP server in its response — confirms tools were registered.
 - Any startup errors: `MCP connection failed`, `process exited`, `timeout` — see the troubleshooting table below.
 
-If `--max-iterations` is not supported in the installed version, add `Termination: { MaxIterations: 1 }` temporarily to the config for this test, then restore it.
+If `--max-iterations` is not supported in the installed version, set `limits: { maxTurns: 1 }` temporarily for this test, then restore it.
 
 ### Step 8: Troubleshoot If Needed
 
@@ -175,9 +173,9 @@ If `--max-iterations` is not supported in the installed version, add `Terminatio
 |---------|-------------|-----|
 | `MCP connection failed: process exited immediately` | Server binary crashed at startup | Run the command manually in a terminal to see its error output; check that required env vars are set |
 | `MCP connection failed: timeout` | stdio server is printing to stderr before MCP protocol starts | Add `builder.Logging.SetMinimumLevel(LogLevel.Warning)` (for .NET servers) or suppress startup logs in your server |
-| `MCP connection failed: command not found` | `Command` binary is not on `$PATH` | Use the full path to the binary, or install it first |
-| Server connects but agent doesn't call any tools | Agent's `Plugins` list missing the server `Name` | Add the name to the agent's `Plugins` |
-| `Name` collision warning at startup | Two `McpServers` entries share a name, or name matches a built-in plugin | Rename one entry; update agent `Plugins` lists to match |
+| `MCP connection failed: command not found` | `command` binary is not on `$PATH` | Use the full path to the binary, or install it first |
+| Server connects but agent doesn't call any tools | Agent's `Plugins` list missing the server `name` | Add the name to the agent's `Plugins` |
+| `name` collision warning at startup | Two `mcpServers` entries share a name, or name matches a built-in plugin | Rename one entry; update agent `Plugins` lists to match |
 | HTTP transport: connection refused | Server is not running at the specified URL | Start the server first; verify the SSE endpoint path (usually `/sse`, not `/`) |
 | Tools visible but calls return auth errors | API key env var not set | `export <VAR>=<value>` before running fuseraft |
 

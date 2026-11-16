@@ -39,21 +39,11 @@ public static class OrchestratorConfigLoader
         bool noReplan,
         CancellationToken cancellationToken)
     {
-        var configuration = YamlConfigLoader.IsYamlPath(configPath)
-            ? YamlConfigLoader.LoadAsConfiguration(configPath)
-            : new ConfigurationBuilder()
-                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
-                .Build();
-
-        var config = BindConfig(configPath, configuration);
-
-        ValidateSchemaVersion(config, loggerFactory);
+        var config = Team.TeamConfigLoader.LoadAndCompile(configPath);
 
         if (config.Agents.Count == 0)
             throw new InvalidOperationException("Config must define at least one agent.");
 
-        ValidateIsolationConstraints(config, loggerFactory);
-        ValidateMergeStrategies(config);
 
         // Expand ${ENV_VAR} tokens in security and API profile config before use.
         config = ExpandEnvVars(config);
@@ -66,9 +56,8 @@ public static class OrchestratorConfigLoader
         if (sessionId is { Length: > 0 })
             config = InterpolateSessionId(config, sessionId, projectSlug);
 
-        // --no-replan: strip all state-machine transitions whose Signal contains "REPLAN"
-        // so the session never routes back to the planning phase. Useful in CI or when the
-        // developer agent has already planned and a replan loop would just burn tokens.
+        // --no-replan: drop every edge that leads back to the Start step, so a run never
+        // returns to planning. Useful in CI, where a replan loop would just burn tokens.
         if (noReplan && config.Selection.StateMachine is { } smForReplan)
         {
             var prunedStates = smForReplan.States.ToDictionary(
@@ -76,8 +65,7 @@ public static class OrchestratorConfigLoader
                 kv => kv.Value with
                 {
                     Transitions = kv.Value.Transitions
-                        .Where(t => t.Signal is null ||
-                                    !t.Signal.Contains("REPLAN", StringComparison.OrdinalIgnoreCase))
+                        .Where(t => kv.Key == smForReplan.Initial || t.To != smForReplan.Initial)
                         .ToList()
                 });
             config = config with
@@ -109,14 +97,7 @@ public static class OrchestratorConfigLoader
     public static SecurityConfig? LoadSecurityConfig(string configPath)
     {
         if (!File.Exists(configPath)) return null;
-
-        var configuration = YamlConfigLoader.IsYamlPath(configPath)
-            ? YamlConfigLoader.LoadAsConfiguration(configPath)
-            : new ConfigurationBuilder()
-                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
-                .Build();
-
-        return configuration.GetSection("Orchestration:Security").Get<SecurityConfig>();
+        return Team.TeamConfigLoader.Load(configPath).Security;
     }
 
     /// <summary>
@@ -125,25 +106,18 @@ public static class OrchestratorConfigLoader
     /// </summary>
     public static OrchestrationConfig LoadConfig(string configPath)
     {
-        if (!File.Exists(configPath))
-            throw new FileNotFoundException($"Config file not found: {configPath}");
-
-        var configuration = YamlConfigLoader.IsYamlPath(configPath)
-            ? YamlConfigLoader.LoadAsConfiguration(configPath)
-            : new ConfigurationBuilder()
-                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
-                .Build();
-
-        return BindConfig(configPath, configuration);
+        return Team.TeamConfigLoader.LoadAndCompile(configPath);
     }
 
     // Fills in ModelId, Endpoint, and ApiKeyEnvVar from ~/.fuseraft/config on any model
     // config that doesn't set them explicitly. This lets the global config act as a
     // default provider so agent files work without repeating connection details.
     // Per-agent explicit values always win; only empty fields are filled.
-    private static OrchestrationConfig ApplyGlobalDefaults(OrchestrationConfig config)
+    private static OrchestrationConfig ApplyGlobalDefaults(OrchestrationConfig config) =>
+        ApplyGlobalDefaults(config, UserConfigStore.Load().Item1);
+
+    internal static OrchestrationConfig ApplyGlobalDefaults(OrchestrationConfig config, UserConfig? globalCfg)
     {
-        var (globalCfg, _) = UserConfigStore.Load();
         var globalModelId      = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ModelId)      ? globalCfg.ModelId      : null;
         var globalEndpoint     = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.Endpoint)     ? globalCfg.Endpoint     : null;
         var globalApiKeyEnvVar = globalCfg is not null && !string.IsNullOrWhiteSpace(globalCfg.ApiKeyEnvVar) ? globalCfg.ApiKeyEnvVar : null;
@@ -155,12 +129,24 @@ public static class OrchestratorConfigLoader
         if (globalModelId is null && globalEndpoint is null && globalApiKeyEnvVar is null)
             return config with { Telemetry = telemetry };
 
-        ModelConfig Fill(ModelConfig m) => m with
+        // The global endpoint and key variable belong to the global provider, so they only fill a
+        // model on that provider, or one that can't name its own endpoint. A claude-* model must not
+        // inherit an xAI default.
+        var globalOrigin = ProviderKeys.Origin(ChatClientFactory.EndpointFor(
+            globalModelId ?? string.Empty, globalCfg?.Provider ?? string.Empty, globalEndpoint ?? string.Empty));
+
+        ModelConfig Fill(ModelConfig m)
         {
-            ModelId      = string.IsNullOrWhiteSpace(m.ModelId)      && globalModelId      is not null ? globalModelId      : m.ModelId,
-            Endpoint     = string.IsNullOrWhiteSpace(m.Endpoint)     && globalEndpoint     is not null ? globalEndpoint     : m.Endpoint,
-            ApiKeyEnvVar = string.IsNullOrWhiteSpace(m.ApiKeyEnvVar) && globalApiKeyEnvVar is not null ? globalApiKeyEnvVar : m.ApiKeyEnvVar,
-        };
+            var modelId = string.IsNullOrWhiteSpace(m.ModelId) && globalModelId is not null ? globalModelId : m.ModelId;
+            var own = ProviderKeys.Origin(ChatClientFactory.EndpointFor(modelId, m.Provider, m.Endpoint));
+            var onGlobalProvider = own.Length == 0 || own == globalOrigin;
+            return m with
+            {
+                ModelId      = modelId,
+                Endpoint     = string.IsNullOrWhiteSpace(m.Endpoint)     && globalEndpoint     is not null && onGlobalProvider ? globalEndpoint     : m.Endpoint,
+                ApiKeyEnvVar = string.IsNullOrWhiteSpace(m.ApiKeyEnvVar) && globalApiKeyEnvVar is not null && onGlobalProvider ? globalApiKeyEnvVar : m.ApiKeyEnvVar,
+            };
+        }
 
         var agents = config.Agents.Select(a => a with { Model = Fill(a.Model) }).ToList();
 
@@ -168,7 +154,6 @@ public static class OrchestratorConfigLoader
 
         var sel = config.Selection with
         {
-            Model    = config.Selection.Model    is not null ? Fill(config.Selection.Model)    : null,
             Magentic = config.Selection.Magentic is not null
                 ? config.Selection.Magentic with { Model = config.Selection.Magentic.Model is not null ? Fill(config.Selection.Magentic.Model) : null }
                 : null,
@@ -189,7 +174,6 @@ public static class OrchestratorConfigLoader
 
         var all = config.Agents.Select(a => a.Model)
             .Concat(config.Models.Values)
-            .Append(config.Selection.Model)
             .Append(config.Selection.Magentic?.Model)
             .OfType<ModelConfig>()
             .Where(NeedsKey)
@@ -234,7 +218,6 @@ public static class OrchestratorConfigLoader
         var models  = config.Models.ToDictionary(kv => kv.Key, kv => fill(kv.Value));
         var sel     = config.Selection with
         {
-            Model    = config.Selection.Model    is not null ? fill(config.Selection.Model)    : null,
             Magentic = config.Selection.Magentic is not null
                 ? config.Selection.Magentic with { Model = config.Selection.Magentic.Model is not null ? fill(config.Selection.Magentic.Model) : null }
                 : null,
@@ -248,6 +231,42 @@ public static class OrchestratorConfigLoader
 
     // Separates binding from loading so both BuildAsync and LoadConfig get the same
     // helpful error message when a field type doesn't match the schema.
+    /// <summary>Binds a pre-v2 <c>Orchestration:</c> file; used only by <c>fuseraft migrate</c>.</summary>
+    internal static (OrchestrationConfig Config, Team.LegacyParts Legacy) LoadLegacyConfig(string configPath)
+    {
+        if (!File.Exists(configPath))
+            throw new FileNotFoundException($"Config file not found: {configPath}");
+
+        var configuration = YamlConfigLoader.IsYamlPath(configPath)
+            ? YamlConfigLoader.LoadAsConfiguration(configPath)
+            : new ConfigurationBuilder()
+                .AddJsonFile(Path.GetFullPath(configPath), optional: false)
+                .Build();
+
+        var root = configuration.GetSection("Orchestration");
+        var selection = root.GetSection("Selection").Get<Team.LegacySelection>() ?? new();
+        if (selection.Graph is { } graph)
+            selection = selection with { Graph = graph with { HasSubGraphs = root.GetSection("Selection:Graph:SubGraphs").Exists() } };
+
+        var dependencies = new Dictionary<string, (List<string>, List<string>)>(StringComparer.Ordinal);
+        foreach (var agent in root.GetSection("Agents").GetChildren())
+        {
+            var produces = agent.GetSection("Produces").Get<List<string>>() ?? [];
+            var requires = agent.GetSection("Requires").Get<List<string>>() ?? [];
+            if ((produces.Count > 0 || requires.Count > 0) && agent["Name"] is { } name)
+                dependencies[name] = (produces, requires);
+        }
+
+        var legacy = new Team.LegacyParts
+        {
+            Selection             = selection,
+            Termination           = root.GetSection("Termination").Get<Team.LegacyTermination>(),
+            TestAssertionPatterns = root.GetSection("Validation:TestAssertionPatterns").Get<List<string>>(),
+            AgentDependencies     = dependencies,
+        };
+        return (BindConfig(configPath, configuration), legacy);
+    }
+
     private static OrchestrationConfig BindConfig(string configPath, IConfiguration configuration)
     {
         OrchestrationConfig? config;
@@ -464,106 +483,4 @@ public static class OrchestratorConfigLoader
             ? path
             : Path.GetFullPath(ProcessHelper.ExpandHome(path), sandboxRoot);
 
-    // Known config schema versions. Any version not in this set triggers a warning.
-    private static readonly IReadOnlySet<string> KnownSchemaVersions =
-        new HashSet<string>(StringComparer.Ordinal) { "2026-05" };
-
-    private static void ValidateSchemaVersion(OrchestrationConfig config, ILoggerFactory loggerFactory)
-    {
-        if (config.SchemaVersion is null) return;
-
-        var logger = loggerFactory.CreateLogger(nameof(OrchestratorBuilder));
-        if (!KnownSchemaVersions.Contains(config.SchemaVersion))
-            logger.LogWarning(
-                "Config declares schema_version '{SchemaVersion}' which is not recognized by this build of fuseraft-cli. " +
-                "Some fields may be silently ignored or default incorrectly. " +
-                "Known versions: {KnownVersions}",
-                config.SchemaVersion,
-                string.Join(", ", KnownSchemaVersions));
-        else
-            logger.LogDebug("Config schema_version '{SchemaVersion}' is valid.", config.SchemaVersion);
-    }
-
-    // Magentic's manager/ledger loop structurally depends on every participant seeing the same
-    // shared transcript to coordinate — Isolation.Fresh (which never reads SharedHistory) would
-    // silently starve the manager of the progress signal it needs. Reject rather than degrade
-    // quietly; the fix (drop Isolation: Fresh or switch orchestrator type) is a one-line config
-    // change, not a runtime workaround.
-    //
-    // Separately, warn (do not fail) when a Fresh agent — the default — declares no Context:
-    // sources at all: such an agent receives only the synthesized handoff directive each turn,
-    // which is fine for a terminal/leaf agent but likely a misconfiguration for one that needs
-    // durable state (brief.json, prior changes, etc.) across turns.
-    // Shared with ValidateConfigCommand's lint pass so the "magentic requires Shared/Fork"
-    // rule can't drift out of sync between the lint-only check and this hard-throw one.
-    internal static IReadOnlyList<string> FindMagenticFreshIsolationViolations(OrchestrationConfig config)
-    {
-        if (!string.Equals(config.Selection.Type, OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
-            return [];
-
-        return config.Agents
-            .Where(a => a.Isolation == AgentIsolation.Fresh)
-            .Select(a => a.Name)
-            .ToList();
-    }
-
-    internal static void ValidateIsolationConstraints(OrchestrationConfig config, ILoggerFactory loggerFactory)
-    {
-        var logger = loggerFactory.CreateLogger(nameof(OrchestratorBuilder));
-
-        var freshAgents = FindMagenticFreshIsolationViolations(config);
-        if (freshAgents.Count > 0)
-            throw new InvalidOperationException(
-                $"Selection.Type 'magentic' requires every agent to use Isolation: Shared or " +
-                $"Isolation: Fork — the manager's ledger loop depends on shared visibility of " +
-                $"progress across all participants. Agent(s) declaring Isolation: Fresh (the " +
-                $"default): {string.Join(", ", freshAgents)}. Set 'Isolation: Shared' explicitly " +
-                $"on these agents, or on the whole roster if none should isolate.");
-
-        foreach (var agent in config.Agents)
-        {
-            if (agent.Isolation == AgentIsolation.Fresh && agent.Context is not { Count: > 0 })
-                logger.LogWarning(
-                    "Agent '{Agent}' uses Isolation: Fresh (the default) with no Context: sources " +
-                    "declared — it will receive only the synthesized handoff directive each turn, " +
-                    "nothing else. This is fine for a terminal/leaf agent; otherwise declare a " +
-                    "Context: block (session_context, brief_field:*, changes_recent:N, own_history:N, " +
-                    "etc.) or set 'Isolation: Shared' if this agent needs the group transcript.",
-                    agent.Name);
-        }
-    }
-
-    // MergeStrategy.Benchmark is a real, selectable enum value with no implementation —
-    // MergeEngine.Merge/MergeAsync throw NotSupportedException for it unconditionally (see
-    // MergeEngine.NotImplemented). Left unchecked, a config author only discovers this when a
-    // long-running session finally hits the one parallel transition that uses it. Reject at
-    // load time instead, same rationale as the Magentic/Fresh-isolation check above. Shared
-    // with ValidateConfigCommand's lint pass so the two checks can't drift out of sync.
-    internal static IReadOnlyList<(string StateName, int TransitionIndex)> FindBenchmarkMergeStrategyUsages(
-        OrchestrationConfig config)
-    {
-        var sm = config.Selection.StateMachine;
-        if (sm is null) return [];
-
-        var locations = new List<(string, int)>();
-        foreach (var (stateName, state) in sm.States)
-            for (int ti = 0; ti < state.Transitions.Count; ti++)
-                if (state.Transitions[ti].Merge?.Strategy == MergeStrategy.Benchmark)
-                    locations.Add((stateName, ti));
-
-        return locations;
-    }
-
-    private static void ValidateMergeStrategies(OrchestrationConfig config)
-    {
-        var benchmarkUsages = FindBenchmarkMergeStrategyUsages(config);
-        if (benchmarkUsages.Count > 0)
-        {
-            var where = string.Join(", ", benchmarkUsages.Select(u => $"States['{u.StateName}'].Transitions[{u.TransitionIndex}]"));
-            throw new InvalidOperationException(
-                $"Merge.Strategy 'Benchmark' is not implemented and always throws at runtime " +
-                $"(see MergeEngine.Merge/MergeAsync). Used at: {where}. " +
-                $"Configure a different Merge.Strategy instead: Union, Consensus, Vote, Ranked, or SemanticDiff.");
-        }
-    }
 }

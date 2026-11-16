@@ -450,36 +450,29 @@ public static class ContextWindowFilter
         return result;
     }
 
-    // Prefixes that unambiguously identify a ChatRole.User correction injected by
-    // CorrectionEngine, routing strategies, or the orchestrator's verifier hook.
+    // Openings of every ChatRole.User correction the state machine and the orchestrator inject.
+    // An agent that sees only its handoff gets corrections through this list, so a correction
+    // that doesn't match one of these never reaches it.
     private static readonly string[] CorrectionPrefixes =
     [
-        "RETRY ",
-        "VALIDATION FAILED",        // CorrectionEngine.InjectValidationError first occurrence
-        "CRITIQUE ESCALATION:",     // back-edge revisit escalation (StateMachineSelectionStrategy)
-        "NO TOOL CALLS",
-        "CRITICAL:",
-        "APPROVED rejected:",
-        "APPROVED blocked:",        // RequireReviewJudgementValidator, KeywordSelectionStrategy
-        "WRONG KEYWORD:",
-        "JSON block correct",
-        "BUILD FAILURE:",
-        "STAGNATION (",
-        "STUCK ",
-        "HALLUCINATION:",
-        "PERSISTENT BUILD FAILURE",
-        "VERIFICATION FINDING",
-        "Files written this turn",
-        "No handoff keyword",
-        "EVIDENCE INCONSISTENCY",   // ConflictingEvidence (KeywordSelectionStrategy)
-        "EVIDENCE AUDIT REQUIRED",  // ConflictingEvidence (StateMachineSelectionStrategy)
-        "MISSING ARTIFACT",         // MissingEvidence (both strategies)
+        "Transition '",                              // first gate failure (InvalidTransition)
+        "RETRY ",                                    // repeated gate failure
+        "MISSING ARTIFACT",                          // MissingEvidence
+        "EVIDENCE AUDIT REQUIRED",                   // ConflictingEvidence
+        "CRITICAL:",                                 // NoProgress
+        "CRITIQUE ESCALATION:",                      // MaxRevisits exceeded
+        "REPLAN BLOCKED",                            // back-edge while a forward gate is failing
+        "RECOVERY ACTIVATED:",                       // OnStuck agent called in
+        "LOOP WARNING:",                             // same agent too many turns in a row
+        "Your last turn ended without a handoff",    // missing handoff
+        "You called handoff with '",                 // handoff to a route the step doesn't have
+        "The operator didn't approve the handoff",   // approve: true refused
+        "VERIFICATION FINDING",                      // verifier finding
     ];
 
     /// <summary>
-    /// Returns <c>true</c> when <paramref name="message"/> is a correction injected by
-    /// <see cref="fuseraft.Orchestration.Workflow.CorrectionEngine"/>, a routing strategy,
-    /// or the orchestrator's verifier hook. Used to pin corrections so they survive
+    /// Returns <c>true</c> when <paramref name="message"/> is a correction injected by the
+    /// state machine or the orchestrator's verifier hook. Used to pin corrections so they survive
     /// <see cref="ContextWindowConfig.MaxTailMessages"/> trimming, and to re-inject them
     /// into assembled agent contexts.
     /// </summary>

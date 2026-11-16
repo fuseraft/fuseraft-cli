@@ -1,9 +1,8 @@
 namespace fuseraft.Core.Exceptions;
 
 /// <summary>
-/// Thrown by <c>KeywordSelectionStrategy</c> when the same routing validator has
-/// blocked the same agent on the same route for <c>ConsecutiveValidatorFailureThreshold</c>
-/// consecutive turns, indicating the agent is stuck and cannot self-correct.
+/// Thrown by <c>StateMachineSelectionStrategy</c> when the same gate has blocked the
+/// same agent on the same edge for the configured threshold of consecutive turns, indicating the agent is stuck and cannot self-correct.
 ///
 /// <para>
 /// The orchestrator catches this exception and triggers human-in-the-loop intervention:
@@ -16,7 +15,7 @@ public sealed class ValidatorStuckException : Exception
     /// <summary>Name of the agent that has been stuck.</summary>
     public string AgentName { get; }
 
-    /// <summary>Config name of the validator that kept blocking (e.g. "RequireBrief").</summary>
+    /// <summary>Name of the gate that kept blocking (e.g. "filesWritten brief.files_to_change").</summary>
     public string ValidatorName { get; }
 
     /// <summary>How many consecutive turns the validator has failed for this agent/route.</summary>

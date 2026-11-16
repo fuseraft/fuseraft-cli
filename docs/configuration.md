@@ -1,167 +1,183 @@
 ---
 title: "Configuration Reference"
-description: "All orchestration settings live in a single config file (default: .fuseraft/config/orchestration.yaml). Both YAML and JSON formats are supported. The file must have a top-level Orchestration key."
+description: "A team file defines agents, the files they hand each other, and the flow between them. Every fact is written once, and every handoff is gated the same way."
 ---
 
-All orchestration settings live in a single config file (default: `.fuseraft/config/orchestration.yaml`). Both **YAML** and **JSON** formats are supported. The file must have a top-level `Orchestration` key.
-
-**JSON**:
-```json
-{
-  "Orchestration": {
-    "Name": "MyTeam",
-    ...
-  }
-}
-```
-
-**YAML** (`.yaml` or `.yml`):
-```yaml
-Orchestration:
-  Name: MyTeam
-  ...
-```
-
-Use any file extension and pass the path explicitly:
+A team file defines your agents, the files they hand each other (**artifacts**), and the **flow** between them. It is YAML or JSON, and you pass its path to `fuseraft run`:
 
 ```bash
-fuseraft run --config .fuseraft/config/my-team.yaml
-fuseraft validate .fuseraft/config/my-team.yaml
+fuseraft run --config .fuseraft/config/team.yaml "Add pagination to the users API"
+fuseraft validate .fuseraft/config/team.yaml
 ```
 
-YAML is often more readable for configs with long agent instructions (block scalars avoid JSON escape sequences) or complex routing tables. Both formats bind to the same schema — every field documented below works identically in either format. See `config/examples/orchestration.yaml` for a complete YAML example.
+The smallest useful team:
+
+```yaml
+team: Solo
+agents:
+  Assistant:
+    tools: [FileSystem, Shell]
+    instructions: You are a careful assistant. Complete the task, then finish.
+flow:
+  start: Assistant
+  steps:
+    Assistant:
+      - to: end
+```
+
+An agent with no `model` uses your default model from `~/.fuseraft/config`. See `config/examples/orchestration.yaml` for a complete team with artifacts and gated handoffs.
+
+**Unknown fields are errors.** A misspelled field, check, agent or artifact name stops the run before the first turn, with a message naming the field. Nothing is silently ignored.
+
+**Keys are camelCase** (`maxTurns`, `onStuck`), as in every example here. Matching ignores case, so a file written in PascalCase still loads, but writing the same field twice in different cases is an error. Names you choose (agents, artifacts, model aliases, environment variables) are used exactly as written, and an artifact can't share a gate's name: call a test report artifact `testResults`, not `testReport`.
+
+> **Upgrading an older config?** Files that start with `Orchestration:` use the previous format. Convert one with `fuseraft migrate <file>` (prints the result) or `fuseraft migrate <file> --write` (overwrites it). The converter keeps the leading comment block and notes anything it had to approximate.
 
 ---
 
 ## Top-level fields
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `SchemaVersion` | string | — | Optional config format version (e.g. `"2026-05"`). When set, fuseraft-cli validates that it recognizes this version and logs a warning if not. Useful for catching upgrades that silently change field semantics. Omit to skip version validation. |
-| `Name` | string | `""` | Human-readable name displayed at startup. |
-| `Description` | string | — | Optional description shown at startup. |
-| `SystemPromptPath` | string | — | Path to a Markdown file that replaces the embedded FUSERAFT.md base prompt prepended to every agent. Relative paths resolve from the config file's directory. Takes precedence over `SystemPrompt`. |
-| `SystemPrompt` | string | — | Inline text that replaces the embedded FUSERAFT.md base prompt. Ignored when `SystemPromptPath` is also set. |
-| `Models` | object | `{}` | Named model aliases reusable across agents. See [Models](models.md). |
-| `Agents` | array | `[]` | Ordered list of agents. At least one is required. |
-| `Selection` | object | sequential | Controls which agent speaks next. See [Strategies](strategies.md). |
-| `Termination` | object | 10 iterations | Controls when the run ends. See [Strategies](strategies.md). |
-| `Security` | object | unrestricted | Sandbox constraints for plugins. See [Security](security.md). |
-| `MaxTotalTokens` | integer | — | Hard token budget (input + output combined). Aborts with `BudgetExceededException` before the next turn if exceeded. For a graceful stop instead, add a `tokenbudget` termination strategy with a lower `MaxTokens` — see [Termination strategy](#termination-strategy). |
-| `ContextBudget` | object | — | Per-agent cumulative input-token budget. Warns and triggers compaction rather than terminating. Requires `Compaction` when `CutoverAt` is set. See [Context budget](#context-budget). |
-| `McpServers` | array | `[]` | External MCP servers to connect at startup. See [MCP](mcp.md). |
-| `Compaction` | object | — | Automatic history summarization. See [Sessions](sessions.md). |
-| `ChangeTracking` | object | — | Cross-agent change log. Enables the `Changes` plugin and validator cross-reference checks. See [Change tracking](#change-tracking). |
-| `Events` | object | — | Structured JSONL event stream. See [Events](#events). |
-| `Validation` | object | — | Routing validator settings. See [Validators](validators.md). |
-| `Telemetry` | object | — | OpenTelemetry export settings. See [Telemetry](#telemetry). |
-| `Checkpoint` | object | — | Checkpoint storage settings. See [Checkpoint](#checkpoint). |
-| `ApiProfiles` | object | `{}` | Named API endpoint profiles (base URL, auth headers, timeout) for the `Http` plugin. See [ApiProfiles](#apiprofiles). |
-| `Saga` | object | — | Compensating rollback settings. When `Enabled: true`, wraps execution with `SagaOrchestrator` for automatic compensation on failure. |
-| `EvidenceStore` | object | — | Structured evidence graph alongside `changes.json`. Required for evidence contracts and lossless compaction. See [Evidence store](#evidence-store). |
-| `SkillCuration` | object | — | Automatically author a reusable skill from each completed session. See [Skill curation](#skill-curation). |
-| `Contracts` | array | — | Named evidence contracts reusable across routes and state machine transitions. See [Evidence contracts](#evidence-contracts). |
-| `FailureHandling` | object | — | Per-failure-type policies (action + threshold) applied when routing validators or contracts block a handoff. See [Failure handling](#failure-handling). |
-| `Verifier` | object | — | Self-verification meta-agent that audits the evidence graph for inconsistencies. See [Verifier](#verifier). |
-| `Brownfield` | object | — | Brownfield-mode settings: recon phase support, change envelope seeding, and convention profile injection. See [Brownfield mode](#brownfield-mode). |
-| `TestSelector` | object | — | Incremental test-selection settings. Exposes a shell command template for finding the minimal test set for a changed file. See [Test selector](#test-selector). |
-| `Output` | object | — | Reporting settings for `fuseraft run`, for scripted/automated invocations. See [Output](#output). |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `team` | yes | Team name, shown when a run starts. |
+| `description` | no | One-line summary. |
+| `models` | no | Named model aliases. See [Models](models.md). |
+| `artifacts` | no | Files agents exchange, each declared once. See [Artifacts](#artifacts). |
+| `agents` | yes | Agents keyed by name. See [Agents](#agents). |
+| `flow` | yes | Who runs next, and what each handoff requires. See [Flow](#flow). |
+| `limits` | no | Hard caps on a run. See [Limits](#limits). |
+| `security` | no | Sandbox, permissions and network rules. See [Security](#security). |
+| `mcpServers` | no | MCP servers whose tools agents can use. See [MCP](mcp.md). |
+| `advanced` | no | Opt-in layers: compaction, verifier, telemetry and more. See [Advanced](#advanced). |
 
 ---
 
-## Base system prompt
+## `artifacts`
 
-Every agent's instructions are prefixed with a shared base prompt before the session starts. By default this is the embedded `FUSERAFT.md` harness document that establishes tool-use discipline, format rules, and safety constraints. You can replace it per-config via `SystemPromptPath` or `SystemPrompt`.
-
-**Load from a file (recommended for multi-config repos):**
+An artifact is a file one agent writes and another reads: a brief, a test report, a review. Declare it once; checks and prompts refer to it by name.
 
 ```yaml
-Orchestration:
-  SystemPromptPath: ./prompts/my-harness.md
+artifacts:
+  brief:
+    path: .fuseraft/artifacts/brief.json
+    shape:
+      goal: string
+      files_to_change: [string]
+      acceptance_criteria: [string]
+      verify_command: string
+  testResults:
+    path: .fuseraft/artifacts/test-report.json
+    shape:
+      results:
+        - criterion: string
+          status: PASS|FAIL
+          command: string
+          exit_code: int
 ```
 
-The path is resolved relative to the config file's directory, so it works regardless of where `fuseraft run` is invoked. Absolute paths are also accepted.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | yes | File path, relative to the working directory. `{project_slug}` and `{session_id}` are expanded at run time. |
+| `shape` | no | A sketch of the JSON the file must hold. Gates that name the artifact check the file against it. |
 
-**Inline override:**
+**Shape syntax**
 
-```yaml
-Orchestration:
-  SystemPrompt: |
-    You are part of a specialized data-engineering team.
-    Always produce deterministic, idempotent SQL.
-    Never truncate tables without an explicit instruction.
-```
+| Sketch | Matches |
+|--------|---------|
+| `string`, `int`, `number`, `bool`, `any` | A value of that type. |
+| `A\|B\|C` | One of those strings, e.g. `PASS\|FAIL`. |
+| `[T]` | A list whose items all match `T`. |
+| a nested map | An object with those fields. Extra fields are allowed. |
+| a trailing `?` | An optional field, e.g. `notes: string?`. |
 
-**Precedence:** `SystemPromptPath` → `SystemPrompt` → embedded `FUSERAFT.md`.
+**What fuseraft does with an artifact**
 
-`fuseraft validate` reports an error if `SystemPromptPath` is set but the file does not exist.
+- Agents list artifacts under `reads` and `writes`. fuseraft tells each agent the artifact's path and, for writers, its shape, so you never repeat them in `instructions`.
+- A `reads` artifact is included in the agent's context whenever the file exists.
+- A gate that names the artifact checks that it exists and matches its shape. See [Gates](#gates).
 
-**Full injection order** — `OrchestratorBuilder` assembles each agent's final system prompt in this sequence before the session starts:
-
-| # | Block | Source |
-|---|-------|--------|
-| 1 | Base prompt | `SystemPromptPath` → `SystemPrompt` → embedded `FUSERAFT.md` |
-| 2 | Agent `Instructions` | Per-agent field in the config |
-| 3 | `.fuseraft/` folder orientation | Auto-injected from `FuseraftPaths.BuildFolderOrientationBlock()` — gives every agent a compact manifest of the runtime directory so they never call `list_files` on `.fuseraft/` to discover it. See [Directory layout](design.md#3-directory-layout). |
-| 4 | Context store summary | Appended when `.fuseraft/context/index.json` has entries (see [Context store](context-store.md)) |
-| 5 | Convention profile | Appended when `Brownfield.ConventionProfilePath` exists (Brownfield mode) |
-| 6 | Test selector hint | Appended when `TestSelector.FindRelatedCommand` is configured |
-
-In **REPL mode** the same folder orientation is injected (blocks 3 onward), but the log-file entries are omitted from the manifest because the session section of the REPL system prompt already lists them and directs the agent to the `repl_session_*` tools for log access.
-
-`SubagentPlugin` (used by `subagent_explore` and `subagent_locate`) receives a single-line skip directive instead of the full manifest, since its system prompt is tightly budgeted.
+Two names are conventional: an artifact named `brief` is the brief that brief-reading checks use, and one named `testResults` is the report `fuseraft run --ci` reads.
 
 ---
 
-## Agent configuration
-
-Each entry in `Agents` configures one participant in the group chat.
+## `agents`
 
 ```yaml
-- Name: Developer
-  Description: Senior engineer who implements features.
-  Instructions: You are a software engineer...
-  Model:
-    ModelId: gpt-4o
-  Plugins:
-    - FileSystem
-    - Shell
-    - Git
-  FunctionChoice: required
+agents:
+  Developer:
+    role: Implements the brief.
+    model: fast
+    tools: [FileSystem, Shell, Git, Search, Changes]
+    reads: [brief]
+    instructions: |
+      Implement every file in the brief's files_to_change, run its
+      verify_command, then commit.
+    advanced:
+      functionChoice: required
+      maxInTurnToolPairs: 12
 ```
 
-| Field | Type | Default | Required | Description |
-|-------|------|---------|----------|-------------|
-| `AgentFile` | string | — | no | Path to a YAML file that provides the base agent definition. Relative paths resolve against the orchestration config's directory. Inline fields that differ from their defaults override the file; fields left at defaults are inherited. See [Agent files](#agent-files). |
-| `Name` | string | — | yes | Unique name used in routing and logs. |
-| `Instructions` | string | — | yes | System prompt defining the agent's persona and behavior. |
-| `Description` | string | — | no | Short description used by LLM selection strategies. |
-| `Model` | string or object | — | yes | Model to use. See [Models](models.md). |
-| `Plugins` | array | `[]` | no | Built-in or MCP plugin names to load into this agent's kernel. See [Plugins](plugins.md). |
-| `Capabilities` | object | `{}` | no | Per-plugin capability filter. Keys are plugin names; values are arrays of capability tags. Only tools covered by a listed tag are registered. Omitting a plugin allows all its tools. See [Capabilities](#capabilities). |
-| `FunctionChoice` | string | `"auto"` | no | Tool-use enforcement: `auto`, `required`, or `none`. |
-| `MaxToolCallsPerTurn` | int | `0` | no | Hard cap on tool calls per turn. `0` means no limit. When exceeded, the turn ends with an error injected into history. |
-| `MaxInTurnContextTokens` | int | `0` | no | Soft cap (budget-reactive) on in-turn context tokens. `0` means no limit. Before each inner LLM call the oldest tool-result messages are replaced with placeholders until the total is under this budget. |
-| `MaxInTurnToolPairs` | int | `0` | no | Deterministic sliding-window cap on the number of tool call/result pairs kept in full within a turn — but only engages once the turn's estimated size reaches ~90% of the agent's context budget (`MaxContextTokens`, or a 200k-char fallback when unset); below that, older pairs are left untouched so the request prefix a provider would cache stays stable across calls. Once triggered, all but the most-recent N pairs are replaced with placeholders. `0` means no limit. Recommended: 8–16 for high-volume action agents. |
-| `TrustScore` | number | `0.7` | no | Governance trust score (0.0–1.0) used to assign an execution ring. See [Governance](governance.md#execution-rings). |
-| `ContextWindow` | object | — | no | Filters the conversation history before it reaches this agent. See [ContextWindow](#contextwindow). |
-| `SubagentModel` | string | — | no | Model ID override for the subagent spawned by the `Subagent` plugin. Defaults to the parent agent's model when unset. Useful for running a cheaper model (e.g. Haiku) for `subagent_explore` / `subagent_locate` calls. |
-| `SubagentPlugins` | array | — | no | Explicit list of plugin names to load into the subagent. When unset the subagent receives the default read-only set: FileSystem read, Search, Shell read, Git read. Unknown names raise an error at session startup. |
-| `SubagentMaxToolCalls` | int | `0` | no | Maximum rounds (model calls; parallel tool calls in one round count once) for `subagent_explore`. `0` uses the built-in default of 20. `subagent_locate` always uses a hard cap of 5 regardless of this setting. |
-| `RemoteAgent` | object | — | no | Delegates this agent slot to a remote A2A agent. When set, `Model`, `Plugins`, `FunctionChoice`, and `Capabilities` are ignored. See [RemoteAgent](#remoteagent). |
+| Field | Description |
+|-------|-------------|
+| `role` | One-line description of what the agent does. |
+| `model` | A [model alias](models.md) from `models`, or a full model map (`{ modelId: gpt-4o, maxTokens: 4096 }`). A map's `modelId` may also be an alias, with the other fields overriding it. Leave it out to use your default model. |
+| `tools` | Tool groups: built-in plugins (see [Plugins](plugins.md)) or `mcpServers` names. `Handoff` is added automatically for agents in a `steps` flow. |
+| `reads` | Artifacts this agent reads. Each is included in its context when the file exists. |
+| `writes` | Artifacts this agent writes. Their paths and shapes go into its prompt. |
+| `sees` | `handoff` (default), `conversation` or `fork`. See below. |
+| `instructions` | Required. What the agent does and how. |
+| `agentFile` | Load this agent's fields from a separate YAML file. See [Agent files](#agent-files). |
+| `remoteAgent` | Run this agent on a remote A2A server. See [`remoteAgent`](#remoteagent). |
+| `advanced` | Per-agent knobs. See [Advanced agent fields](#advanced-agent-fields). |
+
+### What an agent sees
+
+| `sees` | Context each turn |
+|--------|-------------------|
+| `handoff` (default) | The task, or the `goal`/`background`/`constraints` the previous agent passed to `handoff`; the agent's `reads` artifacts; its own last few turns; and any correction addressed to it. It never sees other agents' transcripts. |
+| `conversation` | The whole shared conversation. Use it for agents that genuinely need the discussion, and for every agent in the `magentic` pattern (the default there). |
+| `fork` | The shared conversation, plus the handoff directive on top. |
+
+`handoff` keeps contexts small and stops agents copying each other's mistakes. It works because artifacts carry the durable facts and `handoff` carries the instructions.
+
+### Generated prompt text
+
+fuseraft appends a **Team protocol** section to every agent's instructions, built from the team file:
+
+- each artifact the agent reads or writes, with its path, and the shape it must write;
+- for agents in a `steps` flow, the routes it may hand off on, when to take each one, and the checks fuseraft runs before letting it through.
+
+Don't repeat any of that in `instructions`. Write about the work itself.
+
+### Advanced agent fields
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `functionChoice` | `auto` | `auto`, `required` (must call a tool every turn; use for agents that act), or `none`. |
+| `capabilities` | `{}` | Per-plugin tool filter. See [Capabilities](#capabilities). |
+| `contextWindow` | — | Filters shared history for `conversation`/`fork` agents. See [`contextWindow`](#contextwindow). |
+| `context` | — | Extra context sources: `session_context`, `changes_recent:N`, `brief_field:FIELD`, `file:PATH`, `own_history:N`, `execution_state`, `investigation_log`. |
+| `maxToolCallsPerTurn` | `0` | Hard cap on tool calls per turn; `0` means no limit. |
+| `maxInTurnContextTokens` | `0` | Soft cap on in-turn context tokens; the oldest tool results are replaced with placeholders to stay under it. |
+| `maxInTurnToolPairs` | `0` | Keep only the last N tool call/result pairs in full once a turn nears the context budget. 8–16 suits agents that act a lot. |
+| `trustScore` | `0.7` | Governance trust score (0.0–1.0). See [Governance](governance.md#execution-rings). |
+| `subagentModel` | parent's model | Model for the `Subagent` plugin's explorer, e.g. a cheaper one. |
+| `subagentPlugins` | read-only set | Plugins the subagent may use. |
+| `subagentMaxToolCalls` | `20` | Round cap for `subagent_explore`. |
+| `skipExecutionState` | `false` | Don't prepend the build/test execution state to this agent's context. |
+| `knowledgeWeight` | — | Weighting for knowledge-layer retrieval. |
 
 ### Capabilities
 
-Per-plugin tool filter. Keys are plugin names; values are arrays of capability tags. Only tools whose tag appears in the list are registered on the agent. Omitting a plugin grants all its tools.
+Per-plugin tool filter. Keys are plugin names; values are capability tags. Only tools whose tag is listed are registered. Leaving a plugin out grants all its tools.
 
 ```yaml
-- Name: Reviewer
-  Plugins:
-    - FileSystem
-    - Git
-  Capabilities:
-    FileSystem: [read]
-    Git:        [read]
+Reviewer:
+  tools: [FileSystem, Git]
+  advanced:
+    capabilities:
+      FileSystem: [read]
+      Git:        [read]
 ```
 
 | Plugin | Capability tags |
@@ -169,7 +185,7 @@ Per-plugin tool filter. Keys are plugin names; values are arrays of capability t
 | `FileSystem` | `read` (read_file, grep_file, get_file_summary, get_file_info, list_files) · `write` (write_file, patch_file, save_file_summary, create_directory, copy_file, move_file, set_permissions) · `delete` (delete_file, delete_directory) |
 | `Shell` | `read` (shell_get_env, shell_get_job_status, shell_get_job_output, shell_which, shell_get_working_directory, shell_get_session_temp_dir) · `run` (shell_run, shell_run_script, shell_run_background, shell_set_env, shell_kill_job) |
 | `Git` | `read` (git_status, git_diff, git_log, git_show, git_branch_list, git_stash_list, git_is_inside_work_tree, git_is_repo_root) · `write` (git_add, git_commit, git_checkout, git_create_branch, git_init, git_push, git_pull, git_stash, git_stash_pop, git_reset, git_rebase) |
-| `Http` | `get` (http_get, http_head) · `post` · `put` · `patch` · `delete` — one tag per verb, except `http_head` which shares the `get` tag rather than having its own |
+| `Http` | `get` (http_get, http_head) · `post` · `put` · `patch` · `delete` |
 | `Json` | `read` · `write` (json_merge) |
 | `Document` | `read` (document_extract_text, document_get_info, document_list_sheets, document_get_sheet) |
 | `Search` | `read` |
@@ -179,1245 +195,615 @@ Per-plugin tool filter. Keys are plugin names; values are arrays of capability t
 | `Probe` | `run` |
 | `CodeExecution` | `read` (code_execution_check_docker) · `execute` (sandbox_run, repl_*) |
 | `Decision` | `read` (decision_search, decision_read) · `write` (decision_create, decision_supersede) |
-| `Graph` | `read` (graph_search, graph_refs, graph_dependents — all read-only) |
+| `Graph` | `read` (graph_search, graph_refs, graph_dependents) |
 
-Tools not in the capability map (e.g. MCP-registered tools) always pass through unfiltered.
+Tools not in this map, such as MCP tools, always pass through.
 
 ### Agent files
 
-`AgentFile` lets you extract a reusable agent definition into a stand-alone YAML file and reference it from any number of orchestration configs. Orchestration configs stay small; agents can be independently versioned, diffed, and shared across projects. Multi-agent templates generated by `fuseraft init` use this layout by default, writing each agent to `agents/{name}.yaml` alongside the main config.
-
-**Agent file format** — the file is a plain YAML object with the same fields as an inline agent entry. No top-level wrapper key is required, though `Agent:` is accepted for tooling compatibility:
+`agentFile` loads an agent's fields from a separate YAML file, so one agent definition can be shared across teams. The file holds the same fields as an inline agent (an `agent:` wrapper key is also accepted). Inline fields win over the file's.
 
 ```yaml
 # agents/reviewer.yaml
-Name: Reviewer
-Instructions: |
-  You are a senior engineer reviewing code changes for correctness,
-  test coverage, and adherence to project conventions.
-  ...
-Model:
-  ModelId: claude-opus-4-7
-Plugins:
-  - FileSystem
-  - Git
-  - Changes
-Capabilities:
-  FileSystem: [read]
-  Git:        [read]
-FunctionChoice: required
-TrustScore: 0.85
+role: Reviews changes for correctness and test coverage.
+tools: [FileSystem, Git, Changes]
+instructions: |
+  You are a senior engineer reviewing code changes...
+advanced:
+  functionChoice: required
 ```
-
-**Referencing from an orchestration config:**
 
 ```yaml
-Agents:
-  - AgentFile: agents/reviewer.yaml   # loads the base definition above
-
-  - AgentFile: agents/reviewer.yaml   # same base, different model for this project
-    Model: claude-sonnet-4-6
-
-  - AgentFile: agents/developer.yaml
-    Name: LeadDeveloper               # rename the agent for this config's routing rules
-    MaxInTurnContextTokens: 40000     # tighter context cap for this environment
-    MaxInTurnToolPairs: 12            # deterministic sliding window: keep only last 12 tool results per turn
+agents:
+  Reviewer:
+    agentFile: agents/reviewer.yaml
+    model: reasoning        # inline fields win over the file
 ```
 
-**Override semantics** — inline fields whose value differs from the field's default override the file; fields left at their defaults are inherited. The practical rules:
-
-| Field type | Inline overrides base when… |
-|------------|------------------------------|
-| string | inline is non-empty |
-| array / object | inline is non-empty |
-| nullable | inline is non-null |
-| int | inline is non-zero |
-| `TrustScore` | inline differs from `0.7` |
-| `FunctionChoice` | inline differs from `"auto"` |
-
-This means: to inherit a field from the file, simply omit it in the inline config. To override, set it explicitly.
-
-**Validation** — `fuseraft validate` resolves `AgentFile` paths and reports missing files as errors before the session starts.
+Relative paths resolve from the team file's directory. A missing file is a load error.
 
 ### Subagent
 
-When the `Subagent` plugin is listed in `Plugins`, the agent gains access to these tools:
-
-- **`subagent_explore`** — multi-hop exploration loop (up to `SubagentMaxToolCalls` rounds, default 20). Accepts an optional `format` parameter: `"prose"` (default) or `"file_list"` (bulleted path list).
-- **`subagent_explore_many`** — up to 4 explorations running at the same time, one per query. Strictly read-only, and it never shows an approval prompt: anything that would ask is refused. See [Plugins](plugins.md).
-- **`subagent_locate`** — single-target symbol/file lookup, hard-capped at 5 rounds and 512 output tokens.
-
-Both tools inject the current working directory into the subagent's system prompt and link the parent's cancellation token so interrupts propagate immediately. The subagent does not share the parent's conversation history.
+With `Subagent` in `tools`, an agent gets `subagent_explore` (a multi-hop read-only exploration loop), `subagent_explore_many` (up to four explorations at once) and `subagent_locate` (a single-target lookup capped at 5 rounds). The subagent never sees the parent's conversation.
 
 ```yaml
-- Name: Developer
-  Plugins:
-    - FileSystem
-    - Shell
-    - Subagent
-  SubagentModel: claude-haiku-4-5-20251001   # cheaper model for subagent work
-  SubagentMaxToolCalls: 25                   # allow deeper explore loops
-  SubagentPlugins:
-    - FileSystem
-    - Search
-    - Git
+Developer:
+  tools: [FileSystem, Shell, Subagent]
+  advanced:
+    subagentModel: claude-haiku-4-5-20251001
+    subagentMaxToolCalls: 25
+    subagentPlugins: [FileSystem, Search, Git]
 ```
 
-### RemoteAgent
+### `remoteAgent`
 
-Delegates an agent slot to a remote process that implements the [A2A protocol](https://a2a-protocol.org/). The agent card is fetched from `{Url}/.well-known/agent-card.json` at session startup and the agent participates in orchestration identically to locally-hosted agents.
-
-> **Preview:** The A2A protocol integration depends on a pre-release SDK package (`1.0.0-preview2`). A `LogWarning` is emitted at session startup for every agent that uses `RemoteAgent`. The API may change in future releases — verify compatibility before upgrading in production-critical workflows.
+Runs an agent on a remote server that speaks the [A2A protocol](https://a2a-protocol.org/). The agent card is fetched from `{Url}/.well-known/agent-card.json` when the run starts.
 
 ```yaml
-- Name: RemoteReviewer
-  Instructions: You are a code reviewer. Be thorough.
-  TrustScore: 0.65
-  RemoteAgent:
-    Url: https://reviewer.internal
-    TimeoutSeconds: 60
-    Headers:
+RemoteReviewer:
+  instructions: You are a code reviewer. Be thorough.
+  remoteAgent:
+    url: https://reviewer.internal
+    timeoutSeconds: 60
+    headers:
       Authorization: Bearer ${REVIEWER_TOKEN}
 ```
 
-| Field | Type | Default | Required | Description |
-|-------|------|---------|----------|-------------|
-| `Url` | string | — | yes | Base URL of the remote A2A agent. Card is resolved from `{Url}/.well-known/agent-card.json`, with or without a trailing slash on `Url` — so `http://host:24602/Tester` fetches `/Tester/.well-known/agent-card.json`. |
-| `TimeoutSeconds` | int | `120` | no | HTTP timeout for card resolution and per-turn calls. |
-| `Headers` | map | — | no | HTTP headers sent with every request, e.g. a bearer token. Values support `${ENV_VAR}` tokens. Sent only to `Url`'s origin (scheme, host, port) — never to a different origin the agent card names or a redirect leads to. |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `url` | — | Base URL of the remote agent. |
+| `timeoutSeconds` | `120` | Timeout for card resolution and each turn. |
+| `headers` | — | Headers sent with every request; values support `${ENV_VAR}`. Sent only to `url`'s origin. |
 
-**Fields that apply when `RemoteAgent` is set:** `Name`, `Instructions`, `TrustScore`, `ContextWindow`, `MaxToolCallsPerTurn`.
+A remote agent runs on its own server, so `model`, `tools`, `sees` and `advanced` don't apply and are rejected. It is sent only its own `instructions`; fuseraft's base prompt and local environment details never leave this machine. A remote agent hands off by writing a route name on its own line.
 
-A remote agent is sent only its own `Instructions` (plus the `--spec` block, when given). fuseraft's base system prompt and the local environment blocks — paths, OS, `.gitignore`, project root — are added to local agents only, so they never leave this machine.
+The remote side can be another fuseraft team: `fuseraft serve --a2a` hosts each agent at `{host}:{port}/{AgentName}`. See [Serve — Hosting agents over A2A](serve.md#hosting-agents-over-a2a).
 
-**Fields that are ignored when `RemoteAgent` is set:** `Model`, `Plugins`, `FunctionChoice`, `Capabilities`, `SubagentModel`, `SubagentPlugins` — those are properties of the remote agent.
+### `contextWindow`
 
-The remote side can be another fuseraft team: `fuseraft serve --a2a` hosts each of its agents at `{host}:{port}/{AgentName}`. See [Serve — Hosting agents over A2A](serve.md#hosting-agents-over-a2a).
-
-If the card can't be fetched (wrong token, nothing listening), the session stops before the first turn with the status or connection error, and no crash dump is written — it's a setup problem, not a fuseraft bug.
-
-### FunctionChoice
-
-| Value | Behavior |
-|-------|----------|
-| `auto` | The model may call tools or respond with text. Good for planning agents. |
-| `required` | The model must call at least one tool every turn. Prevents fabricated tool output. Use for action agents (Developer, Tester). |
-| `none` | Tools are registered but the model is not allowed to call them. |
-
-### ContextWindow
-
-Filters the conversation history before it is passed to this agent each turn. Useful for late-stage agents (e.g. a Reviewer) that only need the final text output — not hundreds of tool-call frames accumulated by earlier agents.
+Filters the shared history passed to an agent that sees the conversation (`sees: conversation` or `fork`).
 
 ```yaml
-- Name: Reviewer
-  ContextWindow:
-    TextOnly: true
+Reviewer:
+  sees: conversation
+  advanced:
+    contextWindow:
+      textOnly: true
 ```
 
-Filters are applied in order: `TextOnly` / `ExcludeAgents` first, then `MaxTurnAge`, then `MaxTailMessages`. The shared history is never mutated — only the slice passed to this agent's turn is affected.
+| Field | Default | Description |
+|-------|---------|-------------|
+| `textOnly` | `false` | Strip tool calls and results; keep only text. Often cuts a late-stage agent's input by 90%. |
+| `excludeAgents` | `[]` | Remove everything these agents wrote. |
+| `maxTurnAge` | `0` | Keep only the last N agent turns. |
+| `maxTailMessages` | `0` | After the other filters, keep only the last N messages. |
+| `maxToolResultChars` | `0` | Truncate replayed tool results to this many characters. |
+| `toolResultCharOverrides` | `{}` | Per-tool overrides for `maxToolResultChars`. |
+| `maxReplayChars` | `0` | Truncate replayed assistant messages; `0` uses a 2,000-character fallback. |
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `TextOnly` | bool | `false` | Strip all tool-call frames and tool-result messages. Keeps only text-bearing assistant messages and user messages. |
-| `ExcludeAgents` | array | `[]` | Remove all messages (text and tool frames) authored by these agents. Tool-result messages are also stripped when this list is non-empty. |
-| `MaxTurnAge` | int | `0` | Keep only messages from the last N agent turns (each turn ends at an assistant reply). Applied after `TextOnly`/`ExcludeAgents` and before `MaxTailMessages`. Semantic alternative to a raw message count — discards entire early-session phases rather than an arbitrary number of messages. `0` means no limit. |
-| `MaxTailMessages` | int | `0` | After the above filters, keep only the last N messages. `0` means no limit. |
-| `ContextCapFraction` | double | `0.0` | Soft-cap threshold expressed as a fraction of `MaxTailMessages` (e.g. `0.8` = 80%). When the filtered count exceeds this threshold a `context_cap_warning` event is emitted. Does not change trim behavior — use `MaxTailMessages` to hard-cap. `0.0` disables the warning. |
-| `MaxToolResultChars` | int | `0` | Truncate `FunctionResultContent` strings in the replayed history slice to this many characters. A suffix noting the omitted count is appended. `0` disables truncation. See [context-management — Tool-result truncation](context-management.md#tool-result-truncation-maxtoolresultchars). |
-| `ToolResultCharOverrides` | object | `{}` | Per-tool-name character cap overrides. Keys are tool function names (case-insensitive); values are the character limit for that tool's results, overriding `MaxToolResultChars`. A value of `0` disables truncation for that tool. Only meaningful when `MaxToolResultChars` is also set. |
-| `MaxReplayChars` | int | `0` | Truncate non-summary assistant messages in the replayed history to this many characters. `0` uses the global 2,000-character fallback. Compaction summaries are never truncated. |
-
-**`TextOnly: true`** is the primary lever for context reduction. A Reviewer that independently re-reads files and re-runs commands gains nothing from hundreds of tool results produced by the Developer — stripping them can reduce input tokens by 90%+ in typical sessions.
-
-**`ExcludeAgents`** goes further: removes an entire agent's contribution from the history. Use when one agent's output is irrelevant to another (e.g. a Planner's analysis is not useful to a code Reviewer).
-
-**`MaxTurnAge`** is a semantic alternative to `MaxTailMessages`. Rather than counting raw messages, it counts *agent turns* backward and discards everything before the cut-point. Set it on agents that only need to understand the most recent phase of a session (e.g. a Reviewer that should see the last 5 turns, regardless of how many tool frames each turn produced).
-
-**`MaxTailMessages`** provides a hard message count cap after the other filters. Useful when even filtered text history is still too long for a terminal agent.
+Filters apply in order: `textOnly`/`excludeAgents`, then `maxTurnAge`, then `maxTailMessages`. Shared history itself is never changed.
 
 ---
 
-## Memory
+## `flow`
 
-Every agent's persistent memory store is loaded and ranked by relevance before each turn, then
-injected into its system prompt automatically by the context assembly pipeline — no per-agent
-config is required. See [Context Management — Layer 2](context-management.md#layer-2-persistent-memory-pipeline-injected)
-for ranking and injection format details.
+`flow` takes one of two forms: **Steps**, where you draw the flow and gate each handoff, or a **Pattern** with built-in control logic.
 
-**How it works**
+### Steps
 
-Memories are stored as Markdown files with YAML frontmatter in `~/.fuseraft/memory/agents/{Name}/`. An index file (`MEMORY.md`) maintains a one-line-per-entry listing in injection order.
-
-**Memory storage location**
-
-| Context | Path |
-|---------|------|
-| REPL sessions | `~/.fuseraft/memory/repl/memory_{guid}.md` |
-| Orchestration agents | `~/.fuseraft/memory/agents/{AgentName}/` |
-
-The `{AgentName}` component is sanitized so it is safe as a directory name. Agent memories persist across all sessions and are carried into every future run for that agent.
-
-**REPL auto-memory**
-
-The REPL always loads memories automatically. Saving new ones is manual by default — run `/memory save` — unless `memory.autoSave` is on. Each REPL memory entry is identified by a UUID (stored in the file's frontmatter and used as its filename).
-
-Memories are **scoped to the working directory** where they were created. A file at `~/.fuseraft/sessions/{project_slug}/{session_id}/memory_refs.json` records the GUIDs of memories saved in that session, and on session start the REPL loads the entries listed by every session of the directory, and none from other directories.
-
-On `/memory save` the model is asked to extract new memories from the conversation. With `fuseraft settings set memory.autoSave true`, this also happens when the session ends and before `/clear`, `/switch`, `/provider setup` or compaction discards the conversation. Each saved entry is written to the global store and its GUID is registered in the session's refs file. Use `/memory` commands to manage them. See [CLI Reference — `/memory`](cli-reference.md#memory-commands).
-
-By default this extraction call reuses the REPL's main chat model. Set `memory.model` in `~/.fuseraft/config` to run it on a different model instead (the same model also names new chats; see `repl.autoTitle`) — e.g. a smaller/cheaper one, since extraction doesn't need the same capability as the main conversation:
-
-```bash
-fuseraft settings set memory.model gpt-4o-mini
+```yaml
+flow:
+  start: Planner
+  steps:
+    Planner:
+      - to: Developer
+        requires: [brief]
+    Developer:
+      - to: Tester
+        requires:
+          - commandSucceeded: brief.verify_command
+      - to: Planner
+        when: the plan needs rethinking
+    Tester:
+      - to: Reviewer
+        when: every criterion passes
+        requires:
+          - testReport: testResults
+        onStuck: Developer
+      - to: Developer
+        when: a criterion fails
+    Reviewer:
+      - to: end
+        when: the work is approved
+      - to: Developer
+        when: the code needs fixing
 ```
 
-The model ID picks its provider by prefix (`gpt-*` → OpenAI, `claude-*` → Anthropic, …) and reads that vendor's usual API-key env var (`OPENAI_API_KEY`, …); a key held only in the OS keychain is your main provider's, so set `memory.endpoint` to reuse it. An ID the prefix table doesn't recognize — a gateway's own names, say `openrouter/some-model` — rides the REPL's main provider connection instead. To point the model at a different host, set `memory.endpoint` (it reuses the main provider's API key unless `memory.apiKeyEnvVar` names another), and optionally `memory.provider`. These only take effect together with `memory.model`.
+`start` names the agent that runs first. Each key under `steps` is an agent, followed by the edges it may take when it finishes. An edge to `end` finishes the run.
 
-See [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings).
+| Edge field | Description |
+|------------|-------------|
+| `to` | An agent, `end`, or a list of agents to run in parallel. |
+| `when` | When to take this edge, in words. The agent sees it as the route's description. |
+| `requires` | Gates that must pass before the handoff goes through. See [Gates](#gates). |
+| `onStuck` | An agent to call in after the gates on this edge fail twice in a row, e.g. a Developer to fix what a Tester can't. |
+| `name` | The route name the agent hands off with. Defaults to the target agent (or `end`); only needed when one step has two edges to the same agent. |
+| `join` | For a parallel `to`, the agent that runs after every branch finishes. Required with a list. |
+| `merge` | For a parallel `to`, how branch outputs are combined before `join`. |
+| `maxRevisits` | On a loop back to an earlier step, escalate after this many repeats. The escalation quotes the first artifact this step's agent `writes` (e.g. a review), so the earlier agent sees the outstanding objections. |
+| `approve` | `true` to have a person approve the handoff after its gates pass. A refusal sends the work back to the agent. Asked in the terminal, over `run --bridge`, or by `serve`; with no one to ask (piped stdin), the handoff goes through. |
+
+**How handoffs work.** Every agent in a `steps` flow gets the `handoff` tool. Its `route_keyword` argument only accepts the routes of the agent's current step, so a model can't name a route that doesn't exist. Before the handoff goes through, fuseraft runs the edge's gates; if one fails, the agent gets a message naming what's missing and runs again.
+
+**Every flow must reach `end`.** A flow with no edge to `end` is rejected, because the run could only stop at `limits.maxTurns`. Every agent an edge points to must have its own entry under `steps`, except parallel branches.
+
+**Parallel branches**
+
+```yaml
+Lead:
+  - to: [Backend, Frontend]
+    join: Integrator
+    merge: { strategy: union }
+```
+
+`Backend` and `Frontend` run at the same time, each with its own snapshot of the history, and then `Integrator` runs.
+
+### Patterns
+
+| Pattern | Fields | Behaviour |
+|---------|--------|-----------|
+| `magentic` | `model`, `instructions`, `maxRoundCount` (20), `maxStallCount` (3), `maxResetCount` (2), `enablePlanReview` | A manager model plans, picks who works each round, and replans when progress stalls. |
+| `mapreduce` | `splitter`, `mapper`, `reducer`, `itemsJsonPath`, `maxConcurrency`, `maxSplitterRetries` | A splitter produces a JSON list of work items, a mapper runs on each in parallel, a reducer combines the results. |
+| `scattergather` | `participants`, `synthesizer`, `maxConcurrency` | Every participant gets the same task in parallel; a synthesizer combines their answers. |
+| `adversarial` | `stages` (`generator`, `critic`, `label`), `rounds` (3), `passKeyword` | Each stage pairs a generator with a critic that sees only the artifact under review. |
+
+```yaml
+flow:
+  pattern: magentic
+  model: reasoning
+  maxRoundCount: 20
+```
+
+Patterns end on their own; `limits` still applies. In `magentic`, every agent sees the conversation, because the manager's loop depends on it. See [Strategies](strategies.md) for each pattern in depth.
 
 ---
 
-## Pluggable memory provider
+## Gates
 
-The `Memory` top-level key activates a live memory provider that runs pre- and post-turn hooks around every agent turn. The provider fetches fresh context before each turn and can persist the full accumulated history after each turn.
-
-### Providers
-
-#### `local` (default)
-
-Reads from the file-backed per-agent `MemoryStore` at `~/.fuseraft/memory/agents/{Name}/` before every turn. Save is a no-op — the REPL's memory extractor handles writing new facts in interactive sessions.
+A gate is a check that must pass before a handoff goes through. Gates read files on disk and the run's recorded actions; they never call a model. Every edge uses the same `requires:` list, and an item takes one of three forms:
 
 ```yaml
-Memory:
-  Provider: local
+requires:
+  - brief # an artifact: exists and matches its Shape
+  - relatedTestsPass # a check with no argument
+  - commandSucceeded: brief.verify_command   # a check with an argument
+  - testReport: testResults                   # a check with an argument and options
+    noFailures: true
 ```
 
-#### `webhook`
+| Check | Argument | Passes when |
+|-------|----------|-------------|
+| *artifact name* | — | The artifact's file exists and, if it declares a `shape`, matches it. |
+| `fileExists` | a path | The file exists. |
+| `filesWritten` | `artifact.field` | Every path listed in that field of the artifact has been written this run. |
+| `checklistComplete` | `artifact.field` | Every file-writing step listed in that field has been written this run. |
+| `commandSucceeded` | `artifact.field`, or a pattern | A shell command matching the command in that field (or any `\|`-separated part of the pattern) ran and exited 0 this run. Option: `fallback`, a pattern used when the field is empty. |
+| `testReport` | a test report artifact | The report exists and has results. Options: `noFailures` (default `true`): no result is `FAIL`. `hasAssertions` (default `true`): every `PASS` names a command that actually ran this run. |
+| `relatedTestsPass` | — | The tests related to the files changed this run pass. Needs `advanced.testSelector`. |
+| `acceptanceCriteriaPassed` | the brief artifact | Every acceptance criterion with `expected_output_contains` was met by a successful command's output this run. |
+| `reviewJudgement` | optionally, the brief artifact | The agent's last message holds a ```` ```json {"review": [...]} ```` block with a PASS/FAIL verdict and evidence per criterion, no FAIL, and a successful shell command this turn if any verdict is PASS. |
+| `anyFileWritten` | — | The agent wrote at least one file this turn. Option: `fallback`, a command pattern that also counts. |
+| `noRepeatedShellFailures` | a pattern | The agent's recent runs of matching commands aren't failing over and over. |
+| `sessionContextWritten` | — | The agent wrote a summary with `session_context_write` this turn. |
+| `architecture` | — | The changes follow the project's declared architecture rules. |
 
-Delegates load and save to an HTTP endpoint you control. Useful for integrating external vector stores, knowledge graphs, or managed memory services.
+All gates on an edge must pass. Unknown check names, unknown options and references to undeclared artifacts are load errors.
 
-```yaml
-Memory:
-  Provider: webhook
-  Webhook:
-    LoadUrl: https://memory.example.com/load
-    SaveUrl: https://memory.example.com/save
-    Headers:
-      Authorization: "Bearer ${MEMORY_TOKEN}"
-    TimeoutSeconds: 10
-    SaveEveryNTurns: 10
-```
+**When a gate fails**, the agent gets a correction message naming what's missing, and runs again. Failures are classified (missing evidence, conflicting evidence, no progress) and escalate after a threshold; tune that with `advanced.failureHandling` ([Failure handling](#failure-handling)). With `onStuck`, the named agent is called in after two consecutive failures on that edge.
 
-**Load request** — POST `{"agent": "<name>"}`, expected response `{"block": "<text>"}`. When `block` is null or empty, nothing is prepended.
-
-**Save request** — POST `{"agent": "<name>", "history": [{"role": "...", "content": "..."}]}`. Fire-and-forget; errors are logged but do not interrupt the session.
-
-`SaveEveryNTurns` throttles save calls (default 10) to avoid flooding the endpoint on long sessions.
-
-### WebhookMemoryConfig fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `LoadUrl` | string | — | URL for the pre-turn load POST. Omit to skip loading. |
-| `SaveUrl` | string | — | URL for the post-turn save POST. Omit to skip saving. |
-| `Headers` | object | `{}` | HTTP headers merged into every request. Values support `${ENV_VAR}` expansion. |
-| `TimeoutSeconds` | int | `10` | Per-request HTTP timeout. |
-| `SaveEveryNTurns` | int | `10` | Save only every Nth turn; 1 = every turn. |
+The brief schema and the test report schema the checks expect are in [Validators](validators.md).
 
 ---
 
-## Selection strategy
+## `limits`
 
 ```yaml
-Selection:
-  Type: keyword
-  DefaultAgent: Planner
-  Routes:
-    - Keyword: "HANDOFF TO DEVELOPER"
-      Agent: Developer
-      Validator: RequireBrief
-      SourceAgents:
-        - Planner
-    - Keyword: "HANDOFF TO TESTER"
-      Agent: Tester
-      Validators:
-        - RequireWriteFile
-        - RequireShellPass
-      RequiredCommandPattern: "go build|go test"
-      SourceAgents:
-        - Developer
-    - Keyword: "HANDOFF TO REVIEWER"
-      Agent: Reviewer
-      Validator: TestReportValid
-      SourceAgents:
-        - Tester
-    - Keyword: BUGS FOUND
-      Agent: Developer
-      SourceAgents:
-        - Tester
-    - Keyword: REVISION REQUIRED
-      Agent: Developer
-      SourceAgents:
-        - Reviewer
-    - Keyword: REPLAN REQUIRED
-      Agent: Planner
-      SourceAgents:
-        - Reviewer
-    - Keyword: APPROVED
-      Agent: Reviewer
-      Validators:
-        - RequireShellPass
-        - RequireReviewJudgement
-      SourceAgents:
-        - Reviewer
+limits:
+  maxTurns: 40
+  maxTokens: 200000
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Type` | string | `"sequential"` | `sequential`, `roundrobin`, `keyword`, `llm`, `structured`, `statemachine`, `magentic`, `graph`, `adversarial`, `mapreduce`, or `scattergather`. |
-| `Routes` | array | — | Required for `keyword`. List of keyword → agent mappings. |
-| `StructuredRoutes` | array | — | Required for `structured`. List of condition → agent mappings. See [Strategies](strategies.md#structured). |
-| `DefaultAgent` | string | first agent | Fallback agent when no keyword/condition matches (`keyword` and `structured` only). |
-| `Prompt` | string | — | Custom prompt template for `llm` selection. |
-| `Model` | object | — | Required for `llm` selection. |
-| `Magentic` | object | — | Required for `magentic` selection. See [MagenticManagerConfig](#magenticmanagerconfig) below. |
-| `Graph` | object | — | Required for `graph` selection. See [Strategies — graph](strategies.md#graph) for `GraphConfig`, `GraphNodeConfig`, and `GraphEdgeConfig` field references. |
-| `MapReduce` | object | — | Required for `mapreduce` selection. See [Strategies — mapreduce](strategies.md#mapreduce) for `MapReduceConfig` field reference. |
-| `ScatterGather` | object | — | Required for `scattergather` selection. See [Strategies — scattergather](strategies.md#scattergather) for `ScatterGatherConfig` field reference. |
-
-### KeywordRoute
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Keyword` | string | — | Case-insensitive. Must appear **alone on its own line** in the response (after stripping `*`/`_` markdown). A keyword embedded in a sentence or used as a prose section header does not match. |
-| `Agent` | string | — | Agent to activate when the keyword fires. When `Agent` matches one of `SourceAgents`, the route is **terminal** — the session ends. |
-| `Validator` | string | — | Optional single validator name. Blocks the route until validation passes. Built-in: `RequireBrief`, `RequireWriteFile`, `RequireAllFilesWritten`, `RequireShellPass`, `TestReportValid`, `RequireReviewJudgement`. See [Validators](validators.md). |
-| `Validators` | array | — | Optional multiple validators (AND semantics). Use instead of `Validator` when chaining checks (e.g. `["RequireWriteFile", "RequireShellPass"]`). |
-| `SourceAgents` | array | any | Optional. When set, the route only fires if the message author is in this list. Prevents agents from triggering routes that belong to other roles. Also determines terminal behavior — see `Agent` above. |
-| `RequiredCommandPattern` | string | — | Optional. Used with `RequireShellPass`. The passing command must contain at least one pipe-separated substring (e.g. `"go build\|go test"`). |
-| `RequireHumanApproval` | bool | `false` | When `true`, the operator must explicitly approve (`y`) before the route fires. If rejected, the source agent is re-invoked with a "route blocked" message. See [Human-in-the-loop](cli-reference.md#human-in-the-loop-controls). |
-
-### MagenticManagerConfig
-
-Required when `Selection.Type` is `magentic`. Configures the manager LLM that drives the two-level planning and coordination loop.
-
-```yaml
-Selection:
-  Type: magentic
-  Magentic:
-    Model:
-      ModelId: gpt-4o
-    MaxRoundCount: 20
-    MaxStallCount: 3
-    MaxResetCount: 2
-    EnablePlanReview: false
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Model` | string or object | — | **Required.** Model for the manager LLM. A reasoning-capable model is strongly recommended. |
-| `Instructions` | string | built-in | Optional system instructions. A sensible default is used when omitted. |
-| `MaxRoundCount` | int | `20` | Hard cap on inner-loop coordination rounds before the session terminates. |
-| `MaxStallCount` | int | `3` | Consecutive rounds without forward progress before a replan is triggered. |
-| `MaxResetCount` | int | `2` | Maximum number of replanning cycles. After this limit the session terminates. |
-| `EnablePlanReview` | bool | `false` | When `true`, pauses after the initial plan and waits for HITL review before starting coordination. |
-
-**Note:** for `magentic` selection, the `Termination` section is ignored. Session end is controlled entirely by the three count fields above. See [Strategies — magentic](strategies.md#magentic) for full detail.
-
-See [Strategies](strategies.md) for full detail.
+| Field | Default | Description |
+|-------|---------|-------------|
+| `maxTurns` | `40` | The run stops after this many agent turns. |
+| `maxTokens` | — | The run stops before the next turn once total tokens (input + output) pass this. The session is saved and can be resumed. |
 
 ---
 
-## Termination strategy
+## `security`
 
 ```yaml
-Termination:
-  Type: composite
-  MaxIterations: 40
-  Strategies:
-    - Type: regex
-      Pattern: \bAPPROVED\b
-      AgentNames:
-        - Reviewer
-    - Type: maxiterations
-      MaxIterations: 40
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Type` | string | `"composite"` | `regex`, `structured`, `tokenbudget`, `maxiterations`, or `composite`. |
-| `Pattern` | string | — | Required for `regex`. Regex applied to message content. |
-| `Condition` | object | — | Required for `structured`. `StructuredCondition` block (`Field` plus one of `Is`, `IsNot`, `Contains`, `Exists`) evaluated against JSON found in the message. |
-| `MaxTokens` | int | `0` | Required for `tokenbudget`, must be > 0. Cumulative input+output token threshold across the whole session. Set lower than the top-level `MaxTotalTokens` so this ends the session gracefully before that hard cap aborts it. |
-| `MaxIterations` | int | `0` (uncapped) | Hard cap on agent turns (applies to all types as a safety net). `0` means no cap — set explicitly, since nothing else stops a session that never emits a terminating keyword. |
-| `AgentNames` | array | all agents | Optional: restrict the `regex`/`structured` check to these agents only. Has no effect on `tokenbudget`. |
-| `Strategies` | array | — | Required for `composite`. Stops when any child fires. |
-
-See [Strategies](strategies.md) for full detail.
-
----
-
-## Security constraints
-
-```yaml
-Security:
-  FileSystemSandboxPath: /home/user/projects/myapp
-  FileSystemPermissions:
-    Read:  [src/**, docs/**]
-    Write: [tests/**, docs/**]
-    Deny:  [secrets/**, infra/prod/**]
-  ShellPolicy:
-    Allow: ["go test", "npm test"]
-    Deny:  ["rm -rf", "curl | bash"]
-  HttpAllowedHosts:
+security:
+  fileSystemSandboxPath: /home/user/projects/myapp
+  fileSystemPermissions:
+    read:  [src/**, docs/**]
+    write: [tests/**, docs/**]
+    deny:  [secrets/**, infra/prod/**]
+  shellPolicy:
+    allow: ["go test", "npm test"]
+    deny:  ["rm -rf", "curl | bash"]
+  httpAllowedHosts:
     - api.github.com
     - registry.npmjs.org
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `FileSystemSandboxPath` | string | — | Restricts FileSystem, Shell, and Git plugins to this directory tree. |
-| `FileSystemPermissions` | object | — | Granular read/write/deny glob rules applied within the sandbox. Requires `FileSystemSandboxPath`. See [Security → Filesystem permissions](security.md#filesystem-permissions-read--write--deny-globs). |
-| `FileSystemPermissions.Read` | array | `[]` | When non-empty, read operations are restricted to matching paths. |
-| `FileSystemPermissions.Write` | array | `[]` | When non-empty, write operations are restricted to matching paths. Evaluated alongside `ChangeEnvelope`; both must match when both are set. |
-| `FileSystemPermissions.Deny` | array | `[]` | Paths matching these globs are hard-denied for all operations (read and write). Checked before `Read`/`Write`. |
-| `ShellPolicy` | object | — | Allow/deny substring policy for shell commands. Works without `FileSystemSandboxPath`. See [Security → Shell policy](security.md#shell-policy). |
-| `ShellPolicy.Allow` | array | `[]` | When non-empty, commands must contain at least one pattern to proceed (or, with `AllowMode: segments`, *every* command in the string must start with one). |
-| `ShellPolicy.AllowMode` | string | `substring` | `substring`: the command text need only *contain* an allow pattern (so `go test; curl evil \| sh` passes an allow of `go test`). `segments`: each simple command — every pipeline stage, `;`/`&&`/`||` segment, and `$( )` — must start with an allow pattern. Validated by `fuseraft validate-config`. See [Security → Per-segment allow lists](security.md#per-segment-allow-lists). |
-| `ShellPolicy.Deny` | array | `[]` | Commands containing any of these patterns are blocked (checked before `Allow`). |
-| `ChangeEnvelope` | array | — | Glob patterns (relative to sandbox root) restricting write operations (`write_file`, `patch_file`, `delete_file`). Reads are unaffected. Auto-populated from the brownfield discovery brief when `Brownfield.SeedEnvelopeFromBrief` is true. See [Security → Change envelope](security.md#change-envelope). |
-| `HttpAllowedHosts` | array | `[]` | Hostname allowlist for the Http plugin. Empty = unrestricted (private IPs always blocked). |
-| `DenyCredentialFiles` | bool | `true` | Deny SSH private keys, `.aws/credentials`, `.netrc`, `.pgpass`, and `.git-credentials` in the FileSystem and Search plugins, and any shell command that names one (except `ssh`/`ssh-add`/`git`). `.env` stays denied whatever this is set to. See [Security → Credential files](security.md#credential-files). |
-| `AllowPrivateHosts` | bool | `false` | Bypass the private/loopback IP check. For local dev and sandbox environments only — **do not set in production**. |
-| `ReadFileSizeLimit` | int | `20000` | Max characters returned by a single `read_file` call (~5k tokens at default). Raise for large-file workloads; lower for agents with small context windows. |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `fileSystemSandboxPath` | — | Restricts the FileSystem, Shell and Git plugins to this directory tree. |
+| `fileSystemPermissions` | — | Read/write/deny globs within the sandbox. Needs `fileSystemSandboxPath`. See [Security → Filesystem permissions](security.md#filesystem-permissions-read--write--deny-globs). |
+| `shellPolicy.Allow` | `[]` | When set, commands must contain one of these patterns (or, with `AllowMode: segments`, every command in the string must start with one). |
+| `shellPolicy.AllowMode` | `substring` | `substring` or `segments`. See [Security → Per-segment allow lists](security.md#per-segment-allow-lists). |
+| `shellPolicy.deny` | `[]` | Commands containing any of these are blocked. Checked first. |
+| `changeEnvelope` | — | Globs that writes must match. Seeded from the brownfield discovery brief when `advanced.brownfield.seedEnvelopeFromBrief` is on. See [Security → Change envelope](security.md#change-envelope). |
+| `httpAllowedHosts` | `[]` | Host allowlist for the Http plugin; supports `${ENV_VAR}`. Private IPs are always blocked. |
+| `denyCredentialFiles` | `true` | Deny SSH keys, `.aws/credentials`, `.netrc`, `.pgpass` and `.git-credentials`. `.env` is always denied. See [Security → Credential files](security.md#credential-files). |
+| `allowPrivateHosts` | `false` | Allow private/loopback hosts. Local development only. |
+| `readFileSizeLimit` | `20000` | Max characters one `read_file` call returns. |
 
 See [Security](security.md) for full detail.
 
 ---
 
-## Token budget
+## `advanced`
+
+Everything most teams never touch lives under `advanced`. Each key binds to the section documented below.
+
+| Key | Purpose |
+|-----|---------|
+| `systemPrompt`, `systemPromptPath` | Replace the base prompt. See [Base system prompt](#base-system-prompt). |
+| `compaction` | Summarize long histories. See [Conversation compaction](#conversation-compaction). |
+| `contextBudget` | Per-agent input-token budget that triggers compaction. See [Context budget](#context-budget). |
+| `warnTurnTokens` | Warn when one turn's input passes this many tokens. |
+| `failureHandling` | How gate failures escalate. See [Failure handling](#failure-handling). |
+| `verifier` | A meta-agent that audits claims against the change log. See [Verifier](#verifier). |
+| `brownfield` | Recon-phase support for existing codebases. See [Brownfield mode](#brownfield-mode). |
+| `testSelector` | Commands for finding and running related tests. See [Test selector](#test-selector). |
+| `memory` | A live memory provider around each turn. See [Pluggable memory provider](#pluggable-memory-provider). |
+| `skillCuration` | Author a reusable skill from each finished run. See [Skill curation](#skill-curation). |
+| `telemetry` | OpenTelemetry export. See [Telemetry](#telemetry). |
+| `checkpoint` | Where checkpoints are stored. See [Checkpoint](#checkpoint). |
+| `output` | Reporting defaults for scripted runs. See [Output](#output). |
+| `apiProfiles` | Named endpoints for the Http plugin. See [`apiProfiles`](#apiprofiles). |
+| `scratchpad`, `chatroom` | Storage paths for those plugins. |
+
+### Base system prompt
+
+Every agent's instructions are prefixed with a shared base prompt: by default the embedded `FUSERAFT.md`, which sets tool-use discipline, format rules and safety constraints. Replace it per team:
 
 ```yaml
-MaxTotalTokens: 200000
+advanced:
+  systemPromptPath: ./prompts/my-harness.md   # relative to the team file
 ```
-
-The run stops before the next agent turn if the cumulative token count (input + output across all turns) exceeds this value. The session is saved and can be resumed. Token counts are always exact — reported directly by the provider API.
-
----
-
-## Context budget
-
-Per-agent cumulative input-token budget enforcement. Unlike `MaxTotalTokens` (which counts combined input + output across all agents and terminates the session), `ContextBudget` counts input tokens per agent independently and responds with automatic compaction rather than termination — keeping long sessions alive indefinitely.
 
 ```yaml
-ContextBudget:
-  WarnAt: 60000                  # warn when any agent accumulates this many input tokens
-  CutoverAt: 100000              # compact when cumulative input tokens reach this value
-  MaxSingleTurnInputTokens: 200000  # compact before next turn if a single turn exceeded this
+advanced:
+  systemPrompt: |
+    You are part of a data-engineering team.
+    Always produce deterministic, idempotent SQL.
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `WarnAt` | int | `0` | Cumulative input-token threshold per agent that triggers a warning. When an agent's accumulated input tokens since the last compaction reach this value, a `⚠` warning is printed to the console and a `context_budget_warn` event is emitted. Fires at most once per agent per compaction cycle. `0` disables the warning. |
-| `CutoverAt` | int | `0` | Cumulative input-token threshold per agent that triggers automatic compaction. When reached, compaction runs before the next agent turn and the per-agent counters reset so the next window starts clean. **Requires `Compaction` to be configured.** `WarnAt`, when set, must be less than `CutoverAt`. `0` disables token-based cutover. |
-| `MaxSingleTurnInputTokens` | int | `0` | Per-turn input-token ceiling. When a completed turn's input-token count exceeds this value, compaction fires before the *next* turn begins — independently of the cumulative `CutoverAt` counter. Guards against single-turn explosions (an agent reading many large files at once) that exhaust the cumulative budget in one shot and would leave the next turn with an already-bloated history. **Requires `Compaction` to be configured.** `0` disables per-turn enforcement. |
-| `MaxToolResultTokens` | int | `0` | Maximum estimated tokens that tool-result messages may contribute to the context slice sent on any single agent invocation. When exceeded, the oldest tool results beyond `InTurnToolWindow` are replaced with one-line tombstones before the LLM call — keeping the model aware of what was done without replaying raw content. The full results remain in the shared history for compaction and audit; only the model's view is trimmed. `0` disables the tool-result window. |
-| `InTurnToolWindow` | int | `20` | Number of most-recent tool results to always retain verbatim when `MaxToolResultTokens` is exceeded. Older results beyond this count are tombstoned. Only meaningful when `MaxToolResultTokens > 0`. |
+**Precedence:** `systemPromptPath`, then `systemPrompt`, then the embedded `FUSERAFT.md`. `fuseraft validate` reports a missing `systemPromptPath` file.
 
-**Threshold alignment:** set `WarnTurnTokens` (the per-turn warning) below `CutoverAt` so the warning fires before compaction is forced. If `WarnTurnTokens >= CutoverAt`, both fire in the same turn, making the warning redundant — `fuseraft validate` emits a warning when this condition is detected.
+Each agent's final prompt is assembled in this order: base prompt; the agent's `instructions` with the generated team protocol; a manifest of the `.fuseraft/` runtime folder; the context store summary (when `.fuseraft/context/index.json` has entries, see [Context store](context-store.md)); the brownfield convention profile; and the test selector hint.
 
-**How it differs from `MaxTotalTokens`**
-
-| | `MaxTotalTokens` | `ContextBudget` |
-|---|---|---|
-| Counts | input + output, all agents combined | input tokens per agent independently |
-| Response | terminates the session | triggers compaction, session continues |
-| Resets | never | after each compaction cycle |
-
-**Counter reset and post-compaction grace:** after each compaction cycle, all per-agent cumulative-input-token counters reset to zero. The first turn after compaction is granted a grace period — `CutoverAt` and `MaxSingleTurnInputTokens` are not enforced on that turn — preventing a thrash loop where the compacted history itself is expensive enough to trigger another immediate compaction.
-
-**Validation:** `fuseraft validate` reports an error if `CutoverAt > 0` or `MaxSingleTurnInputTokens > 0` without a `Compaction` section, or if `WarnAt >= CutoverAt` when both are non-zero.
-
-**Events emitted:**
-
-| Event | When |
-|-------|------|
-| `context_budget_warn` | Agent's cumulative input tokens ≥ `WarnAt` (once per agent per cycle) |
-| `context_budget_cutover` | Cumulative tokens ≥ `CutoverAt`, or single-turn input > `MaxSingleTurnInputTokens` (payload includes `reason: "single_turn_limit"` for the latter) |
-
-**Omit** `ContextBudget` entirely to disable per-agent token tracking. Use `MaxTotalTokens` instead when you want a hard stop rather than transparent recovery.
-
----
-
-## Change tracking
+### Conversation compaction
 
 ```yaml
-ChangeTracking:
-  Path: ~/.fuseraft/state/{project_slug}/changes.json
+advanced:
+  compaction:
+    triggerTurnCount: 30
+    keepRecentTurns: 8
+    mode: lossless
 ```
 
-When present, the orchestrator attaches a `ChangeTracker` to every agent's kernel. After each agent text turn it flushes a structured JSON entry recording exactly which tool calls completed: files written or deleted, shell commands run (with pass/fail status), and git commits made.
+| Field | Default | Description |
+|-------|---------|-------------|
+| `triggerTurnCount` | `50` | Compact when the assistant-turn count reaches this. Ignored in `window` mode. Must exceed `keepRecentTurns`. |
+| `keepRecentTurns` | `10` | Turns kept verbatim after compaction. Ignored in `window` mode. |
+| `model` | first agent's model | Model for the summary (`llm` and `hybrid` modes). |
+| `mode` | `llm` | See below. |
+| `tokenBudget` | `80000` | Token budget for `window` mode. |
+| `includeReasoning` | `true` | Prepend `[REASONING EXCERPTS]` from the run's reasoning events. |
+| `includeSymbolGraph` | `true` | Prepend the symbol dependency graph for files written this run. |
+| `maxCharsPerHistoryMessage` | `8000` | Truncate any single message passed to the summarizer. `0` disables. |
+| `antiThrashMinSavingsRatio` | `0.10` | Skip compaction while recent ones saved less than this fraction. `0` disables. |
+| `antiThrashWindow` | `10` | How many recent compactions the anti-thrash guard looks at. |
+| `summaryTemplate` | built-in | Custom summary prompt; see below. |
 
-The change log is consumed in two ways:
+| Mode | Behaviour |
+|------|-----------|
+| `llm` | An LLM call summarizes the compacted turns. |
+| `lossless` | Rebuilds context from the evidence graph, gate results and the current step; no LLM call. Falls back to `llm` for pattern flows. |
+| `hybrid` | `lossless` reconstruction followed by an LLM summary. |
+| `window` | Drops the oldest message pairs until the estimate fits `tokenBudget`; no summary. |
+| `intent` | Rebuilds a deterministic per-operation log from the intent log; no LLM call. |
 
-- **Agents** — add `"Changes"` to a Tester or Reviewer agent's `Plugins` list and call `changes_read_latest` to see what the previous agent did. See [Plugins](plugins.md#changes).
-- **Validators** — set `Validation.ChangeLogPath` to the same path to enable check 8 in `TestReportValid` (cross-referencing report commands against actually-run commands) and to allow `RequireAllFilesWritten` to count files written in prior turns.
-
-**Intent log** — Alongside `changes.json`, the orchestrator also writes `~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json`. Unlike the change log (which records what happened *after* a tool call returns), the intent log records what is *about to happen* before the call executes, then updates the entry `APPLIED` or `FAILED` when it completes. On session resume, any `PENDING` entries represent operations that were in-flight at the time of interruption and can be replayed or skipped. The intent log also backs the `"intent"` compaction mode. See [Conversation compaction](#conversation-compaction).
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Path` | string | `~/.fuseraft/state/{project_slug}/changes.json` | Path to write the change log. Relative paths resolve against the current working directory. |
-| `IntentLogPath` | string | `~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json` | Path to write the intent log. This is a fixed default independent of `Path` — it is *not* derived from `Path`'s directory. Set explicitly to relocate it. |
-
-**Omit** `ChangeTracking` entirely if you don't need cross-agent observability or the command cross-reference check.
-
----
-
-## Events
-
-Emit a structured JSONL stream of session events to a file on disk:
+The default summary prompt produces four sections agents can rely on after a compaction boundary: `## Completed` (files written, commands with exit codes, commits), `## Open Questions`, `## Remaining Work` and `## Key Findings`. To override it:
 
 ```yaml
-Events:
-  Path: ~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl
+advanced:
+  compaction:
+    summaryTemplate: |
+      Summarize the following {{$turn_count}} turns for task: {{$task}}
+      Change log:
+      {{$change_log}}
+      History:
+      {{$history}}
 ```
 
-> **App log** — In addition to this configurable event stream, fuseraft-cli always writes `Warning`-level and higher diagnostic messages to `~/.fuseraft/logs/{project_slug}/app.log` via an always-on Serilog file sink (5 MB per file, 3 retained). This includes store-corruption warnings from `ChangeTracker`, `IntentLog`, `EvidenceStore`, and `FileVersionStore`, as well as structured retry and model-fallover events from the HTTP layer. No configuration needed.
->
-> **Secret masking** — All log output (console, `app.log`, and debug sidecar) passes through a secret-masking formatter that redacts API key–like values (`sk-…` keys, `Bearer …` tokens, `api_key=…` query strings) before they are written. Secrets are never visible in logs regardless of verbosity level.
+Tokens: `{{$task}}`, `{{$turn_count}}`, `{{$change_log}}` (the run's `changes.json`), `{{$history}}`. See [Sessions](sessions.md).
 
-Each line is a JSON object:
+### Context budget
 
-```json
-{ "ts": "2025-10-01T12:00:00Z", "session": "a3f92c1d", "agent": "Tester", "turn": 5, "event_type": "turn_end", "payload": { "input_tokens": 1200, "output_tokens": 340 } }
-{ "ts": "2025-10-01T12:00:02Z", "session": "a3f92c1d", "agent": "Developer", "turn": 6, "event_type": "validation_fail", "payload": { "validator": "RequireWriteFile", "consecutive": 1 } }
+Counts input tokens per agent and compacts, rather than stopping, when a budget is reached.
+
+```yaml
+advanced:
+  contextBudget:
+    warnAt: 60000
+    cutoverAt: 100000
+    maxSingleTurnInputTokens: 200000
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `warnAt` | `0` | Warn once per agent per cycle at this many cumulative input tokens. |
+| `cutoverAt` | `0` | Compact before the next turn at this many. Needs `compaction`. Must exceed `warnAt`. |
+| `maxSingleTurnInputTokens` | `0` | Compact before the next turn when one turn's input passed this. Needs `compaction`. |
+| `maxToolResultTokens` | `0` | Cap on tool-result tokens per invocation; older results become one-line tombstones. |
+| `inTurnToolWindow` | `20` | Most-recent tool results always kept when `maxToolResultTokens` applies. |
+
+Counters reset after each compaction, and the first turn after one is exempt, so the compacted history can't trigger an immediate second compaction. Set `warnTurnTokens` below `cutoverAt`. Events: `context_budget_warn`, `context_budget_cutover`.
+
+`limits.maxTokens` stops the run; `contextBudget` keeps it going by compacting.
+
+### Failure handling
+
+Classifies gate failures and decides how each kind escalates. The values shown are the defaults.
+
+```yaml
+advanced:
+  failureHandling:
+    missingEvidence:     { action: Reinstruct, threshold: 3 }
+    invalidTransition:   { action: Reinstruct, threshold: 3 }
+    conflictingEvidence: { action: Reinstruct, threshold: 2 }
+    noProgress:          { action: Abort,      threshold: 3 }
+    maxConsecutiveContractFailures: 6     # default 0 (off)
+    maxConsecutiveTurnsWithoutSignal: 8   # default 0 (off)
+```
+
+| Type | Detected when |
+|------|--------------|
+| `missingEvidence` | The failure names something not found, missing or absent. |
+| `invalidTransition` | The agent handed off without completing prerequisites. |
+| `conflictingEvidence` | The failure points to fabricated or inconsistent evidence. |
+| `noProgress` | The agent handed off again without calling any tool since the last correction. |
+
+| Action | Behaviour |
+|--------|-----------|
+| `Reinstruct` | Inject a targeted correction and run the agent again. |
+| `ActivateRecovery` | Call in the edge's `onStuck` agent immediately. |
+| `EscalateToHuman` | Stop and escalate immediately. |
+| `Abort` | Keep correcting until `threshold` consecutive failures, then escalate. |
+
+`maxConsecutiveContractFailures` caps consecutive gate failures on one edge across all types, so a `Reinstruct` policy can't loop forever on a gate that can't pass. `maxConsecutiveTurnsWithoutSignal` escalates when an agent runs that many turns without handing off.
+
+### `verifier`
+
+A meta-agent that audits what agents claim against what the change log recorded. It is a regular agent in `agents`, usually with `sees: fork` and the `Changes` tool, and isn't part of the flow.
+
+```yaml
+advanced:
+  verifier:
+    agentName: Verifier
+    everyNTurns: 5
+    triggerOnSuspiciousTransition: true
+    findingsKeyword: INCONSISTENCY
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `agentName` | — | Required. An agent declared under `agents`. |
+| `everyNTurns` | `0` | Run the verifier every N turns. `0` disables periodic runs. |
+| `triggerOnSuspiciousTransition` | `true` | Run it after a conflicting-evidence or no-progress gate failure. |
+| `findingsKeyword` | `INCONSISTENCY` | When the verifier's reply contains this, a correction goes to the next agent. |
+
+See `config/examples/orchestration.yaml` for a Verifier agent's instructions.
+
+### Brownfield mode
+
+Recon-phase support for large existing codebases: the change envelope is seeded from the Archaeologist's discovery brief, and the detected convention profile is injected into every agent's prompt.
+
+```yaml
+advanced:
+  brownfield:
+    entryPoints: [src/cmd/server/main.go]
+    discoveryBriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json
+    conventionProfilePath: ~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json
+    seedEnvelopeFromBrief: true
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `entryPoints` | `[]` | Files or directories that seed the Archaeologist's dependency walk. |
+| `discoveryBriefPath` | session `brief.brownfield.json` | Where the Archaeologist writes the discovery brief. Its `in_scope_files` are merged into `security.changeEnvelope` at startup. |
+| `conventionProfilePath` | session `conventions.json` | Where the Archaeologist writes the convention profile, which is prepended to every agent's prompt. |
+| `seedEnvelopeFromBrief` | `true` | Merge `in_scope_files` into the change envelope. Needs `security.fileSystemSandboxPath`. |
+
+The discovery brief holds `entry_points`, `in_scope_files`, `fragility_signals`, `test_coverage_gaps` and `summary`. The convention profile holds `language`, `naming_patterns`, `error_handling`, `forbidden_patterns`, `test_patterns`, `structural_notes`, `build_command` and `test_command`. A complete runnable example is `config/examples/brownfield.yaml`; see [Examples → Brownfield pipeline](examples.md#brownfield-pipeline).
+
+### Test selector
+
+The commands agents and the `relatedTestsPass` gate use to find and run the tests for a changed file.
+
+```yaml
+advanced:
+  testSelector:
+    findRelatedCommand: "go test -list . $(go list -f '{{.Dir}}' {file}) 2>/dev/null | head -40"
+    fullSuiteCommand: "go test ./..."
 ```
 
 | Field | Description |
 |-------|-------------|
-| `ts` | ISO-8601 UTC timestamp |
-| `session` | Session ID |
-| `agent` | Agent name (null for session-level events) |
-| `turn` | 1-based turn counter |
-| `event_type` | Event identifier. Session lifecycle: `session_start`, `session_end`, `session_summary`, `phase_start`, `phase_end`, `compaction`, `compaction_resume_candidate`, `session_error`. Per-turn: `turn_start`, `turn_end`, `turn_timeout`, `reasoning`, `context_assembly`. Routing: `keyword_detected`, `multi_keyword`, `no_keyword`, `keyword_not_found`, `agent_routed`, `state_advanced`, `back_edge_escalation`, `context_cap_warning`, `correction_injected`. Validation: `validation_fail`, `hitl_escalation`. Context budget: `context_budget_warn`, `context_budget_cutover`. Saga: `saga_compensating`, `saga_compensated`. Magentic: `magentic_plan`, `magentic_replan`, `magentic_complete`. Infrastructure: `tool_blocked`, `tool_call`, `circuit_breaker_open`, `http_reasoning`. Subagent: `subagent_start`, `subagent_tool_call`, `subagent_end`. |
-| `payload` | Event-specific JSON object |
+| `findRelatedCommand` | Finds tests covering `{file}`. |
+| `fullSuiteCommand` | Runs when `findRelatedCommand` finds nothing. |
 
-**`session_start` payload:** `{ task, start_node, resume }` — `task` is the raw task string passed to the session (inline `--task` value or full contents of `--task-file`); `start_node` is the initial graph node; `resume` is true when replaying prior history.
-
-**`turn_end` payload:** `{ input_tokens, output_tokens }` — accumulated across all API calls within the turn.
-
-**`validation_fail` payload:** `{ validator, consecutive }` — name of the blocking validator and how many times in a row it has fired for this agent.
-
-**`hitl_escalation` payload:** `{ message }` — the error message surfaced to the user when the session stalls: with `Selection.Type: graph`, after `Selection.Graph.MaxRetries` (default 4) consecutive failures of any kind; with `keyword`/`statemachine`, after a validator or contract failure reaches its type's `FailureHandling.<Type>.Threshold` (default 3, or 2 for `ConflictingEvidence`). See [Validators — Stuck detection](validators.md#stuck-detection).
-
-**`context_assembly` payload:** `{ knowledge_retrieved, knowledge_included, memory_loaded, memory_included, artifacts, context_chars, system_prompt_chars, assembly_ms, context_strategy, declared_sources, empty_sources }` (sequential-agent turns add `context_chars_breakdown`, `tool_count`, `tool_schema_est_tokens`). `context_strategy` is `"artifact_spec"` when the agent's `Context:` block drove assembly or `"shared_history_fallback"` when it fell back to `ContextWindow`-filtered shared history — the field to alert on if you expect every Reviewer/Tester/Critic-style agent to be running isolated and want to catch one that silently isn't. `declared_sources` lists the `Context:` sources requested (empty under the fallback strategy); `empty_sources` is the subset that resolved to no content at assembly time — e.g. a `brief_field:` naming a field the Planner never wrote — distinguishing "the spec omitted a needed source" (visible by reading the config) from "the spec named a source that was never produced" (only visible at runtime, via this field).
-
-**Omit** `Events` if you don't need the event stream.
-
----
-
-## Conversation compaction
-
-```yaml
-Compaction:
-  TriggerTurnCount: 30
-  KeepRecentTurns: 8
-  Mode: lossless
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `TriggerTurnCount` | int | `50` | Compaction fires when the assistant-turn count reaches this value. Ignored in `window` mode (token-budget trigger is used instead). Must be greater than `KeepRecentTurns`. |
-| `KeepRecentTurns` | int | `10` | Number of most-recent turns preserved verbatim after compaction. Ignored in `window` mode. |
-| `Model` | object | first agent's model | Model used for generating the summary (`llm` and `hybrid` modes only). |
-| `Mode` | string | `"llm"` | Compaction mode. See below. |
-| `TokenBudget` | int | `80000` | Estimated token budget for `window` mode. Oldest message pairs are dropped until the total estimated token count (characters ÷ 4) falls within this limit. Ignored by all other modes. |
-| `IncludeReasoning` | bool | `true` | Prepends a `[REASONING EXCERPTS]` block to the compaction summary. Each excerpt is truncated to ~500 tokens so agents resuming after compaction can see the WHY behind prior decisions. Reads `reasoning` events from the session events log (`Events.Path`). Omitted silently when `Events` is not configured or contains no reasoning events. Set to `false` to suppress. |
-| `IncludeSymbolGraph` | bool | `true` | Prepends a `[SYMBOL DEPENDENCY GRAPH]` block to the summary (before `[REASONING EXCERPTS]` when both are enabled). Lists every `SymbolDefinition` and `SymbolReference` node in the evidence graph for files written during the session. Omitted silently when no evidence store is wired or no symbol nodes are found. Requires `EvidenceStore` and `ChangeTracking` to be configured. Set to `false` to suppress. |
-| `MaxCharsPerHistoryMessage` | int | `8000` | Maximum characters to include from any single message when building the history text passed to the LLM summarizer. Messages that exceed this limit are truncated and annotated with a `[TRUNCATED]` marker; any tool calls recorded for that turn are appended as a compact one-line list so the summarizer still knows what happened. Set to `0` to disable truncation. |
-| `AntiThrashMinSavingsRatio` | float | `0.10` | Minimum savings ratio (0–1) a compaction must achieve to count as effective. If the last `AntiThrashWindow` compactions all saved less than this fraction of the conversation, `ShouldCompact` returns `false` until the history grows past the trigger again. Prevents repeated LLM calls that reduce size by less than 10%. Set to `0` to disable. |
-| `AntiThrashWindow` | int | `10` | Number of recent compaction outcomes to examine for the anti-thrash guard. The guard only suppresses compaction once this many outcomes have been recorded. Set to `0` to disable. |
-| `SummaryTemplate` | string | built-in | Custom Liquid-style template for the LLM summary prompt. Supports `{{$task}}`, `{{$turn_count}}`, `{{$change_log}}`, and `{{$history}}` substitutions. When omitted, the built-in structured template is used — see [Compaction summary template](#compaction-summary-template). |
-
-**Compaction modes**
-
-| Mode | Behavior |
-|------|----------|
-| `llm` | Default. An LLM call summarises the compacted turns. Requires a model. |
-| `lossless` | Reconstructs context entirely from the evidence graph, contract evaluations, and state machine position — no LLM call, no hallucination risk. Falls back to `llm` when no state machine strategy is active. |
-| `hybrid` | Prepends the lossless reconstruction before the LLM summary, giving agents both authoritative ground-truth and the narrative context of what happened. |
-| `window` | Sliding window: drops the oldest user+assistant pairs until the estimated token count is within `TokenBudget`. No LLM call; no summary message is injected. Trigger is token-budget based rather than turn-count based, so `TriggerTurnCount` and `KeepRecentTurns` are ignored. |
-| `intent` | Reconstructs context from the intent log (`intents.json`). Produces a deterministic `✓`/`✗` per-operation block for every tool call in the compacted range — no LLM call, no hallucination. Requires `ChangeTracking` to be configured. Falls back to `lossless` then `llm` when unavailable. |
-
-`lossless` and `hybrid` require an active `statemachine` selection strategy with an `EvidenceStore` configured. When the snapshotter is unavailable, the compactor falls back to `llm` mode automatically and logs a warning.
-
-`intent` mode requires `ChangeTracking` to be configured. It reads from the intent log which records every tracked tool call before and after execution. Unlike `lossless`, it works with any selection strategy, not just state machines.
-
-When `ChangeTracking` or `Validation.ChangeLogPath` is also configured, the `llm` and `hybrid` compactors automatically read `changes.json` and include it in the summary prompt as authoritative ground truth. See [Sessions](sessions.md) for full detail.
-
-### Compaction summary template
-
-The default summary prompt instructs the LLM to produce four sections that agents can reliably parse after a compaction boundary:
-
-| Section | Content |
-|---------|---------|
-| `## Completed` | Exact file paths written, shell commands with exit codes, git commits — ground truth derived from the change log. |
-| `## Open Questions` | Unresolved ambiguities the agent should address next. `"None."` when none exist. |
-| `## Remaining Work` | In-progress and not-yet-started items from the original task. `"None."` when the task is done. |
-| `## Key Findings` | Discoveries, constraints, and workarounds surfaced during the session. `"None."` when none exist. |
-
-This structure ensures agents always recover open threads and pending work after a compaction boundary — a common failure mode with free-form summary prompts.
-
-To override with a custom prompt:
-
-```yaml
-Compaction:
-  TriggerTurnCount: 30
-  KeepRecentTurns: 8
-  SummaryTemplate: |
-    Summarize the following {{$turn_count}} turns for task: {{$task}}
-
-    Change log:
-    {{$change_log}}
-
-    History:
-    {{$history}}
-
-    Produce: a short narrative paragraph followed by a bullet list of open items.
-```
-
-The substitution tokens are:
-
-| Token | Replaced with |
-|-------|---------------|
-| `{{$task}}` | The session task description |
-| `{{$turn_count}}` | Number of turns being compacted |
-| `{{$change_log}}` | Contents of `changes.json` (if `ChangeTracking` is configured), otherwise empty |
-| `{{$history}}` | Formatted conversation history being compacted |
-
----
-
-## Skill curation
-
-Automatically authors a reusable `SKILL.md` from each completed session. When enabled, fuseraft makes one LLM call after the session ends to evaluate whether the session produced learnable, portable knowledge, and writes a skill to the configured library path if it did.
-
-Curation is available in both `fuseraft run` sessions (configured in the orchestration YAML) and interactive REPL sessions (configured in the `skillCuration` section of `~/.fuseraft/config`).
-
-**`fuseraft run` (YAML):**
-
-```yaml
-SkillCuration:
-  Enabled: true
-  LibraryPath: ~/.fuseraft/skills    # default
-  IndexTopN: 5
-```
-
-**REPL (`~/.fuseraft/config`):**
-
-```json
-{
-  "provider": { "modelId": "claude-sonnet-4-6" },
-  "skillCuration": {
-    "Enabled": true
-  }
-}
-```
-
-The quickest way to flip this on is `fuseraft settings set skillCuration.enabled true` — see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings). Other `skillCuration` fields below aren't exposed as individual `settings set` keys yet; edit the file directly for those.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Enabled` | bool | `false` | Enable post-session skill curation. |
-| `LibraryPath` | string | `~/.fuseraft/skills` | Directory where curated skills are written. Each skill gets its own `{slug}/SKILL.md` subdirectory. |
-| `Model` | string or object | first agent's model | Model used for the curation LLM call. A faster, cheaper model is recommended (e.g. `gpt-4o-mini`). |
-| `MinTurns` | int | `5` | Minimum number of session turns required before curation runs. Short sessions are skipped. |
-| `DigestTurns` | int | `30` | Maximum number of recent turns included in the curation prompt. Limits token cost for very long sessions. |
-| `IndexPath` | string | `~/.fuseraft/skills/index.db` | Path to the SQLite FTS5 skill index. Updated automatically after each new skill is written. |
-| `IndexTopN` | int | `5` | Number of skills injected into the session context at startup (retrieved by full-text search against the task description). `0` disables injection. |
-| `LogPath` | string | `~/.fuseraft/skill-curation.jsonl` | Path to the append-only curation log. Every attempt — success or failure — is recorded here. |
-
-**How curation works**
-
-1. After the session completes, the curator reads the last `DigestTurns` turns and the session evidence.
-2. It makes one LLM call with a system prompt that instructs the model to output a `<SKILL>…</SKILL>` block in SKILL.md format, or nothing if no portable skill is warranted.
-3. If a skill block is detected, the `name:` field from the frontmatter is converted to a slug and the file is written to `{LibraryPath}/{slug}/SKILL.md`.
-4. The SQLite FTS5 skill index at `IndexPath` is updated automatically.
-5. At the start of the **next** session, fuseraft searches the index with keywords from the task description and injects the top-N matching skills as a context message.
-
-Curation is best-effort: any failure (LLM error, write failure, index error) is logged and swallowed without affecting the session result.
-
-**Curation log**
-
-Every curation attempt appends one JSON line to `~/.fuseraft/skill-curation.jsonl` (override with `LogPath`). Each line records the outcome, session ID, source (`run` or `repl`), slug, model, turn count, and any failure reason:
-
-```jsonl
-{"ts":"2026-05-24T10:00:00Z","session":"abc123","source":"repl","outcome":"created","slug":"debug-dotnet-sqlite","path":"/home/user/.fuseraft/skills/debug-dotnet-sqlite/SKILL.md","turns_digested":12,"model":"claude-sonnet-4-6"}
-{"ts":"2026-05-24T11:30:00Z","session":"def456","source":"run","outcome":"no_skill","turns_digested":6,"model":"gpt-4o-mini"}
-{"ts":"2026-05-24T12:15:00Z","session":"ghi789","source":"repl","outcome":"skipped","failure_reason":"Only 3 assistant turns (min 5)."}
-{"ts":"2026-05-24T13:00:00Z","session":"xyz012","source":"run","outcome":"failed","failure_reason":"LLM returned an empty response.","turns_digested":9,"model":"gpt-4o-mini"}
-```
-
-Possible `outcome` values:
-
-| Outcome | Meaning |
-|---------|---------|
-| `created` | A new SKILL.md was written. |
-| `updated` | An existing skill was refined in place. |
-| `skipped` | Session had fewer turns than `MinTurns` — no LLM call was made. |
-| `no_skill` | The LLM reviewed the session and determined no portable skill is warranted. |
-| `failed` | An error occurred (empty LLM response, malformed output, write failure). Check `failure_reason`. |
-
-`skill_curation_start` and `skill_curation_complete` events are also emitted to the session event log (`~/.fuseraft/logs/sessions/{project_slug}/{session_id}/events.jsonl` for `fuseraft run`, `~/.fuseraft/logs/{project_slug}/repl_events/{session_id}.jsonl` for REPL) so you can correlate curation with the rest of the session timeline. Use `--verbose` to see debug-level output including the LLM response preview.
-
-**Skill injection at session start (`fuseraft run` only)**
-
-When `IndexTopN > 0` and the index contains skills, fuseraft searches for skills relevant to the current task before the first agent turn. Matching skill bodies are injected as a system context message:
-
-```
-## Relevant Skills
-
-### my-skill
-…SKILL.md body…
-```
-
-This makes accumulated cross-session knowledge available to agents without requiring them to call any skill tools themselves. Injection is not available in REPL sessions because there is no upfront task description to query against.
-
-See [Skills](skills.md) for the full `SKILL.md` format reference and the skill index details.
-
----
-
-## Routing validators
-
-```yaml
-Validation:
-  BriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json
-  TestReportPath: .fuseraft/artifacts/test-report.json
-  TestAssertionPatterns:
-    - tester::assert
-    - "if .+ throw"
-    - \bassert\b
-    - \bexpect\b
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `BriefPath` | string | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json` | Canonical path for the project brief. Required by `RequireBrief` and `TestReportValid`. |
-| `TestReportPath` | string | `.fuseraft/artifacts/test-report.json` | Canonical path for the test report. Required by `TestReportValid`. |
-| `ChangeLogPath` | string | `~/.fuseraft/state/{project_slug}/changes.json` | Path to `changes.json` produced by `ChangeTracking` (must match `ChangeTracking.Path`). Enables check 8 in `TestReportValid` and prior-turn file detection in `RequireAllFilesWritten`. |
-| `TestAssertionPatterns` | array | see above | Regex patterns that identify real assertion calls in test files. |
-
-See [Validators](validators.md) for full detail.
-
----
-
-## Telemetry
-
-Export traces and metrics to any OpenTelemetry-compatible backend (Jaeger, Grafana Tempo, Honeycomb, Datadog, etc.):
-
-```yaml
-Telemetry:
-  OtlpEndpoint: http://localhost:4317
-  ServiceName: my-team
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `OtlpEndpoint` | string | `"http://localhost:4317"` | OTLP gRPC endpoint for both traces and metrics. |
-| `ServiceName` | string | orchestration `Name` | Service name reported in trace/metric attributes. |
-
-**Global default** — a config with no `Telemetry` section at all inherits the global default set via `fuseraft settings set telemetry.otlpEndpoint <url>` (see [CLI Reference — `fuseraft settings`](cli-reference.md#fuseraft-settings)), so every project on the machine exports to the same collector without repeating the endpoint in each `orchestration.yaml`. A project's own `Telemetry` section always takes precedence when present.
-
-**What is exported**
-
-*Traces* — one span per agent turn (`agent.turn/<AgentName>`), tagged with `agent.name`, `model.id`, `turn.index`, `tokens.input`, `tokens.output`, and `duration_seconds`. MAF internal AI spans are forwarded automatically via `Microsoft.Agents.AI*`.
-
-*Metrics*
-
-Per-turn (tagged with `agent.name` and `model.id`):
-
-| Instrument | Type | Unit | Description |
-|------------|------|------|-------------|
-| `fuseraft.agent.turns` | counter | — | Agent turns completed |
-| `fuseraft.tokens.input` | counter | — | Total input tokens consumed |
-| `fuseraft.tokens.output` | counter | — | Total output tokens produced |
-| `fuseraft.agent.duration_seconds` | histogram | s | Wall-clock seconds per turn |
-| `fuseraft.tool.calls` | counter | — | Tool calls made, additionally tagged `tool.name` and `tool.success` |
-
-Session-level (tagged `succeeded`):
-
-| Instrument | Type | Unit | Description |
-|------------|------|------|-------------|
-| `fuseraft.session.completed` | counter | — | Sessions completed |
-| `fuseraft.session.duration_seconds` | histogram | s | Wall-clock seconds per session |
-
-Reliability (forwarded from the `events.jsonl` log by a `TelemetryEventHook`; tagged `agent.name` and/or `reason` where the source event carries them):
-
-| Instrument | Type | Unit | Description |
-|------------|------|------|-------------|
-| `fuseraft.compaction.count` | counter | — | Conversation compaction cycles, tagged `reason` |
-| `fuseraft.retry.attempts` | counter | — | Agent-turn retries scheduled, tagged `agent.name` and `reason` |
-| `fuseraft.retry.exhausted` | counter | — | Times an agent's retry budget was exhausted, tagged `agent.name` and `reason` |
-| `fuseraft.circuit_breaker.opens` | counter | — | Times the provider circuit breaker tripped open |
-| `fuseraft.hitl.escalations` | counter | — | Human-in-the-loop escalations, tagged `agent.name` |
-| `fuseraft.hitl.rejections` | counter | — | Human-in-the-loop rejections, tagged `agent.name` |
-| `fuseraft.context_budget.warnings` | counter | — | Context token budget warnings, tagged `agent.name` |
-| `fuseraft.context_budget.cutovers` | counter | — | Context token budget cutovers into compaction, tagged `agent.name` |
-| `fuseraft.session.max_turns_exceeded` | counter | — | Times a session hit its max-turns/max-iterations cap |
-
-**Quick start with Jaeger**
-
-```bash
-docker run --rm -p 4317:4317 -p 16686:16686 jaegertracing/all-in-one
-```
-
-Then add `"Telemetry": { "OtlpEndpoint": "http://localhost:4317" }` to your config and open `http://localhost:16686`.
-
-**Omit** `Telemetry` entirely if you don't need OTel export — as long as you also haven't set a global default (see above); otherwise all projects export unless a project opts out. There's currently no per-project "opt out of the global default" switch.
-
----
-
-## Checkpoint
-
-Controls where session checkpoints are stored. Checkpoints enable `--resume` and protect against losing progress if a session is interrupted.
-
-```yaml
-Checkpoint:
-  Mode: json
-  Path: .fuseraft/checkpoints
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Mode` | string | `"json"` | `"json"` — write each checkpoint as an individual JSON file. `"memory"` — keep checkpoints in memory only; nothing is written to disk and `--resume` is unavailable. |
-| `Path` | string | `~/.fuseraft/sessions/` | Directory for checkpoint files (`json` mode only). Relative paths resolve against the working directory. Use a project-local path (e.g. `.fuseraft/checkpoints`) to keep checkpoints alongside the project instead of in the global user store. |
-
-**When to use a project-local path**
-
-By default, all sessions land in `~/.fuseraft/sessions/` regardless of which project they belong to. Setting `Path` to `.fuseraft/checkpoints` scopes sessions to the project directory:
-
-- `fuseraft sessions` (which always reads the global store) will no longer show these sessions unless you also set the path there — use `fuseraft run --resume` from the project directory instead
-- If you add `.fuseraft/checkpoints/` to `.gitignore`, checkpoints stay local and off version control
-
-**When to use `memory` mode**
-
-Use `"Mode": "memory"` for short-lived or automated runs where persistence is not needed (e.g. CI pipelines, integration tests). The session runs normally but leaves no files behind.
-
-**Omit** `Checkpoint` entirely to use the default (`json` mode, global `~/.fuseraft/sessions/` path).
-
----
-
-## Output
-
-Controls how `fuseraft run` reports results, for orchestrations that are always invoked non-interactively — CI, cron, event-driven scripts — rather than run by hand.
-
-```yaml
-Output:
-  Json: true
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Json` | bool | `false` | Same effect as passing `--json` on every invocation: suppresses the banner, turn panels, and spinner; sends all human-readable status to stderr; and prints one JSON summary object to stdout when the session ends. The `--json` CLI flag always takes precedence when passed, so this is purely a default for configs that are always run by scripts. |
-
-See [`fuseraft run` → `--json`](cli-reference.md#fuseraft-run) for the summary object's fields and the stdout/stderr contract, and [Scripting & Automation](scripting.md) for a worked event-driven pipeline example.
-
-**Omit** `Output` entirely for normal interactive rendering; pass `--json` per-invocation instead if only some runs of a config need it.
-
----
-
-## ApiProfiles
-
-Named API endpoint profiles that agents can reference via the `profile` parameter of any `Http` plugin function. A profile bundles a base URL, default headers, and a timeout so agents can make authenticated API calls without embedding credentials in their instructions.
-
-```yaml
-ApiProfiles:
-  snow:
-    BaseUrl: "https://mycompany.service-now.com/api/now"
-    TimeoutSeconds: 60
-    DefaultHeaders:
-      Authorization: "Bearer ${SNOW_API_TOKEN}"
-      Accept: "application/json"
-      Content-Type: "application/json"
-  github:
-    BaseUrl: "https://api.github.com"
-    TimeoutSeconds: 30
-    DefaultHeaders:
-      Authorization: "token ${GITHUB_TOKEN}"
-      Accept: "application/vnd.github+json"
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `BaseUrl` | string | `""` | Base URL prepended to relative paths passed by agents. Absolute URLs passed by agents are used as-is. |
-| `DefaultHeaders` | object | `{}` | Headers merged into every request that uses this profile. Per-call headers override these on conflicts. Values support `${ENV_VAR}` expansion (see below). |
-| `TimeoutSeconds` | int | `30` | Request timeout for this profile. Used when the agent does not supply an explicit timeout. |
-
-### `${ENV_VAR}` token expansion
-
-Both `HttpAllowedHosts` entries and `ApiProfiles` values (base URL and all header values) support `${VARIABLE_NAME}` tokens. Tokens are expanded at startup using the process environment — the resolved values are never written back to disk or shown in logs.
-
-```yaml
-Security:
-  HttpAllowedHosts:
-    - "${SNOW_HOST}"          # expanded once at startup
-
-ApiProfiles:
-  snow:
-    BaseUrl: "https://${SNOW_HOST}/api/now"
-    DefaultHeaders:
-      Authorization: "Bearer ${SNOW_API_TOKEN}"
-```
-
-Tokens that reference unset variables are replaced with an empty string (matching shell behaviour). Profile header keys are **not** expanded — only values are.
-
-### How profiles are used by agents
-
-An agent with the `Http` plugin can reference a profile by name:
-
-```
-# Agent instruction or tool call:
-http_get(url="/table/incident?state=1&limit=10", profile="snow")
-```
-
-This resolves to:
-```
-GET https://mycompany.service-now.com/api/now/table/incident?state=1&limit=10
-Authorization: Bearer <value of $SNOW_API_TOKEN>
-Accept: application/json
-```
-
-The allowlist (`HttpAllowedHosts`) is still enforced after profile resolution — a profile whose resolved host is not on the list is denied.
-
-See [Plugins → Http](plugins.md#http) for the full function reference including the `profile` parameter.
-
----
-
-## Evidence store
-
-Enables a structured, queryable evidence graph alongside `changes.json`. When configured, every `write_file`, shell command, and git commit is recorded as a typed node with richer metadata. Evidence contracts query the graph for more accurate results than scanning the flat log.
-
-```yaml
-EvidenceStore:
-  Path: ~/.fuseraft/state/{project_slug}/evidence.json
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `Path` | string | `~/.fuseraft/state/{project_slug}/evidence.json` | File path for the evidence graph JSON. The directory is created automatically. |
-
-**Node types recorded:**
-
-| NodeType | Recorded when |
-|----------|--------------|
-| `FileWrite` | Agent calls `write_file` or `patch_file` |
-| `FileDelete` | Agent calls `delete_file` |
-| `CommandRun` | Agent calls `shell_run` (exit code captured) |
-| `GitCommit` | Agent calls `git_commit` |
-| `TestResult` | Future: emitted by test report plugins |
-| `SymbolDefinition` | Agent calls `search_symbol` (auto-populated from results; one node per unique file found) |
-| `SymbolReference` | Agent calls `search_callers` (auto-populated from results; `TargetFile` resolved from existing `SymbolDefinition` nodes) |
-
-Nodes are linked by typed edges (`produced_by`, `verified_by`, `depends_on`) so contracts can express causal relationships rather than just presence checks.
-
-Omit `EvidenceStore` if you don't use evidence contracts or lossless compaction. The flat `changes.json` from `ChangeTracking` is sufficient for the built-in validators.
-
----
-
-## Evidence contracts
-
-Named, composable transition gates that check what must be true on disk before a route or state machine transition fires. Contracts replace or supplement individual validators with reusable, YAML-declared predicates.
-
-```yaml
-Contracts:
-  - Name: ImplementationComplete
-    Requires:
-      - CommandSucceeded:
-          PatternField: "verify_command"   # reads the verify command from brief.json
-
-  - Name: TestsValid
-    Requires:
-      - FileExists:
-          Path: .fuseraft/artifacts/test-report.json
-      - TestReport:
-          NoFailures: true
-          HasAssertions: true
-```
-
-Contracts are referenced by name from keyword route `Contracts` lists or from state machine transition `Contract`/`Contracts` fields.
-
-**Predicate types**
-
-| Type | Fields | Passes when |
-|------|--------|-------------|
-| `FilesWritten` | `Source`, `Field` | Every path listed in the `Field` array of the `Source` JSON file has been written to disk (current session). |
-| `ChecklistComplete` | `Source`, `Field` | Every file-write step in the `Field` array of the `Source` JSON file (heuristic: items containing `/` or a known extension) has been written to disk (current session). Use this alongside `FilesWritten` to catch paths referenced only in `execution_checklist` that were never mirrored into `files_to_change`. |
-| `CommandSucceeded` | `Pattern` or `PatternField` | At least one shell command whose text matches any pipe-separated alternative in `Pattern` (literal string) or in the value of the field named by `PatternField` inside `PatternSource` (defaults to brief.json) exited 0 this session. Use `PatternField: "verify_command"` to read the pattern from the brief, making the predicate language-agnostic. `Pattern` and `PatternField` are mutually exclusive. |
-| `FileExists` | `Path` | The file at `Path` exists on disk. |
-| `TestReport` | `NoFailures`, `HasAssertions` | `test-report.json` exists, has results, and satisfies the declared checks. |
-| `RelatedTestsPass` | _(none)_ | Resolves changed files for the session from `ChangeTracking`, discovers related test targets via `TestSelector.FindRelatedCommand`, runs them (falling back to `TestSelector.FullSuiteCommand`), and passes only when the test command exits 0. Requires `TestSelector` and `ChangeTracking` to be configured. |
-
-All predicates within a contract use AND semantics — every predicate must pass. All contracts on a route also use AND semantics.
-
-**Query source precedence:** contracts query the `EvidenceStore` graph when configured; they fall back to reading `changes.json` directly when the evidence store is absent.
-
-**Example: keyword route with contracts**
-
-```yaml
-Selection:
-  Type: keyword
-  Routes:
-    - Keyword: "HANDOFF TO TESTER"
-      Agent: Tester
-      Contracts:
-        - ImplementationComplete
-      SourceAgents:
-        - Developer
-```
-
-**Example: state machine transition with contracts**
-
-```yaml
-Selection:
-  Type: statemachine
-  StateMachine:
-    Initial: Implementation
-    States:
-      Implementation:
-        Agent: Developer
-        Transitions:
-          - To: Testing
-            Signal: "HANDOFF TO TESTER"
-            Contract: ImplementationComplete
-```
-
-See [Strategies — statemachine](strategies.md#statemachine) for the full state machine reference.
-
----
-
-## Failure handling
-
-Classifies routing validator and contract failures into typed failure modes and applies a targeted response instead of the uniform "N failures → escalate" behaviour.
-
-```yaml
-FailureHandling:
-  MissingEvidence:
-    Action: Reinstruct
-    Threshold: 3
-  InvalidTransition:
-    Action: Reinstruct
-    Threshold: 3
-  ConflictingEvidence:
-    Action: Reinstruct
-    Threshold: 2
-  NoProgress:
-    Action: Abort
-    Threshold: 3
-  # Global backstops (apply across all failure types and states):
-  MaxConsecutiveContractFailures: 6   # escalate after N contract failures on any transition
-  MaxConsecutiveTurnsWithoutSignal: 8 # escalate after N turns with no routing signal emitted
-```
-
-The per-type values shown are the defaults — omitting `FailureHandling` entirely produces identical per-type behaviour. The two global backstops default to `0` (disabled) and must be set explicitly.
-
-**Failure types**
-
-| Type | Detected when |
-|------|--------------|
-| `MissingEvidence` | Error message contains phrases like "not found", "does not exist", "missing" |
-| `InvalidTransition` | Agent emitted a handoff without completing prerequisites |
-| `ConflictingEvidence` | Error message contains phrases like "fake", "hallucin", "inconsistent", "never ran" |
-| `NoProgress` | Agent re-emitted the handoff without calling any tools since the last correction (requires `SetHistory` wired — automatic for state machine and keyword strategies) |
-
-**Actions**
-
-| Action | Behaviour |
-|--------|-----------|
-| `Reinstruct` | Inject a targeted correction message and re-invoke the source agent. The message is tailored to the failure type: missing artifact, invalid transition, or conflicting evidence. |
-| `ActivateRecovery` | Immediately activate the route's `RecoveryAgent` (if configured) without waiting for the threshold. |
-| `EscalateToHuman` | Immediately throw `ValidatorStuckException` regardless of `Threshold`. |
-| `Abort` | Continue injecting corrections until `Threshold` consecutive failures are reached, then escalate to HITL. |
-
-**Threshold** controls how many consecutive failures of that type trigger escalation (for `Abort`). `EscalateToHuman` and `ActivateRecovery` ignore the threshold and fire immediately.
-
-**Global backstops** plug two gaps that per-type thresholds cannot close:
-
-- `MaxConsecutiveContractFailures` — a hard cap across all failure types on a single transition. When any transition accumulates this many consecutive contract failures — regardless of the per-type `Action` — the orchestrator escalates to HITL. This prevents a `Reinstruct` policy from looping indefinitely when a contract cannot be satisfied: the Reinstruct action has no built-in exit condition, so without this cap a broken contract traps the session until `MaxIterations` kills it.
-
-- `MaxConsecutiveTurnsWithoutSignal` — escalates when a state machine agent runs this many consecutive turns without emitting any routing signal. This is the *silent stuck* case: the agent completed its work but never called `handoff()`. Unlike the loop-warning injection (which scans live history and resets after compaction), this counter lives in strategy state and accumulates correctly across compaction boundaries. It resets when the agent emits any valid signal or when a transition succeeds. `0` (default) disables this guard.
-
----
-
-## Verifier
-
-Configures a self-verification meta-agent that periodically audits the evidence graph for inconsistencies and challenges unverified claims. The verifier is a regular agent in your `Agents` list with a special role: it reads evidence and reports findings rather than doing primary work.
-
-```yaml
-Verifier:
-  AgentName: Verifier
-  EveryNTurns: 5
-  TriggerOnSuspiciousTransition: true
-  FindingsKeyword: INCONSISTENCY
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `AgentName` | string | — | **Required.** Must match an agent name in `Agents` exactly. |
-| `EveryNTurns` | int | `0` | Run the verifier every N agent turns. `0` disables periodic verification. |
-| `TriggerOnSuspiciousTransition` | bool | `true` | When using `statemachine` routing, automatically invoke the verifier on the next turn after a `ConflictingEvidence` or `NoProgress` contract failure. |
-| `FindingsKeyword` | string | `"INCONSISTENCY"` | If this word appears (case-insensitive) in the verifier's output, a correction message is injected into history for the next agent. |
-
-**How it works**
-
-- **Periodic:** after every N-th primary agent turn, the verifier agent runs for one turn. Its output is added to history and visible to subsequent agents.
-- **Suspicious transition:** when the state machine detects `ConflictingEvidence` or `NoProgress`, it schedules a verifier turn before re-invoking the primary agent. The verifier audits the evidence and its findings are in history when the primary agent retries.
-- **Findings injection:** when the verifier's response contains `FindingsKeyword`, a `VERIFICATION FINDING` message is appended to history attributing the finding to the verifier. The next primary agent sees this and must reconcile before continuing.
-
-**Verifier agent instructions (example)**
-
-```yaml
-- Name: Verifier
-  Instructions: |
-    You are an evidence auditor. Your job is to detect inconsistencies between
-    what agents claim and what is recorded in the evidence graph.
-
-    Steps:
-    1. Call changes_read_latest to read what was actually done.
-    2. Compare recorded file writes, commands, and exit codes against any claims
-       made in the conversation.
-    3. If everything is consistent, write "Evidence verified — no inconsistencies found."
-    4. If you find a discrepancy, write "INCONSISTENCY DETECTED:" followed by a concise
-       description of what was claimed vs. what the evidence shows.
-  Model:
-    ModelId: gpt-4o-mini
-  Plugins:
-    - Changes
-```
-
-Omit `Verifier` entirely to disable self-verification. The verifier adds LLM calls (one per periodic trigger or suspicious transition), so tune `EveryNTurns` to balance audit frequency against cost.
-
----
-
-## Brownfield mode
-
-Enables structured recon-phase support for large existing codebases. When configured, fuseraft-cli seeds the change envelope from the Archaeologist agent's discovery brief and injects a detected convention profile into every agent's system prompt — both at session startup, before any agents run.
-
-```yaml
-Brownfield:
-  EntryPoints:
-    - src/cmd/server/main.go
-    - src/internal/billing/charge.go
-  DiscoveryBriefPath: ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json
-  ConventionProfilePath: ~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json
-  SeedEnvelopeFromBrief: true
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `EntryPoints` | array | `[]` | Files or directories that seed the Archaeologist agent's dependency walk. Referenced in agent instructions; not automatically injected into prompts. Relative paths resolve against the sandbox root. |
-| `DiscoveryBriefPath` | string | `~/.fuseraft/sessions/{project_slug}/{session_id}/brief.brownfield.json` | Path where the Archaeologist writes the discovery brief JSON. When `SeedEnvelopeFromBrief` is true and this file exists at startup, its `in_scope_files` list is merged into `Security.ChangeEnvelope`. |
-| `ConventionProfilePath` | string | `~/.fuseraft/sessions/{project_slug}/{session_id}/conventions.json` | Path where the Archaeologist writes the convention profile JSON. When this file exists at session startup, its contents are formatted and prepended to every agent's system prompt. |
-| `SeedEnvelopeFromBrief` | bool | `true` | When true and `DiscoveryBriefPath` exists, the `in_scope_files` list from the discovery brief is merged into `Security.ChangeEnvelope` at startup. Requires `Security.FileSystemSandboxPath` to be set for enforcement to take effect. |
-
-### Brownfield discovery brief
-
-The Archaeologist agent writes a JSON file to `DiscoveryBriefPath` at the end of the recon phase:
-
-```json
-{
-  "entry_points": ["src/cmd/server/main.go"],
-  "in_scope_files": ["src/internal/billing/charge.go", "src/internal/billing/charge_test.go"],
-  "fragility_signals": [
-    { "file": "src/internal/billing/charge.go", "reason": "12 TODO markers, high churn" }
-  ],
-  "test_coverage_gaps": ["src/internal/billing/retry.go"],
-  "summary": "Billing module depends on the payment gateway client. No retries currently wired."
-}
-```
-
-On the next session start (and on all subsequent runs), `in_scope_files` is automatically merged into `Security.ChangeEnvelope` so the Developer cannot write files outside the declared scope.
-
-### Convention profile
-
-The Archaeologist writes a JSON file to `ConventionProfilePath`:
-
-```json
-{
-  "language": "go",
-  "naming_patterns": ["test files match *_test.go", "exported functions are PascalCase"],
-  "error_handling": ["wrap errors with fmt.Errorf(\"%w\", err)", "never swallow errors silently"],
-  "forbidden_patterns": ["no panic() outside main", "no global mutable state"],
-  "test_patterns": ["table-driven tests with testify/require", "sub-tests via t.Run"],
-  "structural_notes": ["each package has a README.md", "internal/ packages are not public API"],
-  "build_command": "go build ./...",
-  "test_command": "go test ./..."
-}
-```
-
-When this file exists at session startup, the orchestrator formats its contents into a `PROJECT CONVENTIONS` block and appends it to every agent's system prompt. Agents then follow naming rules, error-handling idioms, and forbidden patterns without re-deriving them each session.
-
-### Typical brownfield workflow
-
-1. **First run** — the recon state runs the Archaeologist agent. It surveys the codebase from `EntryPoints`, writes `brief.brownfield.json` and `conventions.json`, then signals `RECON COMPLETE`.
-2. **Subsequent runs** — on startup, the orchestrator seeds `Security.ChangeEnvelope` from `in_scope_files` and injects the convention profile into all agent prompts. The recon state skips immediately (the Archaeologist checks that both files exist and calls `RECON COMPLETE` without re-doing the survey).
-3. **Write attempts outside the envelope** — blocked by `SandboxEnforcementFilter` with a `[DENIED]` tool result. The Developer must call `REPLAN REQUIRED` to request scope expansion.
-
-A complete runnable example is in `config/examples/brownfield.yaml`. See [Examples → Brownfield pipeline](examples.md#brownfield-pipeline).
-
----
-
-## Test selector
-
-Exposes the shell command template used by agents to discover the minimal test set for a changed file. Providing this in config — rather than hardcoding it in agent instructions — makes it easy to swap language-specific test runners across projects.
-
-```yaml
-TestSelector:
-  FindRelatedCommand: "go test -list . $(go list -f '{{.Dir}}' {file}) 2>/dev/null | head -40"
-  FullSuiteCommand: "go test ./..."
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `FindRelatedCommand` | string | `""` | Shell command template to discover tests covering a specific changed file. `{file}` is replaced with the file path at runtime. The agent runs this command for each changed file and uses the output to select a targeted test run. |
-| `FullSuiteCommand` | string | — | Fallback command run when `FindRelatedCommand` returns no results. When null, the agent falls back to the convention profile's `test_command`. |
-
-**Language examples**
-
-| Language | `FindRelatedCommand` |
+| Language | `findRelatedCommand` |
 |----------|---------------------|
 | Go | `go test -list . $(go list -f '{{.Dir}}' {file}) 2>/dev/null \| head -40` |
 | Python (pytest) | `pytest --collect-only -q {file} 2>/dev/null \| grep '::' \| head -40` |
 | TypeScript (jest) | `jest --listTests --testPathPattern=$(dirname {file}) 2>/dev/null` |
 | Rust | `cargo test --list 2>/dev/null \| grep $(basename {file} .rs) \| head -20` |
 
-The `TestSelector` block is used in two ways:
+### Pluggable memory provider
 
-- **Agent instructions** — referenced by Tester and Developer agents so they know which command to run.
-- **`RelatedTestsPass` contract predicate** — `TestSelector.FindRelatedCommand` and `FullSuiteCommand` are read automatically by the `RelatedTestsPass` predicate to discover and run targeted tests at handoff time. This is the recommended way to enforce incremental test coverage on brownfield projects without running the full suite on every turn.
+Runs load and save hooks around every agent turn.
 
-For simple "did any test pass" checks without test selection, use `RequireShellPass` with `RequiredCommandPattern` pointing at your test runner.
+```yaml
+advanced:
+  memory:
+    provider: webhook
+    webhook:
+      loadUrl: https://memory.example.com/load
+      saveUrl: https://memory.example.com/save
+      headers:
+        Authorization: "Bearer ${MEMORY_TOKEN}"
+      timeoutSeconds: 10
+      saveEveryNTurns: 10
+```
+
+`local` (the default) reads each agent's file-backed memory at `~/.fuseraft/memory/agents/{Name}/`. `webhook` POSTs `{"agent": "<name>"}` to `LoadUrl` and expects `{"block": "<text>"}`; it POSTs `{"agent", "history"}` to `SaveUrl` every `SaveEveryNTurns` turns, fire-and-forget.
+
+Agent memories are stored as Markdown files with YAML frontmatter, ranked by relevance and injected before each turn without any config. See [Context Management — Layer 2](context-management.md#layer-2-persistent-memory-pipeline-injected).
+
+### Skill curation
+
+After a run finishes, one LLM call decides whether it produced portable knowledge and, if so, writes a `SKILL.md` to the library. At the start of later runs, the most relevant skills are injected by full-text search on the task.
+
+```yaml
+advanced:
+  skillCuration:
+    enabled: true
+    libraryPath: ~/.fuseraft/skills
+    indexTopN: 5
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `false` | Turn curation on. |
+| `libraryPath` | `~/.fuseraft/skills` | Where skills are written, one `{slug}/SKILL.md` each. |
+| `model` | first agent's model | Model for the curation call; a cheaper one works well. |
+| `minTurns` | `5` | Skip runs shorter than this. |
+| `digestTurns` | `30` | Recent turns included in the curation prompt. |
+| `indexPath` | `~/.fuseraft/skills/index.db` | SQLite FTS5 index, updated after each new skill. |
+| `indexTopN` | `5` | Skills injected at the start of a run. `0` disables injection. |
+| `logPath` | `~/.fuseraft/skill-curation.jsonl` | Append-only log of every attempt and its outcome (`created`, `updated`, `skipped`, `no_skill`, `failed`). |
+
+For the REPL, use `fuseraft settings set skillCuration.enabled true`. See [Skills](skills.md).
+
+### `telemetry`
+
+Exports traces and metrics to any OpenTelemetry backend.
+
+```yaml
+advanced:
+  telemetry:
+    otlpEndpoint: http://localhost:4317
+    serviceName: my-team
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `otlpEndpoint` | `http://localhost:4317` | OTLP gRPC endpoint for traces and metrics. |
+| `serviceName` | the `team` name | Service name on traces and metrics. |
+
+A team with no `telemetry` inherits the global default set with `fuseraft settings set telemetry.otlpEndpoint <url>`.
+
+*Traces:* one span per agent turn (`agent.turn/<AgentName>`) tagged with agent, model, turn index, tokens and duration; Agent Framework's own spans are forwarded too.
+
+*Metrics:* `fuseraft.agent.turns`, `fuseraft.tokens.input`, `fuseraft.tokens.output`, `fuseraft.agent.duration_seconds`, `fuseraft.tool.calls`; per run `fuseraft.session.completed` and `fuseraft.session.duration_seconds`; and reliability counters `fuseraft.compaction.count`, `fuseraft.retry.attempts`, `fuseraft.retry.exhausted`, `fuseraft.circuit_breaker.opens`, `fuseraft.hitl.escalations`, `fuseraft.hitl.rejections`, `fuseraft.context_budget.warnings`, `fuseraft.context_budget.cutovers` and `fuseraft.session.max_turns_exceeded`.
+
+Quick start: `docker run --rm -p 4317:4317 -p 16686:16686 jaegertracing/all-in-one`, then open `http://localhost:16686`.
+
+### `checkpoint`
+
+Checkpoints are saved as JSON under `~/.fuseraft/sessions/` by default, which is what `--resume` reads.
+
+```yaml
+advanced:
+  checkpoint:
+    mode: json
+    path: .fuseraft/checkpoints
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `mode` | `json` | `json` writes checkpoint files; `memory` keeps them in memory only, so `--resume` isn't available (useful in CI). |
+| `path` | `~/.fuseraft/sessions/` | Directory for checkpoint files. A project-local path keeps them out of `fuseraft sessions`, which reads the global store. |
+
+### `output`
+
+```yaml
+advanced:
+  output:
+    json: true
+```
+
+`json: true` has the same effect as passing `--json` on every run: no banner or panels, status on stderr, and one JSON summary object on stdout. The `--json` flag always wins. See [Scripting & Automation](scripting.md).
+
+### `apiProfiles`
+
+Named endpoints the `Http` plugin's `profile` parameter refers to, so agents can call authenticated APIs without credentials in their instructions.
+
+```yaml
+advanced:
+  apiProfiles:
+    github:
+      baseUrl: "https://api.github.com"
+      timeoutSeconds: 30
+      defaultHeaders:
+        Authorization: "token ${GITHUB_TOKEN}"
+        Accept: "application/vnd.github+json"
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `baseUrl` | `""` | Prepended to relative paths. |
+| `defaultHeaders` | `{}` | Merged into every request; per-call headers win. Values support `${ENV_VAR}`. |
+| `timeoutSeconds` | `30` | Request timeout. |
+
+`${ENV_VAR}` tokens in `httpAllowedHosts` and profile values are expanded at startup and never written back to disk or logs; unset variables become empty strings. `httpAllowedHosts` is still enforced after a profile resolves. An agent calls `http_get(url="/repos/o/r", profile="github")`. See [Plugins → Http](plugins.md#http).
 
 ---
 
-## Minimal config
+## What every run records
 
-The smallest valid config that does something useful:
+These are always on and have fixed locations; there is nothing to configure.
 
-```yaml
-Orchestration:
-  Name: SingleAgent
-  Agents:
-    - Name: Assistant
-      Instructions: You are a helpful assistant with filesystem access.
-      Model:
-        ModelId: gpt-4o
-      Plugins:
-        - FileSystem
-  Selection:
-    Type: sequential
-  Termination:
-    Type: maxiterations
-    MaxIterations: 5
+| Record | Location | Used by |
+|--------|----------|---------|
+| Change log | `~/.fuseraft/state/{project_slug}/changes.json` | Gates, the `Changes` plugin, compaction summaries. Every file write, shell command and git commit, per turn. |
+| Intent log | `~/.fuseraft/sessions/{project_slug}/{session_id}/intents.json` | Resume and `intent` compaction. Each tracked operation before it runs, then `APPLIED` or `FAILED`. |
+| Evidence graph | `~/.fuseraft/state/{project_slug}/evidence.json` | Gates and `lossless` compaction. Typed nodes (`FileWrite`, `FileDelete`, `CommandRun`, `GitCommit`, `SymbolDefinition`, `SymbolReference`) linked by `produced_by`, `verified_by` and `depends_on` edges. |
+| Event stream | `~/.fuseraft/sessions/{project_slug}/{session_id}/events.jsonl` | Diagnostics, telemetry, `fuseraft sessions`. One JSON object per line. |
+| App log | `~/.fuseraft/logs/{project_slug}/app.log` | Warnings and errors, with secrets masked. |
+
+Each event line looks like:
+
+```json
+{ "ts": "2026-10-01T12:00:00Z", "session": "a3f92c1d", "agent": "Tester", "turn": 5, "event_type": "turn_end", "payload": { "input_tokens": 1200, "output_tokens": 340 } }
 ```
 
-JSON is also supported (same schema, `Orchestration:` becomes `"Orchestration": {}`). See the intro at the top of this page.
+Event types include: `session_start`, `session_end`, `session_summary`, `compaction`, `session_error`; `turn_start`, `turn_end`, `reasoning`, `context_assembly`; `selection_evaluated`, `back_edge_escalation`, `correction_injected`; `validation_fail`, `hitl_escalation`; `context_budget_warn`, `context_budget_cutover`; `magentic_plan`, `magentic_replan`, `magentic_complete`; `tool_blocked`, `tool_call`, `circuit_breaker_open`; and `subagent_start`, `subagent_tool_call`, `subagent_end`.
+
+`context_assembly` reports how each agent's context was built: `context_strategy` is `artifact_spec` for `handoff` agents and `shared_history_fallback` for agents that see the conversation, and `empty_sources` lists declared sources that resolved to nothing, such as an artifact nobody wrote.

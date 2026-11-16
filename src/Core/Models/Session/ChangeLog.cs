@@ -60,7 +60,7 @@ public record CommandRecord
     /// <summary>
     /// Combined stdout/stderr returned by the shell plugin, capped at 4 096 characters.
     /// Null for entries written before output capture was introduced.
-    /// Used by <c>HandoffToReviewerValidator</c> to verify test-report results are grounded
+    /// Used by the <c>testReport</c> gate to verify test-report results are grounded
     /// in real command output rather than cross-referencing fragile command strings.
     /// </summary>
     public string? Output { get; init; }

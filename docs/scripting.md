@@ -45,7 +45,7 @@ These are the `fuseraft run` flags relevant to scripted invocations. Full flag r
 Enable JSON mode two ways:
 
 - **Per invocation:** pass `--json` on the command line.
-- **Per config:** set `Output.Json: true` in the orchestration config, so every run of that config behaves this way without needing the flag. See [Configuration → Output](configuration.md#output). The `--json` flag always takes precedence if both are used.
+- **Per config:** set `advanced.output.json: true` in the team file, so every run of that config behaves this way without needing the flag. See [Configuration → Output](configuration.md#output). The `--json` flag always takes precedence if both are used.
 
 **Stream contract:** when JSON mode is active, stdout carries *only* the final JSON summary — no banner, no turn panels, no spinner, no per-agent status. Every human-readable line, including startup diagnostics, goes to stderr. This makes stdout safe to pipe straight into `jq` or `json.loads()` without stripping anything first.
 
@@ -56,7 +56,7 @@ Enable JSON mode two ways:
 A run can fail before a session ever starts — a bad `--work-dir`, a missing `--spec` file, an unresolvable `--resume` ID, or the config file itself failing to load. fuseraft's contract for these:
 
 - **`--json` flag set:** jsonMode is known from the very first line of the command, before anything else runs. Every one of these early failures still emits exactly one JSON summary line to stdout (`succeeded: false`, `error_message` set, other fields zeroed) and all diagnostic text goes to stderr — the same guarantee as a normal completed run.
-- **Only `Output.Json: true` in the config (no `--json` flag):** JSON mode can't be confirmed until the config has finished loading — the setting itself lives in the config. If the failure happens *before* that point, fuseraft cannot know whether to emit JSON, so it doesn't: **stdout is left completely empty** (never wrong, never mixed with plain text) and the failure is reported via exit code plus a stderr message only. If the config loads successfully and something fails afterward, JSON mode is fully known and behaves exactly like the `--json` flag case above.
+- **Only `output.json: true` in the config (no `--json` flag):** JSON mode can't be confirmed until the config has finished loading — the setting itself lives in the config. If the failure happens *before* that point, fuseraft cannot know whether to emit JSON, so it doesn't: **stdout is left completely empty** (never wrong, never mixed with plain text) and the failure is reported via exit code plus a stderr message only. If the config loads successfully and something fails afterward, JSON mode is fully known and behaves exactly like the `--json` flag case above.
 
 Either way, **stdout never contains anything other than a well-formed JSON summary or nothing at all.** A script's parsing logic should be: try `json.loads(stdout)`; if that fails (empty or non-JSON), treat it as a failure and fall back to the exit code plus whatever was captured on stderr.
 
@@ -75,7 +75,7 @@ $ echo $?
 1
 ```
 
-If you control the invocation (which you almost always do, since you're the one writing the wrapper script), pass `--json` explicitly rather than relying on `Output.Json` alone — it closes this last gap and gives you a JSON line for every outcome, not just successful ones.
+If you control the invocation (which you almost always do, since you're the one writing the wrapper script), pass `--json` explicitly rather than relying on `output.json` alone — it closes this last gap and gives you a JSON line for every outcome, not just successful ones.
 
 ---
 
@@ -132,49 +132,58 @@ This is also the natural target for a message-queue consumer (RabbitMQ, SQS, etc
 
 `config/examples/etl-pipeline.yaml` and `scripts/run-pipeline.sh` / `scripts/run_pipeline.py` are a complete, runnable version of this pattern — copy them as a starting point.
 
-### The orchestration config
+### The team file
 
-Two agents, run at most once each — a linear pipeline, not an open-ended chat:
+Two agents, each running once — a linear pipeline, not an open-ended chat:
 
 ```yaml
-Orchestration:
-  Name: EtlPipeline
+team: EtlPipeline
 
-  Output:
-    Json: true          # every invocation behaves as if --json was passed
+artifacts:
+  testResults:                          # feeds --ci
+    path: .fuseraft/artifacts/test-report.json
+    shape:
+      results:
+        - criterion: string
+          status: PASS|FAIL
 
-  Selection:
-    Type: sequential     # Extractor, then Transformer, in that fixed order
+agents:
+  Extractor:     # reads + validates input, never writes
+    instructions: ...                  # see config/examples/etl-pipeline.yaml
+  Transformer:   # normalizes, writes output, files the test report
+    writes: [testResults]
+    instructions: ...
 
-  Termination:
-    Type: composite
-    Strategies:
-      - Type: regex
-        Pattern: "PIPELINE_COMPLETE"   # Transformer's completion signal
-      - Type: maxiterations
-        MaxIterations: 4               # hard stop if something loops
+flow:
+  start: Extractor
+  steps:
+    Extractor:
+      - to: Transformer
+    Transformer:
+      - to: end
+        requires: [testResults]
 
-  Validation:
-    TestReportPath: .fuseraft/artifacts/test-report.json   # feeds --ci
+limits:
+  maxTurns: 4                          # hard stop if something loops
 
-  Security:
-    FileSystemSandboxPath: .
-    ChangeEnvelope:
-      - "output/**"                     # Transformer may only write here
-      - ".fuseraft/artifacts/**"
+security:
+  fileSystemSandboxPath: .
+  changeEnvelope:
+    - "output/**"                      # Transformer may only write here
+    - ".fuseraft/artifacts/**"
 
-  Agents:
-    - Name: Extractor       # reads + validates input, never writes
-    - Name: Transformer      # normalizes, writes output, files the test report
+advanced:
+  output:
+    json: true                         # every invocation behaves as if --json was passed
 ```
 
 Points worth calling out:
 
-- **`Output.Json: true`** means this config *always* reports structured results — nobody has to remember to pass `--json` when invoking it, which matters once several scripts/services call the same config.
-- **`Selection.Type: sequential`** with two agents means: Extractor runs turn 1, Transformer runs turn 2, done. There's no keyword routing to configure — sequential just advances through the agent list in order.
-- **`Termination`** combines the Transformer's own completion signal (`PIPELINE_COMPLETE`) with a hard `MaxIterations` cap, so a malfunctioning agent can't loop forever in an unattended process.
-- **`Security.ChangeEnvelope`** restricts writes to `output/**` and the artifacts directory — since this runs unattended in response to external events, it shouldn't be able to touch anything else in the sandboxed work dir even if an agent misbehaves. See [Security](security.md).
-- **`Validation.TestReportPath`** is what makes `--ci` meaningful here: the Transformer is instructed to write a PASS/FAIL acceptance-criteria report before signalling completion, and `--ci` reads it after the session ends.
+- **`advanced.output.json: true`** means this team *always* reports structured results — nobody has to remember to pass `--json` when invoking it, which matters once several scripts or services call the same file.
+- **The flow** runs the Extractor, then the Transformer, then ends. The run can only end once the test report exists and matches its shape, so an unattended run never "finishes" without one.
+- **`limits.maxTurns`** is a hard cap, so a malfunctioning agent can't loop forever in an unattended process.
+- **`security.changeEnvelope`** restricts writes to `output/**` and the artifacts directory — since this runs unattended in response to external events, it shouldn't be able to touch anything else in the sandboxed work dir even if an agent misbehaves. See [Security](security.md).
+- **The `testResults` artifact** is what makes `--ci` meaningful: `--ci` reads it after the run and exits non-zero on any FAIL.
 
 See the full file for the complete agent instructions. Full config schema: [Configuration](configuration.md).
 
@@ -226,5 +235,5 @@ cat output/normalized.json
 - [CLI Reference → `fuseraft run`](cli-reference.md#fuseraft-run) — full flag list and the `--json` summary field reference
 - [CLI Reference → `fuseraft schedule`](cli-reference.md#fuseraft-schedule) — cron-driven sessions
 - [CLI Reference → `fuseraft validate`](cli-reference.md#fuseraft-validate) — pre-flight config and API-key checks
-- [Configuration → Output](configuration.md#output) — the `Output.Json` config field
+- [Configuration → Output](configuration.md#output) — the `output.json` config field
 - [Examples](examples.md) — more ready-to-use orchestration configs

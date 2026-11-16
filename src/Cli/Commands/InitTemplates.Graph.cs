@@ -4,25 +4,33 @@ namespace fuseraft.Cli.Commands;
 
 public static partial class InitTemplates
 {
-    /// <summary>
-    /// Generates the <c>pipeline</c> template (replaces <c>graph</c>): Planner → Developer → Tester
-    /// → Reviewer expressed as a declarative directed graph. Back-edges return control to earlier nodes
-    /// without restarting the full pipeline. Developer and Tester have investigation tooling for
-    /// structured failure tracking. Use <c>swe</c> for production work with evidence contracts.
-    /// </summary>
-    private static GeneratedConfig Pipeline(string model, string? endpoint)
-    {
-        var planner = $"""
-            Name: Planner
-            Description: Analyses the task and writes a structured brief.
-            Instructions: |
+    private static GeneratedConfig Pipeline(string model, string? endpoint) => GeneratedConfig.Inline($$"""
+        team: Pipeline
+        description: "Planner → Developer → Tester → Reviewer. Developer and Tester have investigation tooling for structured failure tracking. For stricter evidence gates and full safeguards, use the swe template."
+
+        models:
+          default:
+            modelId: {{model}}{{Ep(endpoint, "    ")}}
+
+        artifacts:
+          brief:
+            path: "~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json"
+          testResults:
+            path: .fuseraft/artifacts/test-report.json
+
+        agents:
+          Planner:
+            role: Analyses the task and writes a structured brief.
+            model: default
+            tools: [FileSystem, Search, SessionContext, Subagent, Brief]
+            instructions: |
               You are a software architect. Your job is to:
-              1. {ContextReadStep}
+              1. {{ContextReadStep}}
               2. Read and understand the task thoroughly.
               3. Use subagent_explore for broad codebase questions without filling your context
-                 with raw file contents. For any direct file reads: {LargeFileProtocol}
-              4. Check if {FuseraftPaths.LocalBrief} already exists. If it does, read it — if it
-                 still covers the current task, call handoff(route_keyword: "HANDOFF TO DEVELOPER")
+                 with raw file contents. For any direct file reads: {{LargeFileProtocol}}
+              4. Check if ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json already exists. If it does, read it — if it
+                 still covers the current task, call handoff(route_keyword: "Developer")
                  immediately without rewriting it.
               5. Call write_file_brief(content: ..., format: "json"). content must be a JSON
                  object with exactly these top-level fields:
@@ -31,34 +39,24 @@ public static partial class InitTemplates
                      Correct:  src/module/file.py
                      Wrong:    project_name/src/module/file.py  (never prefix with the project dir)
                    acceptance_criteria — array of testable criteria the code must satisfy
-              6. {ContextWriteStep}
-              When done, call handoff(route_keyword: "HANDOFF TO DEVELOPER").
+              6. {{ContextWriteStep}}
+              When done, call handoff(route_keyword: "Developer").
 
               You are read-only with respect to this project's own files — you have no
               write_file/patch_file access. write_file_brief is the only way to persist this
               brief; implementing the task itself is the Developer's job, not yours.
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Search
-              - SessionContext
-              - Subagent
-              - Brief
-              - Handoff
-            Capabilities:
-              FileSystem: [read]
-            FunctionChoice: required
-            {AgentFileOptions}
-            """;
-
-        var developer = $"""
-            Name: Developer
-            Description: Implements the changes described in the brief.
-            Instructions: |
+            advanced:
+              functionChoice: required
+              capabilities:
+                FileSystem: [read]
+          Developer:
+            role: Implements the changes described in the brief.
+            model: default
+            tools: [FileSystem, Shell, Git, Changes, Investigation, SessionContext]
+            instructions: |
               You are a senior software engineer. Your job is to:
-              1. {ContextReadStep}
-              2. Read {FuseraftPaths.LocalBrief} — implement every file in files_to_change.
+              1. {{ContextReadStep}}
+              2. Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json — implement every file in files_to_change.
                  Use patch_file for targeted edits to existing files; use write_file only for
                  new files. All paths are relative to the sandbox root.
                  The Execution State and Investigation Log in your context show what has already
@@ -71,250 +69,122 @@ public static partial class InitTemplates
                  c. If it passes: call investigation_confirm_hypothesis(id, evidence).
                  You MUST NOT call handoff with any open hypotheses.
               4. Commit with git_add and git_commit.
-              5. {ContextWriteStep}
-              When done, call handoff(route_keyword: "HANDOFF TO TESTER").
-              If the brief is unclear or needs rethinking, call handoff(route_keyword: "REPLAN REQUIRED").
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Shell
-              - Git
-              - Changes
-              - Investigation
-              - SessionContext
-              - Handoff
-            FunctionChoice: required
-            MaxInTurnToolPairs: 12
-            {DeveloperContextWindow}
-            {AgentFileOptions}
-            """;
-
-        var tester = $"""
-            Name: Tester
-            Description: Writes and runs tests, produces a structured test report.
-            Instructions: |
+              5. {{ContextWriteStep}}
+              When done, call handoff(route_keyword: "Tester").
+              If the brief is unclear or needs rethinking, call handoff(route_keyword: "Planner").
+            advanced:
+              functionChoice: required
+              contextWindow:
+                textOnly: true
+                maxTailMessages: 0
+                maxTurnAge: 5
+                maxToolResultChars: 0
+                maxReplayChars: 0
+              maxInTurnContextTokens: 60000
+              maxInTurnToolPairs: 12
+          Tester:
+            role: "Writes and runs tests, produces a structured test report."
+            model: default
+            tools: [FileSystem, Shell, Changes, Investigation, SessionContext]
+            instructions: |
               You are a QA engineer. Your job is to:
-              1. {ContextReadStep}
-              2. Read {FuseraftPaths.LocalBrief} to understand the acceptance criteria.
-              3. Write test scripts (any format) to {FuseraftPaths.LocalTests}/ and any
-                 fixture or seed files to {FuseraftPaths.LocalTestFixtures}/. Run them with shell_run.
-              4. Write results to {FuseraftPaths.LocalTestReport}:
+              1. {{ContextReadStep}}
+              2. Read ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json to understand the acceptance criteria.
+              3. Write test scripts (any format) to .fuseraft/tests/ and any
+                 fixture or seed files to .fuseraft/tests/fixtures/. Run them with shell_run.
+              4. Write results to .fuseraft/artifacts/test-report.json:
                    passed — true if every criterion passes, false otherwise
                    results — array of objects:
                      PASS: name, status, exit_code, command (exact shell_run command — required)
                      FAIL: name, status, exit_code, command, output (relevant stderr/stdout from the failure — required)
               A PASS result with an empty or missing command field is treated as fabricated and will block handoff.
-              {TestReportCommandFieldRule}
+              {{TestReportCommandFieldRule}}
               Always write the report before routing, even when tests fail.
               If a test failure reveals a clear root cause (wrong return value, missing
               dependency, incorrect wiring), call investigation_identify_root_cause(cause) before
               routing.
-              5. {ContextWriteStep}
-              If all tests pass, call handoff(route_keyword: "HANDOFF TO REVIEWER").
-              If any tests fail, call handoff(route_keyword: "BUGS FOUND").
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Shell
-              - Changes
-              - Investigation
-              - SessionContext
-              - Handoff
-            FunctionChoice: required
-            MaxInTurnToolPairs: 12
-            {TesterContextWindow}
-            {AgentFileOptions}
-            """;
-
-        var reviewer = $"""
-            Name: Reviewer
-            Description: Reviews implementation and test results; gives final approval or requests changes.
-            Instructions: |
+              5. {{ContextWriteStep}}
+              If all tests pass, call handoff(route_keyword: "Reviewer").
+              If any tests fail, call handoff(route_keyword: "Developer").
+            advanced:
+              functionChoice: required
+              contextWindow:
+                textOnly: true
+                maxTailMessages: 0
+                maxTurnAge: 6
+                maxToolResultChars: 0
+                maxReplayChars: 0
+              maxInTurnToolPairs: 12
+          Reviewer:
+            role: Reviews implementation and test results; gives final approval or requests changes.
+            model: default
+            tools: [FileSystem, Shell, Changes, SessionContext]
+            instructions: |
               You are a principal engineer. Your job is to:
-              1. {ContextReadStep}
-              2. Read the implementation files listed in {FuseraftPaths.LocalBrief} under
-                 files_to_change, and {FuseraftPaths.LocalTestReport}. For any large file:
-                 {LargeFileProtocolReviewer}
+              1. {{ContextReadStep}}
+              2. Read the implementation files listed in ~/.fuseraft/sessions/{project_slug}/{session_id}/brief.json under
+                 files_to_change, and .fuseraft/artifacts/test-report.json. For any large file:
+                 {{LargeFileProtocolReviewer}}
               3. Run at least one acceptance criterion as a spot-check with shell_run.
-              4. {ReviewerJudgementBlockRule}
-              If all criteria pass, call handoff(route_keyword: "APPROVED").
-              If targeted fixes are needed, call handoff(route_keyword: "REVISION REQUIRED").
+              4. {{ReviewerJudgementBlockRule}}
+              If all criteria pass, call handoff(route_keyword: "Approved").
+              If targeted fixes are needed, call handoff(route_keyword: "Developer").
                 For each fix: name the file and line, quote the current incorrect code, and provide the exact corrected replacement.
                 Do not describe the problem in prose — provide the code change.
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            Plugins:
-              - FileSystem
-              - Shell
-              - Changes
-              - SessionContext
-              - Handoff
-            Capabilities:
-              FileSystem: [read]
-            FunctionChoice: auto
-            ContextWindow:
-              TextOnly: true
-            {AgentFileOptions}
-            """;
-
-        var approved = $"""
-            Name: Approved
-            Description: Terminal confirmation node — emits a one-line completion summary.
-            Instructions: |
+            advanced:
+              contextWindow:
+                textOnly: true
+                maxTailMessages: 0
+                maxTurnAge: 0
+                maxToolResultChars: 0
+                maxReplayChars: 0
+              capabilities:
+                FileSystem: [read]
+          Approved:
+            role: Terminal confirmation node — emits a one-line completion summary.
+            model: default
+            instructions: |
               All acceptance criteria have already been verified and approved.
               Write exactly one sentence confirming the task is complete. Nothing else.
-            Model:
-              ModelId: {model}{EpAgent(endpoint)}
-            FunctionChoice: none
-            {AgentFileOptions}
-            """;
+            advanced:
+              functionChoice: none
 
-        var mainConfig = $"""
-            Orchestration:
-              Name: Pipeline
-              Description: >-
-                Planner → Developer → Tester → Reviewer as a directed graph. Developer and Tester
-                have investigation tooling for structured failure tracking. Back-edges return to earlier
-                nodes without restarting. For evidence contracts and full safeguards, use the swe template.
+        flow:
+          start: Planner
+          steps:
+            Planner:
+              - to: Developer
+                requires: [brief]
+            Developer:
+              - to: Tester
+                requires: [anyFileWritten]
+              - to: Planner
+                when: the plan needs rethinking
+            Tester:
+              - to: Reviewer
+                requires:
+                  - testReport: testResults
+              - to: Developer
+                when: a test fails
+            Reviewer:
+              - to: Approved
+                requires: [reviewJudgement]
+              - to: Developer
+                when: the code or tests need fixing
+            Approved:
+              - to: end
+                when: your work is complete
 
-              Security:
-                FileSystemSandboxPath: .   # set to your project root (e.g. ~/projects/myapp)
+        limits:
+          maxTurns: 60
 
-              ChangeTracking:
-                Path: {FuseraftPaths.LocalChanges}
+        security:
+          fileSystemSandboxPath: .
 
-              Validation:
-                BriefPath: {FuseraftPaths.LocalBrief}
-                TestReportPath: {FuseraftPaths.LocalTestReport}
-                ChangeLogPath: {FuseraftPaths.LocalChanges}
-
-              Events:
-                Path: {FuseraftPaths.LocalEventsLog}
-
-              WarnTurnTokens: 300000
-
-              # Each agent lives in its own YAML file in agents/ — edit, version, or reuse
-              # them independently across configs. Inline fields override the file at load time.
-              Agents:
-                - AgentFile: agents/planner.yaml
-                - AgentFile: agents/developer.yaml
-                - AgentFile: agents/tester.yaml
-                - AgentFile: agents/reviewer.yaml
-                - AgentFile: agents/approved.yaml
-
-              Selection:
-                Type: graph
-                Graph:
-                  EntryNode: planner
-                  MaxRetries: 4   # max consecutive validator failures per node before HITL escalation
-
-                  # Nodes bind agents to named positions in the graph. IDs are stable,
-                  # lowercase, and appear in event logs. Multiple nodes may share an agent.
-                  Nodes:
-                    - Id: planner
-                      Agent: Planner
-                    - Id: developer
-                      Agent: Developer
-                    - Id: tester
-                      Agent: Tester
-                    - Id: reviewer
-                      Agent: Reviewer             # routes on keyword — NOT terminal
-                    - Id: approved                # terminal node — session ends after this run
-                      Agent: Approved
-                      Terminal: true
-
-                  # Edges define control flow — first matching edge fires each turn.
-                  # Forward edges (target has higher BFS layer) use SendMessage within the
-                  # current MAF phase. Back-edges (lower layer) yield and restart the phase
-                  # loop from the target node, enabling cycles without a DAG violation.
-                  Edges:
-                    # Forward edges
-                    - From: planner
-                      To: developer
-                      Keyword: "HANDOFF TO DEVELOPER"
-                      Validators: [RequireBrief]      # blocks until brief.json is valid
-
-                    - From: developer
-                      To: tester
-                      Keyword: "HANDOFF TO TESTER"
-                      Validators: [RequireWriteFile]  # blocks until at least one file is written
-
-                    - From: tester
-                      To: reviewer
-                      Keyword: "HANDOFF TO REVIEWER"
-                      Validators: [TestReportValid]   # blocks until test-report.json passes
-
-                    - From: reviewer
-                      To: approved
-                      Keyword: "APPROVED"
-                      Validators: [RequireReviewJudgement]  # gate on edge; terminal node runs clean
-
-                    # Back-edges (cycles)
-                    - From: tester
-                      To: developer
-                      Keyword: "BUGS FOUND"           # test failures → back to developer
-
-                    - From: reviewer
-                      To: developer
-                      Keyword: "REVISION REQUIRED"    # review feedback → back to developer
-
-                    - From: developer
-                      To: planner
-                      Keyword: "REPLAN REQUIRED"      # unclear brief → back to planner
-
-              Termination:
-                Type: composite
-                Strategies:
-                  - Type: regex
-                    Pattern: "\\bAPPROVED\\b"
-                    AgentNames: [Reviewer]
-                  - Type: maxiterations
-                    MaxIterations: 60
-
-              # ---------------------------------------------------------------------------
-              # OPTIONAL EXTRAS — uncomment as needed
-              # ---------------------------------------------------------------------------
-
-              # EvidenceStore:              # required for evidence contracts
-              #   Path: {FuseraftPaths.LocalEvidence}
-
-              # Contracts:
-              #   - Name: BriefExists
-              #     Requires:
-              #       - Type: FileExists
-              #         Path: {FuseraftPaths.LocalBrief}
-
-              Compaction:
-                TriggerTurnCount: 30
-                KeepRecentTurns: 8
-                Mode: lossless
-
-              # ContextBudget: per-agent cumulative input-token thresholds. Warns before
-              # context rot sets in, then triggers compaction automatically. Requires Compaction.
-              # ContextBudget:
-              #   WarnAt: 80000
-              #   CutoverAt: 120000
-
-              # Checkpoint:
-              #   Mode: json
-              #   Path: {FuseraftPaths.LocalCheckpoints}
-
-              # Models:
-              #   fast:
-              #     ModelId: {model}
-              #   reasoning:
-              #     ModelId: {model}
-              #     ReasoningEffort: low
-            """;
-
-        return new GeneratedConfig(mainConfig, [
-            ("agents/planner.yaml",    planner),
-            ("agents/developer.yaml",  developer),
-            ("agents/tester.yaml",     tester),
-            ("agents/reviewer.yaml",   reviewer),
-            ("agents/approved.yaml",   approved),
-        ]);
-    }
+        advanced:
+          compaction:
+            triggerTurnCount: 30
+            keepRecentTurns: 8
+            mode: lossless
+        """);
 }

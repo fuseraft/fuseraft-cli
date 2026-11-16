@@ -13,9 +13,9 @@ fuseraft-cli supports the [Model Context Protocol (MCP)](https://modelcontextpro
 
 ## How it works
 
-1. MCP servers are declared in `McpServers` in the config.
+1. MCP servers are declared in `mcpServers` in the config.
 2. At session startup, the orchestrator connects to each server.
-3. The server's tool list is fetched and registered as a named plugin under the server's `Name`.
+3. The server's tool list is fetched and registered as a named plugin under the server's `name`.
 4. Agents reference the server name in their `Plugins` list exactly like a built-in plugin.
 5. When an agent calls a tool from the MCP plugin, the call is routed to the connected server.
 6. When the session ends the connection is closed and any stdio child process is terminated.
@@ -26,16 +26,16 @@ fuseraft-cli supports the [Model Context Protocol (MCP)](https://modelcontextpro
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `Name` | string | — | Plugin name exposed to agents. Must be unique. |
-| `Transport` | string | `"stdio"` | `"stdio"` or `"http"`. |
-| `Command` | string | — | **stdio only.** Executable to launch (e.g. `"npx"`, `"python"`, `"dotnet"`). |
-| `Args` | array | `[]` | **stdio only.** Arguments passed to `Command`. |
-| `Env` | object | `{}` | **stdio only.** Additional environment variables for the child process. Values support `${ENV_VAR}` tokens. |
-| `WorkingDirectory` | string | — | **stdio only.** Working directory for the child process. |
-| `Url` | string | — | **http only.** Endpoint URL (e.g. `"https://mcp.example.com/mcp"`). Supports `${ENV_VAR}` tokens. |
-| `Headers` | object | `{}` | **http only.** Extra HTTP headers sent with every request — e.g. a static API key or bearer token. Values support `${ENV_VAR}` tokens. |
-| `TransportMode` | string | `"auto"` | **http only.** `"auto"`, `"streamable-http"`, or `"sse"`. Pin this for a server that only implements one, or when auto-detection is unreliable behind a proxy. |
-| `OAuth` | object | — | **http only.** Enables interactive OAuth 2.1 login. See [OAuth login](#oauth-login) below. |
+| `name` | string | — | Plugin name exposed to agents. Must be unique. |
+| `transport` | string | `"stdio"` | `"stdio"` or `"http"`. |
+| `command` | string | — | **stdio only.** Executable to launch (e.g. `"npx"`, `"python"`, `"dotnet"`). |
+| `args` | array | `[]` | **stdio only.** Arguments passed to `command`. |
+| `env` | object | `{}` | **stdio only.** Additional environment variables for the child process. Values support `${ENV_VAR}` tokens. |
+| `workingDirectory` | string | — | **stdio only.** Working directory for the child process. |
+| `url` | string | — | **http only.** Endpoint URL (e.g. `"https://mcp.example.com/mcp"`). Supports `${ENV_VAR}` tokens. |
+| `headers` | object | `{}` | **http only.** Extra HTTP headers sent with every request — e.g. a static API key or bearer token. Values support `${ENV_VAR}` tokens. |
+| `transportMode` | string | `"auto"` | **http only.** `"auto"`, `"streamable-http"`, or `"sse"`. Pin this for a server that only implements one, or when auto-detection is unreliable behind a proxy. |
+| `oauth` | object | — | **http only.** Enables interactive OAuth 2.1 login. See [OAuth login](#oauth-login) below. |
 
 ---
 
@@ -46,22 +46,22 @@ Most hosted MCP servers require authentication. fuseraft-cli supports the two co
 ### Static header (API key / bearer token)
 
 ```yaml
-McpServers:
-  - Name: RemoteTools
-    Transport: http
-    Url: https://mcp.example.com/mcp
-    Headers:
+mcpServers:
+  - name: RemoteTools
+    transport: http
+    url: https://mcp.example.com/mcp
+    headers:
       Authorization: "Bearer ${MY_SERVER_TOKEN}"
 ```
 
-`${ENV_VAR}` tokens in `Url` and `Headers` values are expanded at connect time (same syntax as
-`ApiProfiles`), so the secret itself never has to live in the config file — set
+`${ENV_VAR}` tokens in `url` and `headers` values are expanded at connect time (same syntax as
+`apiProfiles`), so the secret itself never has to live in the config file — set
 `MY_SERVER_TOKEN` in your shell or a `.env` your process loads before running fuseraft.
-`fuseraft validate-config` warns if a referenced env var isn't set in the current shell.
+`fuseraft validate` warns if a referenced env var isn't set in the current shell.
 
 **Headers stay on the server's origin.** fuseraft follows HTTP redirects from an MCP server (for
 example `/mcp` → `/mcp/`, or `http` → `https` on the same host), but a redirect to a *different*
-origin (scheme, host, or port) is followed **without** your configured `Headers` — nor
+origin (scheme, host, or port) is followed **without** your configured `headers` — nor
 `Authorization`, `Proxy-Authorization`, or `Cookie` — so a compromised server or an open redirect
 in front of it can't collect your API key. Once dropped, they aren't re-added if a later hop comes
 back to the original origin. Redirects that would downgrade `https` to `http` aren't followed, and
@@ -69,20 +69,20 @@ at most 10 hops are followed.
 
 ### OAuth login
 
-For a server that requires OAuth 2.1 (the MCP spec's native auth flow), set `OAuth` on the
+For a server that requires OAuth 2.1 (the MCP spec's native auth flow), set `oauth` on the
 server entry — most fields are optional, since fuseraft-cli requests dynamic client registration
 automatically when the server supports it:
 
 ```yaml
-McpServers:
-  - Name: HostedMcp
-    Transport: http
-    Url: https://mcp.example.com/mcp
-    OAuth: {}
+mcpServers:
+  - name: HostedMcp
+    transport: http
+    url: https://mcp.example.com/mcp
+    oauth: {}
 ```
 
 The first time fuseraft connects, it opens your default browser to the server's consent page and
-listens on `http://localhost:1179/callback` (configurable via `OAuth.CallbackPort`) for the
+listens on `http://localhost:1179/callback` (configurable via `oauth.callbackPort`) for the
 redirect. Once you approve, the resulting tokens are cached in your OS keychain (macOS Keychain,
 GNOME Keyring, or Windows Credential Manager — never plaintext on disk) keyed by server name, so
 later sessions reconnect silently until the token is revoked or expires with no refresh token.
@@ -94,10 +94,10 @@ be prompted again next process run.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `ClientId` | string | — | Pre-registered OAuth client ID. Omit to use dynamic client registration. |
-| `ClientSecret` | string | — | Pre-registered client secret, paired with `ClientId`. Supports `${ENV_VAR}`. |
-| `Scopes` | array | `[]` | OAuth scopes to request. Omit to accept the server's default scopes. |
-| `CallbackPort` | int | `1179` | Loopback port for the local redirect callback. Change only if it collides with something else. |
+| `clientId` | string | — | Pre-registered OAuth client ID. Omit to use dynamic client registration. |
+| `clientSecret` | string | — | Pre-registered client secret, paired with `clientId`. Supports `${ENV_VAR}`. |
+| `scopes` | array | `[]` | OAuth scopes to request. Omit to accept the server's default scopes. |
+| `callbackPort` | int | `1179` | Loopback port for the local redirect callback. Change only if it collides with something else. |
 
 In the REPL, `/mcp add` offers the same two options interactively — pick "Header" or "OAuth" when
 prompted for authentication after entering the URL.
@@ -118,36 +118,36 @@ remove and re-add it:
 The most common setup. fuseraft-cli spawns the MCP server as a child process and communicates over stdin/stdout.
 
 ```yaml
-McpServers:
-  - Name: Filesystem
-    Transport: stdio
-    Command: npx
-    Args:
+mcpServers:
+  - name: Filesystem
+    transport: stdio
+    command: npx
+    args:
       - "-y"
       - "@modelcontextprotocol/server-filesystem"
       - /home/user/projects
 ```
 
 ```yaml
-McpServers:
-  - Name: Puppeteer
-    Transport: stdio
-    Command: npx
-    Args:
+mcpServers:
+  - name: Puppeteer
+    transport: stdio
+    command: npx
+    args:
       - "-y"
       - "@modelcontextprotocol/server-puppeteer"
 ```
 
 ```yaml
-McpServers:
-  - Name: MyPython
-    Transport: stdio
-    Command: python
-    Args:
+mcpServers:
+  - name: MyPython
+    transport: stdio
+    command: python
+    args:
       - "-m"
       - my_mcp_server
-    WorkingDirectory: /home/user/my-mcp-server
-    Env:
+    workingDirectory: /home/user/my-mcp-server
+    env:
       MY_CONFIG_PATH: /etc/myserver.yaml
 ```
 
@@ -156,15 +156,15 @@ McpServers:
 ## HTTP transport
 
 Connect to a running MCP server over HTTP. By default fuseraft-cli probes the endpoint and picks
-the right wire protocol automatically — modern Streamable HTTP or legacy SSE. Set `TransportMode`
+the right wire protocol automatically — modern Streamable HTTP or legacy SSE. Set `transportMode`
 to pin one explicitly if a server only implements one or auto-detection is unreliable behind a
 proxy.
 
 ```yaml
-McpServers:
-  - Name: RemoteTools
-    Transport: http
-    Url: http://localhost:8080/mcp
+mcpServers:
+  - name: RemoteTools
+    transport: http
+    url: http://localhost:8080/mcp
 ```
 
 For a server that requires an API key, bearer token, or OAuth login, see
@@ -174,15 +174,12 @@ For a server that requires an API key, bearer token, or OAuth login, see
 
 ## Referencing MCP tools from agents
 
-Add the server's `Name` to an agent's `Plugins` list:
+Add the server's `name` to an agent's `tools`:
 
 ```yaml
-Agents:
-  - Name: Developer
-    Plugins:
-      - FileSystem
-      - Shell
-      - Puppeteer
+agents:
+  Developer:
+    tools: [FileSystem, Shell, Puppeteer]
     ...
 ```
 
@@ -211,9 +208,9 @@ names look like secrets (`..._TOKEN`, `..._KEY`) are masked in tool output; `FUS
 
 - **REPL**: each one connects at startup along with your saved servers, and `/mcp list` marks it *provided by
   the launcher*. A saved server with the same name is used instead. `/mcp remove` drops it for the session only.
-- **Orchestration**: one connects only if an agent names it in `Plugins` and the config's own `McpServers`
+- **Orchestration**: one connects only if an agent names it in `tools` and the config's own `mcpServers`
   doesn't use the name. If it can't connect, the run logs a warning and carries on without its tools, rather
-  than failing as a server in `McpServers` would.
+  than failing as a server in `mcpServers` would.
 
 ---
 
@@ -260,11 +257,11 @@ public sealed class MyTools
 Build and reference it in the config:
 
 ```yaml
-McpServers:
-  - Name: MyServer
-    Transport: stdio
-    Command: dotnet
-    Args:
+mcpServers:
+  - name: MyServer
+    transport: stdio
+    command: dotnet
+    args:
       - path/to/my-server.dll
 ```
 

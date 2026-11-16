@@ -57,8 +57,8 @@ public sealed class ConsecutiveShellFailValidator(
             $"The same build or verify command has failed in every recent turn with no recovery.\n" +
             $"Retrying the same approach will continue to fail and waste session budget.\n\n" +
             $"Required action — escalate instead of re-attempting:\n" +
-            $"  1. Do NOT emit the implementation-complete handoff keyword.\n" +
-            $"  2. Emit 'REPLAN REQUIRED' to return control to the Planner.\n" +
+            $"  1. Do NOT hand off as if the work were complete.\n" +
+            $"  2. Hand off back to planning, if your routes include it.\n" +
             $"  3. Include a brief summary of what failed so the Planner can write\n" +
             $"     a corrected brief before the next Developer turn.");
     }

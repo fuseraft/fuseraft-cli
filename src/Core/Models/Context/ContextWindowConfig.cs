@@ -60,19 +60,6 @@ public sealed record ContextWindowConfig
     public int MaxTailMessages { get; init; }
 
     /// <summary>
-    /// Fraction of <see cref="MaxTailMessages"/> at which a <c>context_window_warn</c>
-    /// event is emitted before the next agent turn.  For example, <c>0.4</c> warns when
-    /// the filtered message count exceeds 40% of <see cref="MaxTailMessages"/>.
-    ///
-    /// This gives the orchestrator an early signal to trigger inline compaction rather
-    /// than waiting for the hard <see cref="MaxTailMessages"/> limit to be reached.
-    ///
-    /// Only meaningful when <see cref="MaxTailMessages"/> is also set.
-    /// Default: <c>0</c> (disabled).
-    /// </summary>
-    public double ContextCapFraction { get; init; }
-
-    /// <summary>
     /// When greater than zero, keeps only messages from the last <em>N agent turns</em>
     /// (where each turn ends with an assistant reply). Applied after
     /// <see cref="TextOnly"/> / <see cref="ExcludeAgents"/> and before

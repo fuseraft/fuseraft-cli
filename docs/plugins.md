@@ -1,16 +1,14 @@
 ---
 title: "Plugins"
-description: "Plugins are the tools agents can call. Each plugin is a named collection of kernel functions. Add plugin names to an agent's Plugins list to make them available."
+description: "Plugins are the tools agents can call. Each plugin is a named collection of functions. List plugin names in an agent's Tools to make them available."
 ---
 
-Plugins are the tools agents can call. Each plugin is a named collection of kernel functions. Add plugin names to an agent's `Plugins` list to make them available.
+Plugins are the tools agents can call. Each plugin is a named collection of functions. List plugin names in an agent's `tools` to make them available.
 
 ```yaml
-Plugins:
-  - FileSystem
-  - Shell
-  - Git
-  - Search
+agents:
+  Developer:
+    tools: [FileSystem, Shell, Git, Search]
 ```
 
 Plugin names are case-insensitive.
@@ -23,7 +21,7 @@ Read, write, and navigate the local filesystem.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
-| `read_file` | `path`, `startLine` (default 1), `maxLines` (optional) | Read a text file. Returns up to `Security.ReadFileSizeLimit` characters (default 20,000). Larger files are truncated with a notice. Rejects binary files. |
+| `read_file` | `path`, `startLine` (default 1), `maxLines` (optional) | Read a text file. Returns up to `security.readFileSizeLimit` characters (default 20,000). Larger files are truncated with a notice. Rejects binary files. |
 | `grep_file` | `path`, `pattern`, `contextLines` (default 2), `maxMatches` (default 30) | Case-insensitive text or regex search within a single file. Returns matching lines with surrounding context. A directory path is refused with a hint to use `search_content` instead. A line longer than 1,000 characters (one-line XML, a minified bundle) is shown as a window around each match, tagged with its column — see [Long lines](#search). |
 | `get_file_summary` | `path` | Return a previously saved structural summary, or a character-count notice when no summary exists. |
 | `save_file_summary` | `path`, `summary` | Persist a structural summary of a file so future agents can retrieve it cheaply via `get_file_summary`. |
@@ -39,7 +37,7 @@ Read, write, and navigate the local filesystem.
 | `move_file` | `source`, `destination`, `overwrite` (default false) | Move or rename a file or directory. Creates the destination parent directory if needed. |
 | `list_directory` | `directory`, `pattern` (default `"*"`) | List files and subdirectories in a single directory (non-recursive). Subdirectories are shown with a trailing `/`. Returns up to 500 entries. |
 
-**Tip:** When `FileSystemSandboxPath` is configured, all paths are resolved to canonical form and rejected if they fall outside the sandbox root. See [Security](security.md).
+**Tip:** When `fileSystemSandboxPath` is configured, all paths are resolved to canonical form and rejected if they fall outside the sandbox root. See [Security](security.md).
 
 **Write/delete approval:** When `fuseraft run --hitl` is active, every write or delete call (`write_file`, `patch_file`, `delete_file`, `delete_directory`, `copy_file`, `move_file`, `create_directory`, `set_permissions`, `save_file_summary`) pauses for approval before executing — `read_file`/`grep_file`/`list_files`/etc. are never gated. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle.
 
@@ -77,7 +75,7 @@ The system prompt tells the model about `shell` on Windows.
 
 **Shell command approval:** When `fuseraft run --hitl` is active, every `shell_run`, `shell_run_script`, and `shell_run_background` call pauses and shows the command for approval before executing. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle (see [CLI Reference — `fuseraft repl`](cli-reference.md#fuseraft-repl)).
 
-**Security note:** When `FileSystemSandboxPath` is set, the `workingDirectory` argument is hard-denied if it falls outside the sandbox. The `command` and `script` arguments are scanned for absolute paths escaping the sandbox; system binary prefixes (`/usr/`, `/bin/`, `/opt/`, `/nix/`, etc.) are exempted. Shell scanning is heuristic — for strict containment use `CodeExecution` (Docker) instead.
+**Security note:** When `fileSystemSandboxPath` is set, the `workingDirectory` argument is hard-denied if it falls outside the sandbox. The `command` and `script` arguments are scanned for absolute paths escaping the sandbox; system binary prefixes (`/usr/`, `/bin/`, `/opt/`, `/nix/`, etc.) are exempted. Shell scanning is heuristic — for strict containment use `CodeExecution` (Docker) instead.
 
 ---
 
@@ -94,7 +92,7 @@ Read and write a Git repository.
 | `git_log` | `repoPath`, `count` (default 10), `ref` (optional) | Show recent commit history with hashes, authors, and messages. |
 | `git_show` | `commitRef`, `repoPath`, `maxLines` (default 300) | Show the content and diff of a specific commit. `<ref>:<path>` shows one file's contents at that ref. |
 
-**Protected files.** A diff is file content, so the Git read tools honour the same [FileSystem deny rules](security.md#a-deny-rule-is-never-a-prompt) as `read_file`: in `git_diff`, `git_show`, and any patch `git_log` is asked to print, the body of a protected file's section (a tracked `.env`, an SSH key, a [credentials file](security.md#credential-files), a configured `Deny` glob) is replaced by `[content hidden: '<path>' matches a FileSystem deny rule]` — the `diff --git` header stays, so the agent still sees *that* it changed. `git_show <ref>:<path>` of a protected path is denied, and so is `git_show` of a bare blob hash, which has no path to check (use `<ref>:<path>` instead). See [Security — Git output](security.md#git-output).
+**Protected files.** A diff is file content, so the Git read tools honour the same [FileSystem deny rules](security.md#a-deny-rule-is-never-a-prompt) as `read_file`: in `git_diff`, `git_show`, and any patch `git_log` is asked to print, the body of a protected file's section (a tracked `.env`, an SSH key, a [credentials file](security.md#credential-files), a configured `deny` glob) is replaced by `[content hidden: '<path>' matches a FileSystem deny rule]` — the `diff --git` header stays, so the agent still sees *that* it changed. `git_show <ref>:<path>` of a protected path is denied, and so is `git_show` of a bare blob hash, which has no path to check (use `<ref>:<path>` instead). See [Security — Git output](security.md#git-output).
 
 **Options in `commitRef` / `ref`.** `git_show`'s `commitRef` and `git_log`'s `ref` take a commit, ref, or path plus display options — `--stat`, `-p`, `--name-only`, `--oneline`, `-U<n>`, `--pretty=…`, `--author=…`, `--since=…`, and similar. Any other option is refused with `[DENIED] git option '…' is not accepted here`: `--output=<file>` would otherwise make git write the unfiltered patch to a file of the agent's choosing, outside the sandbox if it liked, and `--ext-diff` runs a program. Each word reaches git as its own argument, and words after `--` are always pathspecs.
 | `git_branch_list` | `repoPath`, `includeRemotes` (default false) | List branches. |
@@ -117,7 +115,7 @@ Read and write a Git repository.
 | `git_reset` | `mode` (default `"mixed"`), `ref` (default `"HEAD"`), `repoPath` | Reset HEAD. `soft`: moves HEAD only. `mixed`: unstages changes. `hard`: discards all uncommitted changes — use with caution. |
 | `git_rebase` | `upstream` (optional), `onto` (optional), `control` (optional: `abort`/`continue`/`skip`), `repoPath` | Rebase the current branch onto `upstream`, or onto `onto` with `upstream` as the fork point. Pass `control` alone to manage a rebase already in progress. |
 
-**Sandbox:** When `FileSystemSandboxPath` is configured, every function above — including the read-only ones — resolves `repoPath` (or `directory` for `git_init`) to canonical form and rejects it if it falls outside the sandbox root; an unspecified `repoPath` defaults to the sandbox root rather than the process's actual working directory. See [Security](security.md).
+**Sandbox:** When `fileSystemSandboxPath` is configured, every function above — including the read-only ones — resolves `repoPath` (or `directory` for `git_init`) to canonical form and rejects it if it falls outside the sandbox root; an unspecified `repoPath` defaults to the sandbox root rather than the process's actual working directory. See [Security](security.md).
 
 **Write approval:** When `fuseraft run --hitl` is active, every write operation above pauses for approval before executing — the read operations are never gated. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle.
 
@@ -136,25 +134,25 @@ Make HTTP requests to external APIs.
 | `http_delete` | `url`, `headers`, `timeoutSeconds` (default 30), `profile` | DELETE request. |
 | `http_head` | `url`, `headers`, `timeoutSeconds` (default 30), `profile` | HEAD request. Returns response headers only, no body. |
 
-**Redirects.** Redirects are followed by the plugin, not the HTTP client: each hop is re-checked against `HttpAllowedHosts` and the private-address rules, credential headers are dropped once a hop leaves the original origin, an `https` → `http` redirect is refused, and a chain stops after 10 hops. Secret-looking environment variable values in a response body are replaced with `<secret-hidden>`. See [Security — Shell, Probe, and every other tool](security.md#shell-probe-and-every-other-tool).
+**Redirects.** Redirects are followed by the plugin, not the HTTP client: each hop is re-checked against `httpAllowedHosts` and the private-address rules, credential headers are dropped once a hop leaves the original origin, an `https` → `http` redirect is refused, and a chain stops after 10 hops. Secret-looking environment variable values in a response body are replaced with `<secret-hidden>`. See [Security — Shell, Probe, and every other tool](security.md#shell-probe-and-every-other-tool).
 
 **Write approval:** When `fuseraft run --hitl` is active, `http_post`/`http_put`/`http_patch`/`http_delete` pause for approval before sending — `http_get`/`http_head` are never gated. See [CLI Reference — Shell/FileSystem/Git/Http write approval](cli-reference.md#human-in-the-loop-controls). The REPL has the same gate behind its own `/hitl on`/`/hitl off` toggle.
 
 ### API profiles (`profile` parameter)
 
-All HTTP functions accept an optional `profile` parameter. When provided, the plugin looks up that name in the `ApiProfiles` config section and applies:
+All HTTP functions accept an optional `profile` parameter. When provided, the plugin looks up that name in the `apiProfiles` config section and applies:
 
-- **Base URL** — if `url` is a relative path (no `http://`/`https://` scheme), it is prepended with the profile's `BaseUrl`. Absolute URLs are used as-is.
+- **Base URL** — if `url` is a relative path (no `http://`/`https://` scheme), it is prepended with the profile's `baseUrl`. Absolute URLs are used as-is.
 - **Default headers** — merged with any per-call `headers`. Per-call headers win on conflicts.
-- **Timeout** — the profile's `TimeoutSeconds` is used when the caller does not supply an explicit timeout (i.e. when `timeoutSeconds` equals the default of 30).
+- **Timeout** — the profile's `timeoutSeconds` is used when the caller does not supply an explicit timeout (i.e. when `timeoutSeconds` equals the default of 30).
 
 ```yaml
 # .fuseraft/config/orchestration.yaml snippet
-ApiProfiles:
+apiProfiles:
   snow:
-    BaseUrl: "https://mycompany.service-now.com/api/now"
-    TimeoutSeconds: 60
-    DefaultHeaders:
+    baseUrl: "https://mycompany.service-now.com/api/now"
+    timeoutSeconds: 60
+    defaultHeaders:
       Authorization: "Bearer ${SNOW_API_TOKEN}"
       Accept: "application/json"
 ```
@@ -166,9 +164,9 @@ http_get(url="/table/incident", profile="snow")
 #   Authorization: Bearer <value of $SNOW_API_TOKEN>
 ```
 
-Header values in `DefaultHeaders` support `${ENV_VAR}` token expansion — the token is replaced with the environment variable's value at startup. See [Configuration → ApiProfiles](configuration.md#apiprofiles) for the full reference.
+Header values in `defaultHeaders` support `${ENV_VAR}` token expansion — the token is replaced with the environment variable's value at startup. See [Configuration → ApiProfiles](configuration.md#apiprofiles) for the full reference.
 
-**Security note:** When `HttpAllowedHosts` is non-empty, only listed hostnames are permitted. The allowlist is enforced after profile resolution — a profile that resolves to an unlisted host is still denied. Private and loopback addresses (`127.x`, `10.x`, `172.16–31.x`, `192.168.x`, `169.254.x`, IPv6 loopback/link-local) are always blocked regardless of the allowlist.
+**Security note:** When `httpAllowedHosts` is non-empty, only listed hostnames are permitted. The allowlist is enforced after profile resolution — a profile that resolves to an unlisted host is still denied. Private and loopback addresses (`127.x`, `10.x`, `172.16–31.x`, `192.168.x`, `169.254.x`, IPv6 loopback/link-local) are always blocked regardless of the allowlist.
 
 ---
 
@@ -191,7 +189,7 @@ Parse, transform, and query JSON data.
 
 ## Search
 
-Search file contents and locate symbols. Files protected by a [FileSystem deny rule](security.md#a-deny-rule-is-never-a-prompt) — `.env` at any depth, [credential files](security.md#credential-files), and any configured `FileSystemPermissions.Deny` glob — are skipped by every search tool, so a query for a secret's name or value can't return a line of a file `read_file` would refuse to open. Finding files by name is `list_files` in [FileSystem](#filesystem) — kept there rather than duplicated here since it's the one covered by sandbox path enforcement and the FileSystem capability map.
+Search file contents and locate symbols. Files protected by a [FileSystem deny rule](security.md#a-deny-rule-is-never-a-prompt) — `.env` at any depth, [credential files](security.md#credential-files), and any configured `fileSystemPermissions.deny` glob — are skipped by every search tool, so a query for a secret's name or value can't return a line of a file `read_file` would refuse to open. Finding files by name is `list_files` in [FileSystem](#filesystem) — kept there rather than duplicated here since it's the one covered by sandbox path enforcement and the FileSystem capability map.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
@@ -216,7 +214,7 @@ Structured hypothesis testing and assertion utilities. Useful for Tester agents 
 | `probe_compare_outputs` | `commandA`, `commandB`, `directory`, `timeoutSeconds` | Run two commands and return their outputs side-by-side for comparison. |
 | `probe_run_hypothesis` | `hypothesis`, `command`, `expectedObservation`, `setupCommand` (optional), `directory`, `timeoutSeconds` | Given/When/Then structured test. |
 
-Every command Probe starts goes through the same guard as `shell_run` — dangerous-command and `sudo` rules, `ShellPolicy`, HITL approval, the sandbox working directory (`directory: "."` means the sandbox root) — and its output is masked for secret values and protected-file diffs. For a non-shell language only the credential-file rule, `ShellPolicy`, and approval apply. See [Security — Shell, Probe, and every other tool](security.md#shell-probe-and-every-other-tool).
+Every command Probe starts goes through the same guard as `shell_run` — dangerous-command and `sudo` rules, `shellPolicy`, HITL approval, the sandbox working directory (`directory: "."` means the sandbox root) — and its output is masked for secret values and protected-file diffs. For a non-shell language only the credential-file rule, `shellPolicy`, and approval apply. See [Security — Shell, Probe, and every other tool](security.md#shell-probe-and-every-other-tool).
 
 On Windows, `language: "powershell"` (or `"ps"`) resolves to `pwsh` if it's installed, otherwise falls back to the built-in Windows PowerShell 5.1 — it no longer fails outright on machines that only have the stock PowerShell.
 
@@ -253,7 +251,7 @@ Sandboxed code execution via Docker containers. Each run gets a fresh, isolated 
 
 ## Scratchpad
 
-Persistent per-agent key-value store that survives across sessions. Each agent that includes `"Scratchpad"` in its `Plugins` list gets an isolated JSON file at `~/.fuseraft/scratchpad/{AgentName}.json`. A `global` scope (`~/.fuseraft/scratchpad/global.json`) is shared by all agents in the orchestration.
+Persistent per-agent key-value store that survives across sessions. Each agent that includes `"Scratchpad"` in its `tools` gets an isolated JSON file at `~/.fuseraft/scratchpad/{AgentName}.json`. A `global` scope (`~/.fuseraft/scratchpad/global.json`) is shared by all agents in the orchestration.
 
 Files are stored outside the project directory so notes persist regardless of which project or config file is used.
 
@@ -287,7 +285,7 @@ Before ending the session:          scratchpad_write("session_summary", "Complet
 
 ## Chatroom
 
-Shared append-only message log for agent-to-agent coordination. All agents that include `"Chatroom"` in their `Plugins` list share the same JSONL file, but each agent sends under its own name.
+Shared append-only message log for agent-to-agent coordination. All agents that include `"Chatroom"` in their `tools` share the same JSONL file, but each agent sends under its own name.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
@@ -310,7 +308,7 @@ Broadcasting a blocker:     chatroom_send("All", "Blocked on missing dependency 
 
 Read-only view of the session change log written automatically by the orchestrator's `ChangeTracker`. Records which files were written, which commands ran, and which git commits were made — turn by turn — so downstream agents (Tester, Reviewer) know exactly what happened without having to infer it from the chat history.
 
-**Availability:** Only registered when `ChangeTracking` is present in the orchestration config. See [Configuration](configuration.md#change-tracking).
+**Availability:** Every team run records changes, so `Changes` is always available to agents that list it. See [What every run records](configuration.md#what-every-run-records).
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
@@ -332,7 +330,7 @@ Each entry shows the agent name, turn index, timestamp, files written/deleted, c
 
 Durable investigation memory: records hypotheses, rejected paths, and confirmed root causes so future agents never re-run the same dead-end investigation. All writes go to `~/.fuseraft/state/{project_slug}/investigation-log.json`. The log survives compaction and is injected into every agent's context via the `investigation_log` context source.
 
-**Availability:** Only registered when `ChangeTracking` is present in the orchestration config — same gate as [Changes](#changes). Used by the `pipeline`, `brownfield`, and `audit` init templates.
+**Availability:** Available to any team agent that lists it. Used by the `pipeline`, `brownfield`, and `audit` init templates.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
@@ -395,7 +393,7 @@ compact_context(focus="finish fixing the auth middleware")
 
 ## Todo
 
-Self-directed todo list the model uses to plan and track its own multi-step work within a single REPL session. In-memory only — scoped to the session, not persisted to disk. Always available in the REPL when tools are enabled (i.e. unless `fuseraft repl --no-tools` is used); not applicable to `fuseraft run` orchestrations and not added via an agent's `Plugins` list.
+Self-directed todo list the model uses to plan and track its own multi-step work within a single REPL session. In-memory only — scoped to the session, not persisted to disk. Always available in the REPL when tools are enabled (i.e. unless `fuseraft repl --no-tools` is used); not applicable to `fuseraft run` orchestrations and not added via an agent's `tools`.
 
 Unlike [Scratchpad](#scratchpad) (free-form key/value notes), Todo holds one ordered checklist that is always replaced wholesale on write — the model writes the full plan up front, then rewrites the full list after each step to flip statuses, rather than patching individual entries.
 
@@ -425,12 +423,11 @@ In the terminal the question shows as a picker: move with ↑/↓ and press Ente
 Lets an agent request a history compaction flush on demand — the same path as the automatic
 turn-count and token-budget triggers, using whatever compaction mode is configured.
 
-**Availability:** Only effective when `Compaction` is present in the orchestration config.
+**Availability:** Only effective when `advanced.compaction` is set in the team file.
 Calling `compact_conversation` without a configured compactor is a no-op.
 
 ```yaml
-Plugins:
-  - Compaction
+tools: [Compaction]
 ```
 
 ```
@@ -450,25 +447,15 @@ automatic threshold trigger.
 
 ## Handoff
 
-Provides a single `handoff` tool for deterministic, type-safe routing. Agents call `handoff(route_keyword: "...")` instead of emitting a keyword in free text. The tool-call argument is parsed by the model's function-calling infrastructure — far more reliable than expecting an exact string on its own line in an open-ended prose response.
+Provides the `handoff` tool agents use to finish their turn and pass the work on. You don't list it: every agent in a `steps` flow gets it automatically.
 
-When `handoff` is called, fuseraft terminates the agent's tool loop immediately so no further tools can be called in the same turn. This guarantees the handoff is always the last action the agent takes.
+The tool's `route_keyword` only accepts the routes of the agent's current step, so a model can't name a route that doesn't exist. fuseraft also writes each route, when to take it and the gates it checks into the agent's prompt.
 
-```yaml
-Plugins:
-  - Handoff
-```
-
-```
-# In agent instructions:
-When your work is complete, call handoff(route_keyword: "HANDOFF TO TESTER").
-```
+When `handoff` is called, fuseraft ends the agent's tool loop immediately, so the handoff is always the last action of the turn.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
-| `handoff` | `route_keyword` | Signal completion and hand off to the next step. Provide the exact keyword defined in your instructions (e.g. `"HANDOFF TO TESTER"`, `"APPROVED"`). Must be the last tool call in your response. |
-
-**How it interacts with keyword routing:** The keyword strategy checks for a `handoff` tool call first. If found, the `route_keyword` argument is used directly as the routing signal — text scanning is skipped entirely. Text-based keywords are still supported as a fallback for configs that do not include the `Handoff` plugin.
+| `handoff` | `route_keyword`, `goal`, `background`, `constraints` | Finish the turn on one of this step's routes. `goal`, `background` and `constraints` become the next agent's directive, which is all an agent with `sees: handoff` gets besides its artifacts. |
 
 ---
 
@@ -481,8 +468,7 @@ Both tools share the same tool set, timeout (8 minutes), and cancellation behavi
 **Default tool set (read-only):** `read_file`, `list_files`, `grep_file`, `get_file_summary`, `get_file_info`, `search_content`, `search_symbol`, `shell_run`, `shell_get_env`, `shell_which`, `git_status`, `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_stash_list`. The subagent is instructed never to implement, edit, delete, commit, or push anything.
 
 ```yaml
-Plugins:
-  - Subagent
+tools: [Subagent]
 ```
 
 | Tool | Parameters | Description |
@@ -520,54 +506,47 @@ subagent_locate("AgentFactory.Create")
 subagent_locate("EventEmitter.cs")
 ```
 
-### Subagent model override (`SubagentModel`)
+### Subagent model override (`subagentModel`)
 
-By default the subagent inherits the parent agent's model. Set `SubagentModel` to run it on a cheaper model for cost control:
+By default the subagent inherits the parent agent's model. Set `subagentModel` to run it on a cheaper model for cost control:
 
 ```yaml
-Agents:
-  - Name: Developer
-    Model: claude-opus-4-7
-    Plugins:
-      - FileSystem
-      - Shell
-      - Subagent
-    SubagentModel: claude-haiku-4-5-20251001   # exploration on a cheaper model
+agents:
+  Developer:
+    model: claude-opus-4-7
+    tools: [FileSystem, Shell, Subagent]
+    advanced:
+      subagentModel: claude-haiku-4-5-20251001   # exploration on a cheaper model
 ```
 
-Any model alias or provider model ID accepted by the `Models` config section can be used here.
+Any model alias or provider model ID accepted by the `models` config section can be used here.
 
-### Subagent round cap (`SubagentMaxToolCalls`)
+### Subagent round cap (`subagentMaxToolCalls`)
 
 Controls the maximum number of rounds inside the `subagent_explore` loop. A round is one model call in the subagent's loop: tool calls it fires in parallel count once, so a run can make more tool calls than it has rounds. `subagent_locate` always uses a hard cap of 5.
 
 ```yaml
-Agents:
-  - Name: Archaeologist
-    Plugins:
-      - Subagent
-    SubagentMaxToolCalls: 30   # allow deeper exploration for this agent
+agents:
+  Archaeologist:
+    tools: [Subagent]
+    advanced:
+      subagentMaxToolCalls: 30   # allow deeper exploration for this agent
 ```
 
 `0` (default) uses the built-in default of 20. A subagent that runs out of rounds returns a `stopped after N rounds without finishing` notice (with any partial output) rather than an answer, and its `subagent_end` event records `outcome: iteration_limit`.
 
-### Custom subagent plugin list (`SubagentPlugins`)
+### Custom subagent plugin list (`subagentPlugins`)
 
-To give the subagent a different set of plugins from the default, list them under `SubagentPlugins`. Capability filters from `Capabilities` apply to subagent plugins the same way they apply to the parent. Unknown plugin names raise an error at session startup (they are not silently ignored).
+To give the subagent a different set of plugins from the default, list them under `subagentPlugins`. Capability filters from `capabilities` apply to subagent plugins the same way they apply to the parent. Unknown plugin names raise an error at session startup (they are not silently ignored).
 
 ```yaml
-Agents:
-  - Name: Developer
-    Plugins:
-      - FileSystem
-      - Shell
-      - Subagent
-    SubagentPlugins:
-      - FileSystem
-      - Search
-      - Git
-    Capabilities:
-      Git: [read]
+agents:
+  Developer:
+    tools: [FileSystem, Shell, Subagent]
+    advanced:
+      subagentPlugins: [FileSystem, Search, Git]
+      capabilities:
+        Git: [read]
 ```
 
 **Note:** `Subagent` is instantiated per-agent by `AgentFactory`. The stub registered in `PluginRegistry` is only used by `fuseraft plugins` for enumeration.
@@ -576,7 +555,7 @@ Agents:
 
 ## Document
 
-Read rich document formats as plain text. All operations are read-only. Sandbox rules apply when `FileSystemSandboxPath` is configured, and so do the [FileSystem deny rules](security.md#a-deny-rule-is-never-a-prompt) — a deny-ruled document is refused like any other protected file.
+Read rich document formats as plain text. All operations are read-only. Sandbox rules apply when `fileSystemSandboxPath` is configured, and so do the [FileSystem deny rules](security.md#a-deny-rule-is-never-a-prompt) — a deny-ruled document is refused like any other protected file.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
@@ -643,9 +622,9 @@ Shared writable context summary for the current orchestration session. Agents wr
 
 ## Artifact
 
-Fixed-target-path artifact writers for recon and planning-style agents (e.g. the `brownfield` template's Archaeologist, `greenfield`'s Preflight, `audit`'s Auditor and Prioritizer, `devops`'s OpsPlanner, `research`'s Researcher and Critic). Each registered name below is the same underlying class bound at construction to exactly one file path, one required format, and one uniquely-named write tool — there is no path parameter, so a call can never be redirected at the project's own source files the way `write_file`/`patch_file` can. Pair with `Capabilities: { FileSystem: [read] }` so the agent can examine the sandbox but can only persist findings through its one write tool.
+Fixed-target-path artifact writers for recon and planning-style agents (e.g. the `brownfield` template's Archaeologist, `greenfield`'s Preflight, `audit`'s Auditor and Prioritizer, `devops`'s OpsPlanner, `research`'s Researcher and Critic). Each registered name below is the same underlying class bound at construction to exactly one file path, one required format, and one uniquely-named write tool — there is no path parameter, so a call can never be redirected at the project's own source files the way `write_file`/`patch_file` can. Pair with `capabilities: { FileSystem: [read] }` so the agent can examine the sandbox but can only persist findings through its one write tool.
 
-Every instance validates `content` against its required format before writing (`json` parses with `System.Text.Json`, `yaml` with YamlDotNet, `md` has no required structure), and creates parent directories automatically.
+Every instance validates `content` against its required format before writing (`json` parses with `System.Text.json`, `yaml` with YamlDotNet, `md` has no required structure), and creates parent directories automatically.
 
 | Plugin name | Tool | Format | Default path |
 |-------------|------|--------|--------------|
@@ -663,19 +642,15 @@ Every instance validates `content` against its required format before writing (`
 Each write tool takes `content` (full file content) and `format` (must be exactly `md`, `json`, or `yaml` — and must match the instance's required format above).
 
 ```yaml
-Agents:
-  - Name: Auditor
-    Plugins:
-      - FileSystem
-      - Search
-      - Shell
-      - Investigation
-      - AuditFindings
-    Capabilities:
-      FileSystem: [read]
+agents:
+  Auditor:
+    tools: [FileSystem, Search, Shell, Investigation, AuditFindings]
+    advanced:
+      capabilities:
+        FileSystem: [read]
 ```
 
-**Note:** the `Conventions`/`DiscoveryBrief`/`Preflight`/`Brief`/`BriefReview` paths are session-scoped — one file per session, under the global `~/.fuseraft/sessions/` tree. The `AuditFindings`/`RemediationPlan`/`OpsPlan`/`ResearchFindings`/`ResearchReview` paths are fixed relative to the sandbox root (or the current directory when no `FileSystemSandboxPath` is set) — shared across sessions in the same project so a downstream agent's `read_file` call always finds them regardless of which session wrote them.
+**Note:** the `Conventions`/`DiscoveryBrief`/`Preflight`/`Brief`/`BriefReview` paths are session-scoped — one file per session, under the global `~/.fuseraft/sessions/` tree. The `AuditFindings`/`RemediationPlan`/`OpsPlan`/`ResearchFindings`/`ResearchReview` paths are fixed relative to the sandbox root (or the current directory when no `fileSystemSandboxPath` is set) — shared across sessions in the same project so a downstream agent's `read_file` call always finds them regardless of which session wrote them.
 
 ---
 
@@ -683,7 +658,7 @@ Agents:
 
 Exposes installed skills as callable tools in the REPL. Only present when at least one skill is found at startup — see [Skills](skills.md) for how discovery works.
 
-Unlike other plugins, Skills is not listed in an agent's `Plugins` config. It is registered automatically by the REPL based on what is installed on the filesystem.
+Unlike other plugins, Skills is not listed in an agent's `tools`. It is registered automatically by the REPL based on what is installed on the filesystem.
 
 | Function | Parameters | Description |
 |----------|-----------|-------------|
@@ -695,22 +670,19 @@ Unlike other plugins, Skills is not listed in an agent's `Plugins` config. It is
 
 ## MCP plugins
 
-In addition to the built-in plugins above, tools from any connected MCP server are available as plugins. The plugin name is the `Name` field from `McpServers` config.
+In addition to the built-in plugins above, tools from any connected MCP server are available as plugins. The plugin name is the `name` field from `mcpServers` config.
 
 ```yaml
-McpServers:
-  - Name: MyTools
-    Transport: stdio
-    Command: npx
-    Args:
+mcpServers:
+  - name: MyTools
+    transport: stdio
+    command: npx
+    args:
       - "-y"
       - my-mcp-server
-Agents:
-  - Name: Developer
-    Plugins:
-      - FileSystem
-      - Shell
-      - MyTools
+agents:
+  Developer:
+    tools: [FileSystem, Shell, MyTools]
 ```
 
 See [MCP Integration](mcp.md) for full detail.

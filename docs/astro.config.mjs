@@ -56,8 +56,8 @@ export default defineConfig({
 					items: [
 						{ label: 'Configuration', link: '/configuration/' },
 						{ label: 'Models & Providers', link: '/models/' },
-						{ label: 'Strategies', link: '/strategies/' },
-						{ label: 'Routing Validators', link: '/validators/' },
+						{ label: 'Flows', link: '/strategies/' },
+						{ label: 'Gates', link: '/validators/' },
 						{ label: 'Harness Engineering', link: '/harness-engineering/' },
 						{ label: 'Spec-Driven Development', link: '/spec-driven/' },
 						{ label: 'Subagents', link: '/subagents/' },

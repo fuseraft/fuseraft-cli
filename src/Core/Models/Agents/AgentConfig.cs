@@ -252,20 +252,8 @@ public record AgentConfig
     /// </summary>
     public int SubagentMaxToolCalls { get; init; } = 0;
 
-    /// <summary>
-    /// Tokens produced by this agent when its turn completes successfully.
-    /// Used by <see cref="fuseraft.Orchestration.DependencyPlanner"/> to mark dependencies as fulfilled.
-    /// Supported token types: <c>artifact:&lt;name&gt;</c>, <c>file:&lt;path&gt;</c>,
-    /// <c>symbol:&lt;name&gt;</c>, or plain coarse-capability strings (e.g. <c>analyzed_codebase</c>).
-    /// </summary>
-    public List<string> Produces { get; init; } = [];
-
-    /// <summary>
-    /// Tokens that must be in the fulfilled set before this agent is eligible to run.
-    /// The orchestrator blocks this agent until all listed tokens are produced.
-    /// Token format mirrors <see cref="Produces"/>.
-    /// </summary>
-    public List<string> Requires { get; init; } = [];
+    /// <summary>Allowed <c>handoff</c> routes for this agent; when set, <c>route_keyword</c> is an enum of their names.</summary>
+    public List<HandoffRoute> HandoffRoutes { get; init; } = [];
 
     /// <summary>
     /// When set, this agent is hosted remotely and accessed via the A2A protocol.
@@ -285,3 +273,6 @@ public record AgentConfig
     public RemoteAgentConfig? RemoteAgent { get; init; }
 
 }
+
+/// <summary>One route an agent may hand off on, with the text the model sees for it.</summary>
+public sealed record HandoffRoute(string Name, string Description);

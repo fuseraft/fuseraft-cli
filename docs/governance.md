@@ -11,7 +11,7 @@ fuseraft-cli integrates with the Agent Governance Toolkit (AGT) to provide runti
 
 | Feature | Description |
 |---------|-------------|
-| [Execution rings](#execution-rings) | Per-agent privilege tiers derived from `TrustScore` |
+| [Execution rings](#execution-rings) | Per-agent privilege tiers derived from `trustScore` |
 | [Prompt injection detection](#prompt-injection-detection) | Blocks tool results that contain adversarial instruction overrides |
 | [Hash-chain audit log](#audit-log) | Tamper-evident record of every governance event |
 | [Circuit breaker](#circuit-breaker) | Stops runaway agents after repeated API failures |
@@ -24,7 +24,7 @@ fuseraft-cli integrates with the Agent Governance Toolkit (AGT) to provide runti
 
 ## Execution rings
 
-When `Security.FileSystemSandboxPath` is configured, each agent is assigned to an execution ring based on its `TrustScore` (configured in [Agent fields](configuration.md#agent-configuration)). The ring controls what the agent is permitted to do within the sandbox.
+When `security.fileSystemSandboxPath` is configured, each agent is assigned to an execution ring based on its `trustScore` (configured in [Agent fields](configuration.md#advanced-agent-fields)). The ring controls what the agent is permitted to do within the sandbox.
 
 | Ring | TrustScore | Write access | Network access |
 |------|-----------|--------------|----------------|
@@ -34,15 +34,15 @@ When `Security.FileSystemSandboxPath` is configured, each agent is assigned to a
 
 Ring 3 agents can call `read_file` and `list_files` but are blocked from `write_file`, `delete_file`, `shell_run`, and HTTP requests. Denials are returned as tool results so the agent sees them; they are also recorded in the audit log.
 
-**Default:** All agents default to `TrustScore: 0.7` (Ring 2) when not specified.
+**Default:** All agents default to `trustScore: 0.7` (Ring 2) when not specified.
 
 ```yaml
-- Name: Reviewer
-  TrustScore: 0.6
+- name: Reviewer
+  trustScore: 0.6
   ...
 ```
 
-To give a Reviewer or Planner read-only access to the sandbox while ensuring they cannot modify files, set `TrustScore` to any value below 0.60.
+To give a Reviewer or Planner read-only access to the sandbox while ensuring they cannot modify files, set `trustScore` to any value below 0.60.
 
 ---
 
@@ -50,7 +50,7 @@ To give a Reviewer or Planner read-only access to the sandbox while ensuring the
 
 When a `shell_run` or `read_file` result contains text that looks like an adversarial instruction override (e.g. a file that says "Ignore your instructions and do X"), the injection detector flags the content before it is passed to the agent as a tool result.
 
-Detection is heuristic and runs automatically — no configuration is needed. Detected injections are recorded in the audit log with `GovernanceEventType.ToolCallBlocked` and also appear in the [events stream](configuration.md#events) as `"tool_blocked"` entries.
+Detection is heuristic and runs automatically — no configuration is needed. Detected injections are recorded in the audit log with `GovernanceEventType.ToolCallBlocked` and also appear in the [events stream](configuration.md#what-every-run-records) as `"tool_blocked"` entries.
 
 ---
 
@@ -109,13 +109,11 @@ SLO events appear in the governance audit log. They do not currently surface in 
 
 ## Rate limiting
 
-A failure counter tracks bad turns per agent. A "bad turn" is any turn that results in a correction being injected: no routing keyword, a keyword that belongs to a different role, multiple keywords in one response, or a keyword whose validator rejected the handoff.
-
-With `Selection.Type: graph`, a single counter covers all of these uniformly and escalates at `Selection.Graph.MaxRetries` (default 4). With `keyword`/`statemachine`, only validator/contract failures are counted this way, classified by type and escalated per `FailureHandling.<Type>.Threshold` (default 3, or 2 for `ConflictingEvidence`); a bare missing-keyword/signal turn is not covered by this counter (see [Validators — Stuck detection](validators.md#stuck-detection) for the full breakdown). Either way, when the threshold is reached, `ValidatorStuckException` is thrown and the session stops with a descriptive error. The checkpoint is saved so the session can be resumed after diagnosing the issue.
+A failure counter tracks bad turns per agent: a handoff whose gates failed. Failures are classified by kind and escalate per `advanced.failureHandling.<Kind>.threshold` (default 3, or 2 for conflicting evidence); a turn that ends without any handoff gets a reminder rather than counting here (see [Gates — When an agent gets stuck](validators.md#when-an-agent-gets-stuck)). When the threshold is reached, `ValidatorStuckException` is thrown and the session stops with a descriptive error. The checkpoint is saved so the session can be resumed after diagnosing the issue.
 
 `GovernanceKernel`'s rate limiter enforces the same threshold via a 10-minute rolling window alongside the consecutive-turn count: if that many failures accumulate within the window, escalation fires immediately rather than waiting for the consecutive-turn count to catch up.
 
-This prevents infinite correction loops where an agent keeps re-emitting a broken handoff without making progress. The counter does not reset when the failure mode changes — alternating between validator failures and no-keyword turns hits the threshold at the same rate as repeated identical failures.
+This prevents infinite correction loops where an agent keeps re-attempting a blocked handoff without making progress.
 
 ---
 

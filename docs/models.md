@@ -1,60 +1,54 @@
 ---
 title: "Models & Providers"
-description: "The Model field on any agent (or on Selection.Model, Selection.Magentic.Model, Compaction.Model) accepts three forms:"
+description: "The Model field on any agent (or on a magentic Flow, Compaction or SkillCuration) accepts three forms:"
 ---
 
 ## Specifying a model
 
-The `Model` field on any agent (or on `Selection.Model`, `Selection.Magentic.Model`, `Compaction.Model`) accepts three forms:
+The `model` field on any agent (or on a `magentic` flow, `advanced.compaction` or `advanced.skillCuration`) accepts three forms:
 
 ### 1. Plain string — auto-detection
 
 ```yaml
-Model: gpt-4o
+model: gpt-4o
 ```
 
 The provider, API endpoint, and API key environment variable are inferred from the model ID prefix. Nothing else needs to be configured.
 
 ### 2. Named alias — registry reference
 
-Define aliases once in the top-level `Models` dictionary, then reference by name:
+Define aliases once in the top-level `models` dictionary, then reference by name:
 
 ```yaml
-Models:
+models:
   fast:
-    ModelId: grok-4.3
-    ReasoningEffort: none
+    modelId: grok-4.3
+    reasoningEffort: none
   smart:
-    ModelId: grok-4.3
-    ReasoningEffort: low
+    modelId: grok-4.3
+    reasoningEffort: low
 
-Agents:
-  - Name: Planner
-    Model:
-      ModelId: fast
-      MaxTokens: 4096
-  - Name: Developer
-    Model:
-      ModelId: fast
-      MaxTokens: 16384
-  - Name: Tester
-    Model:
-      ModelId: smart
-      MaxTokens: 8192
+agents:
+  Planner:
+    model: fast
+  Developer:
+    model: { modelId: fast, maxTokens: 16384 }
+  Tester:
+    model: { modelId: smart, maxTokens: 8192 }
 ```
 
-Per-agent `Temperature` and `MaxTokens` override the alias values.
+Write just the alias name, or a model map whose `modelId` is the alias; per-agent `temperature` and `maxTokens` then override the alias values. A string that isn't an alias is used as a model ID.
 
 ### 3. Inline object — full manual control
 
 ```yaml
-Model:
-  ModelId: my-model
-  Provider: openai
-  Endpoint: https://my-proxy.example.com/v1
-  ApiKeyEnvVar: MY_PROXY_KEY
-  MaxTokens: 8192
-  Temperature: 0.2
+model:
+  modelId: my-model
+  provider: openai
+  endpoint: https://my-proxy.example.com/v1
+  apiKeyEnvVar: MY_PROXY_KEY
+  maxTokens: 8192
+  temperature: 0.2
 ```
 
 Any field left empty falls back to auto-detection.
@@ -65,26 +59,26 @@ Any field left empty falls back to auto-detection.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `ModelId` | string | — | Model identifier sent to the API. |
-| `Provider` | string | auto | Connector type: `openai`, `anthropic`, `azure`, `google`, `mistral`, `ollama`. Auto-detected from `ModelId` if omitted. |
-| `Endpoint` | string | auto | API base URL. Auto-detected from provider if omitted. Required for `azure`. Falls back to `endpoint` in `~/.fuseraft/config` when blank. |
-| `ApiKeyEnvVar` | string | auto | Name of the environment variable holding the primary API key. Auto-detected from provider if omitted. Leave empty for `ollama`. Falls back to `apiKeyEnvVar` in `~/.fuseraft/config` when blank. |
-| `ApiKey` | string | — | Literal API key. Takes precedence over `ApiKeyEnvVar`. Used by the REPL wizard; not recommended in YAML configs. |
-| `ApiKeys` | array | — | Additional literal API keys for pool rotation. See [Credential pool rotation](#credential-pool-rotation). |
-| `ApiKeyEnvVars` | array | — | Additional environment variable names each holding an API key, for pool rotation. See [Credential pool rotation](#credential-pool-rotation). |
-| `MaxTokens` | int | `0` | Max tokens per response. `0` = use model default. |
-| `MaxContextTokens` | int | `0` | Input context window limit (≈85% of the model's advertised maximum). Requests that would exceed this value are rejected before the API call — prevents expensive failures on models with hard limits. `0` disables the check. |
-| `MaxPayloadBytes` | integer | `0` | Maximum serialized request body size in bytes. When set, the agent middleware estimates the outgoing JSON payload size (content × 1.2 + tool schemas × 1.1 + 2 KB envelope) before each API call and rejects it if it would exceed this limit — preventing HTTP 413 errors from upstream proxies (e.g. nginx). Set to your proxy's `client_max_body_size` minus ~10% headroom. `0` = no limit enforced. |
-| `Temperature` | number | — | Sampling temperature (0.0–2.0). Omit for reasoning models that reject this parameter. |
-| `ReasoningEffort` | string | — | Reasoning depth for models that support it (e.g. `grok-4.3`). Passed through verbatim — not validated against a fixed list, since accepted values are provider- and model-specific and keep growing (common: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Injected as `"reasoning": {"effort": "..."}` in the request. Omit for models that do not support this parameter. |
-| `FalloverModels` | array | — | Ordered list of fallover models to try when this model fails with a classifiable error. Each entry supports the same shorthand as `ModelId` (a plain string in YAML). See [Fallover chain](#fallover-chain). |
-| `FalloverOn` | array | — | Error reasons that trigger fallover. Defaults to all recoverable reasons: `RateLimit`, `ContextExceeded`, `QuotaExceeded`, `ServerError`. `AuthError` is never fallover-able. Only relevant when `FalloverModels` is set. |
+| `modelId` | string | — | Model identifier sent to the API. |
+| `provider` | string | auto | Connector type: `openai`, `anthropic`, `azure`, `google`, `mistral`, `ollama`. Auto-detected from `modelId` if omitted. |
+| `endpoint` | string | auto | API base URL. Auto-detected from provider if omitted. Required for `azure`. Falls back to `endpoint` in `~/.fuseraft/config` when blank. |
+| `apiKeyEnvVar` | string | auto | Name of the environment variable holding the primary API key. Auto-detected from provider if omitted. Leave empty for `ollama`. Falls back to `apiKeyEnvVar` in `~/.fuseraft/config` when blank. |
+| `apiKey` | string | — | Literal API key. Takes precedence over `apiKeyEnvVar`. Used by the REPL wizard; not recommended in YAML configs. |
+| `apiKeys` | array | — | Additional literal API keys for pool rotation. See [Credential pool rotation](#credential-pool-rotation). |
+| `apiKeyEnvVars` | array | — | Additional environment variable names each holding an API key, for pool rotation. See [Credential pool rotation](#credential-pool-rotation). |
+| `maxTokens` | int | `0` | Max tokens per response. `0` = use model default. |
+| `maxContextTokens` | int | `0` | Input context window limit (≈85% of the model's advertised maximum). Requests that would exceed this value are rejected before the API call — prevents expensive failures on models with hard limits. `0` disables the check. |
+| `maxPayloadBytes` | integer | `0` | Maximum serialized request body size in bytes. When set, the agent middleware estimates the outgoing JSON payload size (content × 1.2 + tool schemas × 1.1 + 2 KB envelope) before each API call and rejects it if it would exceed this limit — preventing HTTP 413 errors from upstream proxies (e.g. nginx). Set to your proxy's `client_max_body_size` minus ~10% headroom. `0` = no limit enforced. |
+| `temperature` | number | — | Sampling temperature (0.0–2.0). Omit for reasoning models that reject this parameter. |
+| `reasoningEffort` | string | — | Reasoning depth for models that support it (e.g. `grok-4.3`). Passed through verbatim — not validated against a fixed list, since accepted values are provider- and model-specific and keep growing (common: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Injected as `"reasoning": {"effort": "..."}` in the request. Omit for models that do not support this parameter. |
+| `falloverModels` | array | — | Ordered list of fallover models to try when this model fails with a classifiable error. Each entry supports the same shorthand as `modelId` (a plain string in YAML). See [Fallover chain](#fallover-chain). |
+| `falloverOn` | array | — | Error reasons that trigger fallover. Defaults to all recoverable reasons: `RateLimit`, `ContextExceeded`, `QuotaExceeded`, `ServerError`. `AuthError` is never fallover-able. Only relevant when `falloverModels` is set. |
 
 ---
 
 ## Auto-detection table
 
-When `Endpoint` and `ApiKeyEnvVar` are not specified, they are filled in based on the model ID prefix:
+When `endpoint` and `apiKeyEnvVar` are not specified, they are filled in based on the model ID prefix:
 
 | Model prefix | Provider | Default endpoint | API key env var |
 |-------------|----------|-----------------|-----------------|
@@ -99,13 +93,13 @@ When `Endpoint` and `ApiKeyEnvVar` are not specified, they are filled in based o
 | `llama*`, `phi*`, `qwen*`, `gemma*`, `codellama*`, `smollm*` | ollama | `http://localhost:11434` | *(none)* |
 | `name:tag` (colon format) | ollama | `http://localhost:11434` | *(none)* |
 
-For any model not matching the table, specify `Provider`, `Endpoint`, and `ApiKeyEnvVar` explicitly.
+For any model not matching the table, specify `provider`, `endpoint`, and `apiKeyEnvVar` explicitly.
 
 ---
 
 ## Global config defaults
 
-`~/.fuseraft/config`'s `provider` section can define a default `endpoint` and `apiKeyEnvVar` that are applied to every agent model (and named alias) that doesn't set those fields itself. This means you only need to configure the provider once — generated agent files work out of the box without repeating the values. The same file's `telemetry` section also seeds `Telemetry.OtlpEndpoint`/`ServiceName` for any project config that doesn't declare its own (see [Telemetry](configuration.md#telemetry)).
+`~/.fuseraft/config`'s `provider` section can define a default `endpoint` and `apiKeyEnvVar` that are applied to every agent model (and named alias) that doesn't set those fields itself. This means you only need to configure the provider once — generated agent files work out of the box without repeating the values. The same file's `telemetry` section also seeds `telemetry.otlpEndpoint`/`serviceName` for any project config that doesn't declare its own (see [Telemetry](configuration.md#telemetry)).
 
 ```json
 {
@@ -124,9 +118,9 @@ Set individual fields from the command line with `fuseraft settings set <key> <v
 
 ### `repl.contextBudget` — REPL working-context override
 
-The REPL trims conversation history against a working-context-token budget (`ctx.ContextTokenBudget`, shown in `/context`), separate from `MaxContextTokens` above. By default this budget comes from a per-model-family heuristic (256K for `grok-*`, 150K for other 1M/128K+-class frontier models like `claude-*`/`gemini-*`/`gpt-5*`, 100K for ~128K-class models like `gpt-4*`/`mistral-*`/`deepseek-*`, 80K otherwise) — deliberately conservative, since the REPL's char-based token estimate doesn't account for tool-schema tokens.
+The REPL trims conversation history against a working-context-token budget (`ctx.ContextTokenBudget`, shown in `/context`), separate from `maxContextTokens` above. By default this budget comes from a per-model-family heuristic (256K for `grok-*`, 150K for other 1M/128K+-class frontier models like `claude-*`/`gemini-*`/`gpt-5*`, 100K for ~128K-class models like `gpt-4*`/`mistral-*`/`deepseek-*`, 80K otherwise) — deliberately conservative, since the REPL's char-based token estimate doesn't account for tool-schema tokens.
 
-Set `repl.contextBudget` in `~/.fuseraft/config` (a positive integer, in tokens — `fuseraft settings set repl.contextBudget 400000`) to override that heuristic for every model used in the REPL session, regardless of family. Leave it unset to keep the built-in heuristic. This is REPL-only and does not affect `MaxContextTokens` above (a separate per-agent hard ceiling enforced before each API call in non-REPL agent/orchestration contexts), nor the unrelated `ContextBudget` YAML block used in `orchestration.yaml` (warn/cutover/tool-result trimming for multi-agent orchestration runs) — the similarly-named field intentionally lives under the `repl` section to keep the two apart.
+Set `repl.contextBudget` in `~/.fuseraft/config` (a positive integer, in tokens — `fuseraft settings set repl.contextBudget 400000`) to override that heuristic for every model used in the REPL session, regardless of family. Leave it unset to keep the built-in heuristic. This is REPL-only and does not affect `maxContextTokens` above (a separate per-agent hard ceiling enforced before each API call in non-REPL agent/orchestration contexts), nor the unrelated `contextBudget` YAML block used in `orchestration.yaml` (warn/cutover/tool-result trimming for multi-agent orchestration runs) — the similarly-named field intentionally lives under the `repl` section to keep the two apart.
 
 The same budget sizes how much file content `read_file` can return in one turn: half of it, in characters (about 4 per token). That's ~512K chars for a `grok-*` model, ~300K for another 150K-token model, and ~160K for an unrecognized one. A turn that uses it up gets a `[DENIED]` for further reads until the next message, so on a model with a larger real context window, raising `repl.contextBudget` lets the agent read more before stopping. Each subagent run gets its own budget of the same size.
 
@@ -156,10 +150,10 @@ In the REPL a stream that drops mid-reply is also retried automatically, separat
 
 ### OS keychain fallback
 
-If an agent model has neither `ApiKey` nor `ApiKeyEnvVar` set after global defaults are applied, fuseraft retrieves the key stored in the OS keychain (set via `fuseraft keychain --set` or the REPL wizard) and injects it as a literal `ApiKey`. This means the full auth resolution order for any agent model is:
+If an agent model has neither `apiKey` nor `apiKeyEnvVar` set after global defaults are applied, fuseraft retrieves the key stored in the OS keychain (set via `fuseraft keychain --set` or the REPL wizard) and injects it as a literal `apiKey`. This means the full auth resolution order for any agent model is:
 
-1. Explicit `ApiKey` in the agent file (literal value)
-2. `ApiKeyEnvVar` from the agent file (env var lookup)
+1. Explicit `apiKey` in the agent file (literal value)
+2. `apiKeyEnvVar` from the agent file (env var lookup)
 3. `provider.apiKeyEnvVar` from `~/.fuseraft/config` (env var lookup)
 4. OS keychain: the key saved for that model's endpoint (retrieved once at startup, injected as literal key). A model on another endpoint never gets it.
 5. Nothing — Ollama and other unauthenticated providers work without a key
@@ -174,49 +168,49 @@ Per-agent values always win; global values only fill in empty fields.
 
 Uses `Microsoft.Extensions.AI` with the OpenAI connector. Works with any API that follows the OpenAI chat completions format.
 
-Compatible services include: OpenAI, xAI (Grok), DeepSeek, OpenRouter, Groq, Together AI, LM Studio, vLLM, and many others. Anthropic also exposes an OpenAI-compatible endpoint, reachable this way with an explicit `Endpoint` override, but `claude-*` model IDs default to the native `anthropic` provider below instead — the OpenAI-compatible endpoint does not support prompt caching.
+Compatible services include: OpenAI, xAI (Grok), DeepSeek, OpenRouter, Groq, Together AI, LM Studio, vLLM, and many others. Anthropic also exposes an OpenAI-compatible endpoint, reachable this way with an explicit `endpoint` override, but `claude-*` model IDs default to the native `anthropic` provider below instead — the OpenAI-compatible endpoint does not support prompt caching.
 
 ```bash
 export OPENAI_API_KEY=sk-...
 ```
 
 ```yaml
-Model: gpt-4o
+model: gpt-4o
 ```
 
 ### anthropic — Claude via the native Messages API
 
 Uses `Anthropic.SDK` directly against `https://api.anthropic.com`, rather than the OpenAI-compatible endpoint the `openai` provider would use. This is required for prompt caching: requests are sent with a 3-breakpoint caching strategy (system prompt, tool definitions, and the tail of the conversation history), so the growing multi-turn history gets cached on the provider side too, not just the static prefix. Cache-read tokens are surfaced cumulatively in the REPL's `--verbose` per-turn line and in `/context`'s session usage summary (see [CLI Reference](cli-reference.md#fuseraft-repl)).
 
-`claude-*` model IDs auto-detect this provider — no explicit `Provider` needed.
+`claude-*` model IDs auto-detect this provider — no explicit `provider` needed.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ```yaml
-Model: claude-sonnet-4-6
+model: claude-sonnet-4-6
 ```
 
-To route a Claude model through a custom proxy instead of `api.anthropic.com`, set `Endpoint` explicitly; anything other than the native default is passed to the SDK's URL formatter as-is (no `/v1` suffix — the SDK builds the full path itself).
+To route a Claude model through a custom proxy instead of `api.anthropic.com`, set `endpoint` explicitly; anything other than the native default is passed to the SDK's URL formatter as-is (no `/v1` suffix — the SDK builds the full path itself).
 
 ### azure — Azure OpenAI Service
 
-Uses `Microsoft.Extensions.AI` with the Azure OpenAI connector. Requires `Endpoint` (your Azure resource URL) and `ApiKeyEnvVar`.
+Uses `Microsoft.Extensions.AI` with the Azure OpenAI connector. Requires `endpoint` (your Azure resource URL) and `apiKeyEnvVar`.
 
 ```bash
 export AZURE_OPENAI_API_KEY=...
 ```
 
 ```yaml
-Model:
-  ModelId: gpt-4o
-  Provider: azure
-  Endpoint: https://my-resource.openai.azure.com/
-  ApiKeyEnvVar: AZURE_OPENAI_API_KEY
+model:
+  modelId: gpt-4o
+  provider: azure
+  endpoint: https://my-resource.openai.azure.com/
+  apiKeyEnvVar: AZURE_OPENAI_API_KEY
 ```
 
-`ModelId` maps to the Azure deployment name, not the underlying model name.
+`modelId` maps to the Azure deployment name, not the underlying model name.
 
 ### google — Google AI Gemini
 
@@ -227,7 +221,7 @@ export GOOGLE_AI_API_KEY=...
 ```
 
 ```yaml
-Model: gemini-2.0-flash
+model: gemini-2.0-flash
 ```
 
 ### mistral — Mistral AI
@@ -239,7 +233,7 @@ export MISTRAL_API_KEY=...
 ```
 
 ```yaml
-Model: mistral-large-latest
+model: mistral-large-latest
 ```
 
 ### ollama — Local models via Ollama
@@ -247,15 +241,15 @@ Model: mistral-large-latest
 Uses `OllamaApiClient` from [OllamaSharp](https://github.com/awaescher/OllamaSharp). No API key required. The default endpoint is `http://localhost:11434`.
 
 ```yaml
-Model: llama3.2
+model: llama3.2
 ```
 
 To use a custom Ollama endpoint:
 
 ```yaml
-Model:
-  ModelId: llama3.2
-  Endpoint: http://192.168.1.50:11434
+model:
+  modelId: llama3.2
+  endpoint: http://192.168.1.50:11434
 ```
 
 ---
@@ -269,12 +263,12 @@ export OPENWEBUI_API_KEY=<key-from-owui-settings>
 ```
 
 ```yaml
-Models:
+models:
   local-llama:
-    ModelId: llama3.2
-    Provider: openai
-    Endpoint: http://localhost:3000/api/openai/v1
-    ApiKeyEnvVar: OPENWEBUI_API_KEY
+    modelId: llama3.2
+    provider: openai
+    endpoint: http://localhost:3000/api/openai/v1
+    apiKeyEnvVar: OPENWEBUI_API_KEY
 ```
 
 Generate the API key in Open WebUI under **Settings → Account → API Keys**.
@@ -286,26 +280,23 @@ Generate the API key in Open WebUI under **Settings → Account → API Keys**.
 Each agent gets its own chat client and its own model. You can freely mix providers in a single config:
 
 ```yaml
-Models:
+models:
   planner-model:
-    ModelId: gpt-4o
+    modelId: gpt-4o
   coder-model:
-    ModelId: claude-3-5-sonnet-20241022
+    modelId: claude-3-5-sonnet-20241022
   local-reviewer:
-    ModelId: llama3.2
+    modelId: llama3.2
 
-Agents:
-  - Name: Planner
-    Model:
-      ModelId: planner-model
+agents:
+  Planner:
+    model: planner-model
     ...
-  - Name: Developer
-    Model:
-      ModelId: coder-model
+  Developer:
+    model: coder-model
     ...
-  - Name: Reviewer
-    Model:
-      ModelId: local-reviewer
+  Reviewer:
+    model: local-reviewer
     ...
 ```
 
@@ -321,7 +312,7 @@ When multiple API keys are available for the same provider, fuseraft-cli automat
 
 ### How it works
 
-1. All keys from `ApiKey`, `ApiKeyEnvVar`, `ApiKeys`, and `ApiKeyEnvVars` are collected and deduplicated at session start.
+1. All keys from `apiKey`, `apiKeyEnvVar`, `apiKeys`, and `apiKeyEnvVars` are collected and deduplicated at session start.
 2. Requests use the current slot (round-robin starting at 0).
 3. When a 429 is returned — after [`TransientRetryHandler`](https://github.com/fuseraft/fuseraft-cli) exhausts its own per-request retries — the slot is marked with a 60-second cooldown and the next available slot is tried.
 4. If all slots are simultaneously rate-limited, the session surfaces the error rather than busy-waiting.
@@ -330,18 +321,18 @@ When multiple API keys are available for the same provider, fuseraft-cli automat
 ### Configuration
 
 ```yaml
-Model:
-  ModelId: gpt-4o
-  ApiKeyEnvVar: OPENAI_API_KEY_1       # primary key (env var)
-  ApiKeyEnvVars:
+model:
+  modelId: gpt-4o
+  apiKeyEnvVar: OPENAI_API_KEY_1       # primary key (env var)
+  apiKeyEnvVars:
     - OPENAI_API_KEY_2                 # rotated to on 429
     - OPENAI_API_KEY_3
 
 # Or mix literal keys:
-Model:
-  ModelId: claude-sonnet-4-6
-  ApiKeyEnvVar: ANTHROPIC_API_KEY
-  ApiKeys:
+model:
+  modelId: claude-sonnet-4-6
+  apiKeyEnvVar: ANTHROPIC_API_KEY
+  apiKeys:
     - sk-ant-...second-key...
     - sk-ant-...third-key...
 ```
@@ -349,9 +340,9 @@ Model:
 Keys can also be sourced entirely from env vars:
 
 ```yaml
-Model:
-  ModelId: gpt-4o
-  ApiKeyEnvVars:
+model:
+  modelId: gpt-4o
+  apiKeyEnvVars:
     - OPENAI_KEY_TEAM_1
     - OPENAI_KEY_TEAM_2
     - OPENAI_KEY_TEAM_3
@@ -360,17 +351,17 @@ Model:
 ### Named alias with a pool
 
 ```yaml
-Models:
+models:
   gpt4-pool:
-    ModelId: gpt-4o
-    ApiKeyEnvVar: OPENAI_API_KEY_1
-    ApiKeyEnvVars:
+    modelId: gpt-4o
+    apiKeyEnvVar: OPENAI_API_KEY_1
+    apiKeyEnvVars:
       - OPENAI_API_KEY_2
       - OPENAI_API_KEY_3
 
-Agents:
-  - Name: Developer
-    Model: gpt4-pool
+agents:
+  Developer:
+    model: gpt4-pool
 ```
 
 All agents that reference the same alias share the same `KeyPoolChatClient` instance, so rotation state is shared across agents. Cooldowns from one agent's 429 apply to all agents using that pool for the duration of the cooldown window.
@@ -379,22 +370,22 @@ All agents that reference the same alias share the same `KeyPoolChatClient` inst
 
 ## Fallover chain
 
-When a provider call fails with a classifiable error (rate limit, context exceeded, quota exhausted, or server error), fuseraft-cli can automatically retry on a different model. Configure an ordered `FalloverModels` list on any `ModelConfig` and the primary model is tried first; on failure the next entry is tried, and so on until one succeeds or all are exhausted.
+When a provider call fails with a classifiable error (rate limit, context exceeded, quota exhausted, or server error), fuseraft-cli can automatically retry on a different model. Configure an ordered `falloverModels` list on any `ModelConfig` and the primary model is tried first; on failure the next entry is tried, and so on until one succeeds or all are exhausted.
 
 ```yaml
-Model:
-  ModelId: claude-opus-4-7
-  FalloverModels:
+model:
+  modelId: claude-opus-4-7
+  falloverModels:
     - gpt-4o           # tried if Anthropic returns 429 or 5xx
     - gemini-2.0-flash # final fallback
 ```
 
-Each fallover entry supports the same shorthand as `ModelId` (a plain string) and goes through the full model resolution pipeline — including its own key pool if you configure `ApiKeys` or `ApiKeyEnvVars` on the fallover model.
+Each fallover entry supports the same shorthand as `modelId` (a plain string) and goes through the full model resolution pipeline — including its own key pool if you configure `apiKeys` or `apiKeyEnvVars` on the fallover model.
 
 ### How it works
 
 1. The primary model is tried first.
-2. If it throws an exception whose cause is in `FalloverOn`, the error is logged to stderr and the next model in the chain is tried.
+2. If it throws an exception whose cause is in `falloverOn`, the error is logged to stderr and the next model in the chain is tried.
 3. For streaming responses, fallover only fires before the first chunk is delivered — mid-stream exceptions propagate as-is (the caller has already received partial output).
 4. If all models in the chain fail, the last exception is re-thrown.
 
@@ -408,55 +399,55 @@ Each fallover entry supports the same shorthand as `ModelId` (a plain string) an
 | `ServerError` | 5xx | Provider-side server error after all per-request retries. |
 | `AuthError` | 401 / 403 | Invalid or missing credentials — **not** fallover-able by default. |
 
-The default `FalloverOn` value covers all four recoverable reasons. Override it to restrict fallover to specific conditions:
+The default `falloverOn` value covers all four recoverable reasons. Override it to restrict fallover to specific conditions:
 
 ```yaml
-Model:
-  ModelId: gpt-4o
-  FalloverModels:
+model:
+  modelId: gpt-4o
+  falloverModels:
     - gemini-2.0-flash
-  FalloverOn:
+  falloverOn:
     - ContextExceeded   # only fallover when the prompt is too long
 ```
 
 ### Combining with credential pool rotation
 
-`FalloverModels` and [credential pool rotation](#credential-pool-rotation) work independently and compose well. The key pool rotates between API keys for the **same model**; the fallover chain switches to a **different model** when all keys on the primary are exhausted:
+`falloverModels` and [credential pool rotation](#credential-pool-rotation) work independently and compose well. The key pool rotates between API keys for the **same model**; the fallover chain switches to a **different model** when all keys on the primary are exhausted:
 
 ```yaml
-Model:
-  ModelId: claude-opus-4-7
-  ApiKeyEnvVar: ANTHROPIC_KEY_1
-  ApiKeyEnvVars:
+model:
+  modelId: claude-opus-4-7
+  apiKeyEnvVar: ANTHROPIC_KEY_1
+  apiKeyEnvVars:
     - ANTHROPIC_KEY_2     # rotated to on 429
-  FalloverModels:
+  falloverModels:
     - gpt-4o              # tried after all Anthropic keys are rate-limited
 ```
 
 ### Named alias with a fallover chain
 
 ```yaml
-Models:
+models:
   robust:
-    ModelId: claude-opus-4-7
-    FalloverModels:
+    modelId: claude-opus-4-7
+    falloverModels:
       - gpt-4o
       - gemini-2.0-flash
 
-Agents:
-  - Name: Developer
-    Model: robust
+agents:
+  Developer:
+    model: robust
 ```
 
 ---
 
 ## Reasoning models
 
-Reasoning models (OpenAI `o1`/`o3`/`o4`, xAI `grok-4.3`) reject the `temperature` parameter. Leave `Temperature` unset (null) for these models.
+Reasoning models (OpenAI `o1`/`o3`/`o4`, xAI `grok-4.3`) reject the `temperature` parameter. Leave `temperature` unset (null) for these models.
 
 ### xAI reasoning effort
 
-`grok-4.3` supports four reasoning depth levels controlled by the `ReasoningEffort` field:
+`grok-4.3` supports four reasoning depth levels controlled by the `reasoningEffort` field:
 
 | Value | Behaviour |
 |-------|-----------|
@@ -466,23 +457,23 @@ Reasoning models (OpenAI `o1`/`o3`/`o4`, xAI `grok-4.3`) reject the `temperature
 | `high` | Maximum reasoning — slowest and most expensive. Reserve for the hardest problems. |
 
 ```yaml
-Models:
+models:
   fast:
-    ModelId: grok-4.3
-    ApiKeyEnvVar: XAI_API_KEY
-    ReasoningEffort: none      # structured output, routing agents
+    modelId: grok-4.3
+    apiKeyEnvVar: XAI_API_KEY
+    reasoningEffort: none      # structured output, routing agents
 
   reasoning:
-    ModelId: grok-4.3
-    ApiKeyEnvVar: XAI_API_KEY
-    ReasoningEffort: low       # general agentic work
+    modelId: grok-4.3
+    apiKeyEnvVar: XAI_API_KEY
+    reasoningEffort: low       # general agentic work
 
   deep:
-    ModelId: grok-4.3
-    ApiKeyEnvVar: XAI_API_KEY
-    ReasoningEffort: high      # complex planning or review
+    modelId: grok-4.3
+    apiKeyEnvVar: XAI_API_KEY
+    reasoningEffort: high      # complex planning or review
 ```
 
 The value is injected at the HTTP layer as `"reasoning": {"effort": "..."}` — no SDK-level support is required.
 
-For OpenAI `o1`/`o3`/`o4`, leave `ReasoningEffort` unset; those models use a separate SDK-native mechanism (`ReasoningEffortLevel`) that the OpenAI SDK applies automatically.
+For OpenAI `o1`/`o3`/`o4`, leave `reasoningEffort` unset; those models use a separate SDK-native mechanism (`ReasoningEffortLevel`) that the OpenAI SDK applies automatically.

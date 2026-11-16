@@ -221,7 +221,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             var caseToken = caseCts?.Token ?? cancellationToken;
 
             SessionResult sessionResult;
-            TerminationStrategyConfig? termination = null;
+
             try
             {
                 var built = await OrchestratorBuilder.BuildAsync(
@@ -229,8 +229,8 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                     hitlMode: false, sessionId: sessionId);
 
                 var (orchestrator, config, mcpManager, compactor, changeTracker, eventEmitter,
-                     governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, _, sessionMetrics, _, _) = built;
-                termination = config.Termination;
+                     governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, sessionMetrics, _, _) = built;
+
 
                 await using var _mcp = mcpManager;
                 using  var _gov      = governanceKernel;
@@ -273,7 +273,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                         StringComparer.OrdinalIgnoreCase),
                     devUI:          null,
                     configPath:     configPath,
-                    maxIterations:  config.Termination?.ResolveMaxIterations() ?? 0,
+                    maxIterations:  config.MaxTurns,
                     contextBudget:  config.ContextBudget,
                     sessionMetrics: sessionMetrics,
                     quiet:          true);
@@ -294,7 +294,7 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
                 continue;
             }
 
-            var caseResult = Score(evalCase, sessionResult, sessionId, termination);
+            var caseResult = Score(evalCase, sessionResult, sessionId);
             await RecordResultAsync(caseResult);
             PrintCaseResult(caseResult);
         }
@@ -316,33 +316,23 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
     // internal so tests can call directly without spinning up an orchestrator.
 
     internal static EvalCaseResult Score(
-        EvalCase evalCase, SessionResult result, string sessionId, TerminationStrategyConfig? termination = null)
+        EvalCase evalCase, SessionResult result, string sessionId)
     {
         var failures = new List<string>();
 
         if (evalCase.MustSucceed && !result.Succeeded)
             failures.Add($"session did not succeed: {result.ErrorMessage ?? "unknown"}");
 
-        // Prefer the last message from whichever agent the orchestration's own regex
-        // termination condition is scoped to (Termination.AgentNames) — mirrors
-        // RegexTerminationCondition's own agent-filtered backward scan (see its doc
-        // comment). Without this, a periodic/auxiliary agent (e.g. a Verifier) that
-        // speaks *after* the approving agent's turn becomes "the last assistant message"
-        // even though RegexTerminationCondition correctly looked past it and terminated
-        // on the earlier, agent-matched message — scoring the session a false FAIL.
-        var terminationAgentNames = FindScopedTerminationAgentNames(termination);
-        var lastAssistant = terminationAgentNames is { Length: > 0 }
-            ? result.Messages.LastOrDefault(m =>
-                  m.Role == MessageRole.Assistant &&
-                  terminationAgentNames.Any(n => string.Equals(n, m.AgentName, StringComparison.OrdinalIgnoreCase)))
-              ?? result.Messages.LastOrDefault(m => m.Role == MessageRole.Assistant)
-            : result.Messages.LastOrDefault(m => m.Role == MessageRole.Assistant);
+        // Score the message that finished the run — the one that handed off to "end" — so an
+        // auxiliary agent (e.g. a Verifier) speaking afterwards isn't mistaken for the result.
+        var assistants = result.Messages.Where(m => m.Role == MessageRole.Assistant).ToList();
+        var lastAssistant = assistants.LastOrDefault(m => m.ToolCalls?.Any(IsHandoffToEnd) == true)
+                            ?? assistants.LastOrDefault();
         var finalContent  = lastAssistant?.Content ?? string.Empty;
 
         // A turn that only calls handoff() with no accompanying prose leaves Content empty —
         // the routing keyword lives in the tool-call argument instead. Fold it in so
-        // keyword/regex checks see the same signal RegexTerminationCondition already used
-        // to decide the session was done.
+        // keyword/regex checks see it too.
         var handoffCall = lastAssistant?.ToolCalls?.LastOrDefault(tc =>
             string.Equals(tc.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase));
         if (handoffCall?.ArgsSummary is { Length: > 0 } handoffArgs)
@@ -386,27 +376,10 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
         };
     }
 
-    // Recursively searches a (possibly composite) termination config for a "regex" or
-    // "structured" strategy with AgentNames set, matching how CompositeTerminationStrategy
-    // /RegexTerminationCondition/StructuredTerminationCondition are actually built from this
-    // same config (see StrategyFactory) — both scan backward with the same agent-filter
-    // semantics. Returns the first match depth-first; a config with multiple agent-scoped
-    // strategies is not expected here.
-    private static string[]? FindScopedTerminationAgentNames(TerminationStrategyConfig? config)
-    {
-        if (config is null) return null;
-
-        if (config.Type.ToLowerInvariant() is "regex" or "structured"
-            && config.AgentNames is { Length: > 0 })
-            return config.AgentNames;
-
-        if (config.Strategies is not null)
-            foreach (var child in config.Strategies)
-                if (FindScopedTerminationAgentNames(child) is { Length: > 0 } found)
-                    return found;
-
-        return null;
-    }
+    private static bool IsHandoffToEnd(ToolCallRecord call) =>
+        string.Equals(call.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)
+        && call.ArgsSummary is { } args
+        && args.StartsWith($"{HandoffPlugin.ArgumentName}=end", StringComparison.OrdinalIgnoreCase);
 
     internal static EvalSuite LoadSuite(string path)
     {

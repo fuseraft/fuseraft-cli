@@ -9,7 +9,6 @@ public static class EventTypes
     // ── Core turn / session lifecycle ────────────────────────────────────────
     public const string TurnStart        = "turn_start";
     public const string TurnEnd          = "turn_end";
-    public const string TurnTimeout      = "turn_timeout";
     public const string SessionStart     = "session_start";
     public const string SessionEnd       = "session_end";
     public const string SessionError     = "session_error";
@@ -24,18 +23,16 @@ public static class EventTypes
     public const string AgentTimeout = "agent_timeout";
 
     // ── Agent routing / state machine ────────────────────────────────────────
-    public const string AgentRouted          = "agent_routed";
     public const string AgentBlocked         = "agent_blocked";
-    public const string StateAdvanced        = "state_advanced";
-    public const string KeywordDetected      = "keyword_detected";
     public const string KeywordNotFound      = "keyword_not_found";
-    public const string MultiKeyword         = "multi_keyword";
     public const string BackEdgeEscalation   = "back_edge_escalation";
     public const string ReplanBlocked        = "replan_blocked";
 
-    // ── Parallel / phase execution ───────────────────────────────────────────
+    // ── Pattern phases (map-reduce, scatter-gather) ───────────────────────
     public const string PhaseStart           = "phase_start";
     public const string PhaseEnd             = "phase_end";
+
+    // ── Parallel execution ───────────────────────────────────────────────────
     public const string ParallelStart        = "parallel_start";
     public const string ParallelMerge        = "parallel_merge";
     public const string ParallelBranchStart  = "parallel_branch_start";
@@ -97,12 +94,6 @@ public static class EventTypes
     public const string MagenticPlan     = "magentic_plan";
     public const string MagenticComplete = "magentic_complete";
     public const string MagenticReplan   = "magentic_replan";
-
-    // ── Saga orchestrator ────────────────────────────────────────────────────
-    public const string SagaCompensating       = "saga_compensating";
-    public const string SagaCompensated        = "saga_compensated";
-    public const string SagaCompensationFailed = "saga_compensation_failed";
-    public const string SagaCompensationSkipped = "saga_compensation_skipped";
 
     // ── Adversarial orchestrator ─────────────────────────────────────────────
     public const string AdversarialStageStart   = "adversarial_stage_start";

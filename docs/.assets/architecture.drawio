@@ -6,19 +6,19 @@
         <mxCell id="1" parent="0" />
 
         <!-- ===================== TITLE ===================== -->
-        <mxCell id="title" value="fuseraft — agents, plugins, validators &amp; evidence flow" style="text;html=1;fontSize=22;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="title" value="fuseraft — agents, plugins, gates &amp; evidence flow" style="text;html=1;fontSize=22;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="20" y="0" width="700" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="Claims are not evidence — artifacts and command results are. Validators are deterministic pre-flight checks; they read what plugins actually recorded on disk, not what an agent said it did." style="text;html=1;fontSize=12;fontStyle=2;align=left;verticalAlign=middle;fontColor=#666666;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="Claims are not evidence — artifacts and command results are. Gates are deterministic checks on each edge; they read what plugins actually recorded on disk, not what an agent said it did." style="text;html=1;fontSize=12;fontStyle=2;align=left;verticalAlign=middle;fontColor=#666666;" vertex="1" parent="1">
           <mxGeometry x="20" y="28" width="1100" height="24" as="geometry" />
         </mxCell>
 
         <!-- ===================== BAND BACKGROUNDS ===================== -->
-        <mxCell id="bandAgents" value="Agents &amp; Routing  (Selection strategy — keyword routing shown; graph / magentic / adversarial / map-reduce / scatter-gather also supported)" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="bandAgents" value="Agents &amp; Flow  (a steps flow shown; magentic / adversarial / mapreduce / scattergather patterns are the alternatives)" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=13;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="20" y="60" width="1610" height="150" as="geometry" />
         </mxCell>
 
-        <mxCell id="bandValidators" value="Validators — deterministic pre-flight gates (block handoff until evidence exists on disk)" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="bandValidators" value="Gates (requires:) — deterministic checks on each edge (block the handoff until evidence exists on disk)" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=13;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="20" y="230" width="1610" height="180" as="geometry" />
         </mxCell>
 
@@ -26,7 +26,7 @@
           <mxGeometry x="20" y="430" width="1610" height="150" as="geometry" />
         </mxCell>
 
-        <mxCell id="bandEvidence" value="Change Tracker &amp; Evidence Store — ground-truth artifacts on disk (what validators actually read)" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="bandEvidence" value="Change Tracker &amp; Evidence Store — ground-truth artifacts on disk (what gates actually read)" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontSize=13;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="20" y="600" width="1610" height="220" as="geometry" />
         </mxCell>
 
@@ -73,25 +73,25 @@
         <mxCell id="e_task_planner" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="n_task" target="n_planner">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e_planner_g1" value="HANDOFF TO DEVELOPER" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="n_planner" target="g1">
+        <mxCell id="e_planner_g1" value="to: Developer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="n_planner" target="g1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e_g1_developer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;" edge="1" parent="1" source="g1" target="n_developer">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e_developer_g2" value="HANDOFF TO TESTER" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="n_developer" target="g2">
+        <mxCell id="e_developer_g2" value="to: Tester" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="n_developer" target="g2">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e_g2_tester" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;" edge="1" parent="1" source="g2" target="n_tester">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e_tester_g3" value="HANDOFF TO REVIEWER" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="n_tester" target="g3">
+        <mxCell id="e_tester_g3" value="to: Reviewer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="n_tester" target="g3">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e_g3_reviewer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;" edge="1" parent="1" source="g3" target="n_reviewer">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e_reviewer_g4" value="APPROVED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="n_reviewer" target="g4">
+        <mxCell id="e_reviewer_g4" value="to: end" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;" edge="1" parent="1" source="n_reviewer" target="g4">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e_g4_done" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;" edge="1" parent="1" source="g4" target="n_done">
@@ -99,7 +99,7 @@
         </mxCell>
 
         <!-- Feedback / revision loops (validator or reviewer rejection) -->
-        <mxCell id="e_tester_developer" value="BUGS FOUND" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#b85450;fontColor=#b85450;fontSize=10;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.75;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_tester" target="n_developer">
+        <mxCell id="e_tester_developer" value="to: Developer (a test fails)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#b85450;fontColor=#b85450;fontSize=10;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.75;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_tester" target="n_developer">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="705" y="195" />
@@ -107,7 +107,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e_reviewer_developer" value="REVISION REQUIRED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#b85450;fontColor=#b85450;fontSize=10;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.9;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_reviewer" target="n_developer">
+        <mxCell id="e_reviewer_developer" value="to: Developer (needs fixes)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#b85450;fontColor=#b85450;fontSize=10;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.9;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_reviewer" target="n_developer">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="905" y="210" />
@@ -115,7 +115,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e_reviewer_planner" value="REPLAN REQUIRED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#b85450;fontColor=#b85450;fontSize=10;exitX=0.1;exitY=1;exitDx=0;exitDy=0;entryX=0.9;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_reviewer" target="n_planner">
+        <mxCell id="e_reviewer_planner" value="to: Planner (plan is wrong)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#b85450;fontColor=#b85450;fontSize=10;exitX=0.1;exitY=1;exitDx=0;exitDy=0;entryX=0.9;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="n_reviewer" target="n_planner">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="884" y="222" />
@@ -125,36 +125,36 @@
         </mxCell>
 
         <!-- ===================== VALIDATORS ROW ===================== -->
-        <mxCell id="v_brief" value="RequireBrief&#10;reads brief.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="v_brief" value="brief&#10;artifact exists and matches its shape" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="300" y="270" width="160" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="v_writefile" value="RequireWriteFile&#10;write_file / patch_file this turn" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="v_writefile" value="anyFileWritten&#10;write_file / patch_file this turn" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="500" y="270" width="160" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="v_shellpass" value="RequireShellPass&#10;shell_run exit 0 this turn" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="v_shellpass" value="commandSucceeded&#10;matching shell_run exited 0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="680" y="270" width="160" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="v_testreport" value="TestReportValid&#10;reads test-report.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="v_testreport" value="testReport&#10;reads test-report.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="860" y="270" width="160" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="v_reviewjudgement" value="RequireReviewJudgement&#10;structured PASS/FAIL block + shell_run" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="v_reviewjudgement" value="reviewJudgement&#10;structured PASS/FAIL block + shell_run" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="1040" y="270" width="180" height="50" as="geometry" />
         </mxCell>
 
-        <mxCell id="v_allfiles" value="RequireAllFilesWritten&#10;every brief.json file written" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="v_allfiles" value="filesWritten&#10;every brief.files_to_change file written" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="300" y="335" width="180" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="v_relatedtests" value="RequireRelatedTestsPass&#10;runs tests for changed files" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="v_relatedtests" value="relatedTestsPass&#10;runs tests for changed files" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="490" y="335" width="180" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="v_acceptance" value="RequireAcceptanceCriteriaPassedValidator&#10;output sentinel match in changes.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="v_acceptance" value="acceptanceCriteriaPassed&#10;expected output found in changes.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="680" y="335" width="230" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="v_contracts" value="Evidence Contracts (YAML)&#10;FileExists · CommandSucceeded · TestReport · FilesWritten" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+        <mxCell id="v_contracts" value="One contract per edge&#10;its requires: list, run by ContractEngine before the handoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
           <mxGeometry x="1180" y="335" width="230" height="50" as="geometry" />
         </mxCell>
 
-        <mxCell id="v_note" value="On failure: error injected into the conversation as a user turn → agent re-invoked. 3 consecutive failures ⇒ ValidatorStuckException." style="text;html=1;fontSize=10;fontStyle=2;fontColor=#806600;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="v_note" value="On failure: a correction naming what is missing is injected → agent re-invoked. Repeated failures ⇒ the onStuck agent, then ValidatorStuckException." style="text;html=1;fontSize=10;fontStyle=2;fontColor=#806600;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="1050" y="380" width="560" height="24" as="geometry" />
         </mxCell>
 
@@ -239,7 +239,7 @@
           <mxGeometry x="1260" y="650" width="220" height="60" as="geometry" />
         </mxCell>
 
-        <mxCell id="e_note" value="Artifacts are the ground truth validators consult — not the agent's prose claims. Planner/Tester write brief.json / test-report.json directly; everything else is captured mechanically by ChangeTracker." style="text;html=1;fontSize=10;fontStyle=2;fontColor=#5c3566;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="e_note" value="Artifacts are the ground truth gates consult — not the agent's prose claims. Planner/Tester write brief.json / test-report.json directly; everything else is captured mechanically by ChangeTracker." style="text;html=1;fontSize=10;fontStyle=2;fontColor=#5c3566;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="60" y="720" width="1000" height="24" as="geometry" />
         </mxCell>
 
@@ -286,13 +286,13 @@
         <mxCell id="legend_l2" value="- - red dashed: rejection / retry loop" style="text;html=1;fontSize=10;fontColor=#b85450;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="1380" y="103" width="240" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="legend_l3" value="- - orange dashed: gate references validator" style="text;html=1;fontSize=10;fontColor=#d79b00;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="legend_l3" value="- - orange dashed: edge references gate" style="text;html=1;fontSize=10;fontColor=#d79b00;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="1380" y="121" width="240" height="20" as="geometry" />
         </mxCell>
         <mxCell id="legend_l4" value="- - green dashed: agent invokes plugin" style="text;html=1;fontSize=10;fontColor=#3d6b31;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="1380" y="139" width="240" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="legend_l5" value="- - gold dashed: validator reads artifact" style="text;html=1;fontSize=10;fontColor=#806600;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="legend_l5" value="- - gold dashed: gate reads artifact" style="text;html=1;fontSize=10;fontColor=#806600;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="1380" y="157" width="240" height="20" as="geometry" />
         </mxCell>
         <mxCell id="legend_l6" value="— purple: ChangeTracker writes artifact" style="text;html=1;fontSize=10;fontColor=#9673a6;align=left;verticalAlign=middle;" vertex="1" parent="1">

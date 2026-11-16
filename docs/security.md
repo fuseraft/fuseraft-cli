@@ -9,21 +9,21 @@ fuseraft-cli provides two runtime containment mechanisms: a filesystem sandbox t
 
 ## Filesystem sandbox
 
-Set `Security.FileSystemSandboxPath` to a directory path. Every `FileSystem`, `Shell`, and `Git` plugin call that involves a path argument is checked before execution.
+Set `security.fileSystemSandboxPath` to a directory path. Every `FileSystem`, `Shell`, and `Git` plugin call that involves a path argument is checked before execution.
 
 ```yaml
-Security:
-  FileSystemSandboxPath: /home/user/projects/myapp
+security:
+  fileSystemSandboxPath: /home/user/projects/myapp
 ```
 
-**`fuseraft repl` applies this automatically** — no config needed. The launch directory is used as the sandbox root by default; pass `--yolo` to disable it (along with `/hitl`'s default-on approval gate — see [`fuseraft repl`](cli-reference.md#fuseraft-repl)). `fuseraft run` has no equivalent default; `Security.FileSystemSandboxPath` must be set explicitly in the orchestration config.
+**`fuseraft repl` applies this automatically** — no config needed. The launch directory is used as the sandbox root by default; pass `--yolo` to disable it (along with `/hitl`'s default-on approval gate — see [`fuseraft repl`](cli-reference.md#fuseraft-repl)). `fuseraft run` has no equivalent default; `security.fileSystemSandboxPath` must be set explicitly in the orchestration config.
 
 ### What is checked
 
 | Plugin | Functions / Argument | Check type |
 |--------|----------------------|-----------|
 | `FileSystem` | `read_file`, `write_file`, `delete_file`, `list_files`, `grep_file`, `get_file_info`, `get_file_summary` — `path` / `directory` | Hard deny if resolved path is outside sandbox |
-| `FileSystem` | `patch_file`, `create_directory`, `delete_directory`, `set_permissions`, `copy_file`, `move_file` | Hard deny if resolved path is outside sandbox (always enforced, regardless of whether `FileSystemPermissions` globs are configured) |
+| `FileSystem` | `patch_file`, `create_directory`, `delete_directory`, `set_permissions`, `copy_file`, `move_file` | Hard deny if resolved path is outside sandbox (always enforced, regardless of whether `fileSystemPermissions` globs are configured) |
 | `Shell` | `shell_run`, `shell_run_script` — `workingDirectory` | Hard deny if resolved path is outside sandbox |
 | `Shell` | `shell_run`, `shell_run_script` — `command` / `script` | Best-effort scan for absolute paths escaping sandbox |
 | `Git` | Every function — `repoPath` (`directory` for `git_init`) | Hard deny if resolved path is outside sandbox, including read-only queries (`git_status`, `git_log`, `git_show`, …); an unspecified `repoPath` defaults to the sandbox root |
@@ -91,19 +91,19 @@ Approving grants the *containing directory* of the requested path (not the singl
 
 ## Filesystem permissions (read / write / deny globs)
 
-`Security.FileSystemPermissions` adds per-path access control on top of the sandbox boundary. All three sub-lists use the same glob syntax as `ChangeEnvelope` and are evaluated relative to `FileSystemSandboxPath`. Requires `FileSystemSandboxPath` to be set.
+`security.fileSystemPermissions` adds per-path access control on top of the sandbox boundary. All three sub-lists use the same glob syntax as `changeEnvelope` and are evaluated relative to `fileSystemSandboxPath`. Requires `fileSystemSandboxPath` to be set.
 
 ```yaml
-Security:
-  FileSystemSandboxPath: /home/user/projects/myapp
-  FileSystemPermissions:
-    Read:
+security:
+  fileSystemSandboxPath: /home/user/projects/myapp
+  fileSystemPermissions:
+    read:
       - src/**
       - docs/**
-    Write:
+    write:
       - tests/**
       - docs/**
-    Deny:
+    deny:
       - secrets/**
       - infra/prod/**
       - .env
@@ -113,26 +113,26 @@ Security:
 
 For every filesystem function call, the three lists are checked in this order:
 
-1. **Deny** — if the resolved path matches any `Deny` glob, the call is blocked immediately, regardless of `Read` or `Write`.
-2. **Write** — if the function is a write operation and `Write` is non-empty, the path must match at least one `Write` glob to proceed.
-3. **Read** — if the function is a read operation and `Read` is non-empty, the path must match at least one `Read` glob to proceed.
+1. **Deny** — if the resolved path matches any `deny` glob, the call is blocked immediately, regardless of `read` or `write`.
+2. **Write** — if the function is a write operation and `write` is non-empty, the path must match at least one `write` glob to proceed.
+3. **Read** — if the function is a read operation and `read` is non-empty, the path must match at least one `read` glob to proceed.
 
 ### Which functions are covered
 
 | Category | Functions | Notes |
 |----------|-----------|-------|
 | Content-read (Read glob applies) | `read_file`, `grep_file`, `get_file_summary` | Returns file content |
-| Metadata (Deny glob only, exempt from Read) | `list_files`, `list_directory`, `get_file_info` | Returns names / timestamps only, not content — use `Deny` to restrict these |
+| Metadata (Deny glob only, exempt from Read) | `list_files`, `list_directory`, `get_file_info` | Returns names / timestamps only, not content — use `deny` to restrict these |
 | Write ops (Write glob + envelope apply) | `write_file`, `patch_file`, `delete_file`, `create_directory`, `delete_directory`, `set_permissions` | |
 | Mixed read+write (Copy/Move) | `copy_file`, `move_file` | Read glob checked on `source`; Write glob and envelope checked on `destination` |
 
-### Interaction with ChangeEnvelope
+### Interaction with `changeEnvelope`
 
-`FileSystemPermissions.Write` and `ChangeEnvelope` are independent restrictions — **both must be satisfied** when both are configured. A write is permitted only if the path matches at least one pattern from each list.
+`fileSystemPermissions.write` and `changeEnvelope` are independent restrictions — **both must be satisfied** when both are configured. A write is permitted only if the path matches at least one pattern from each list.
 
-`ChangeEnvelope` targets brownfield workflows where the Archaeologist auto-populates the list from a discovery brief. `FileSystemPermissions.Write` is the general-purpose alternative for manual configuration.
+`changeEnvelope` targets brownfield workflows where the Archaeologist auto-populates the list from a discovery brief. `fileSystemPermissions.write` is the general-purpose alternative for manual configuration.
 
-`ChangeEnvelope` applies to direct writes (`write_file`, `patch_file`, `delete_file`) and to the **destination** of copy and move operations — so copying or moving a file into a path outside the envelope is also denied.
+`changeEnvelope` applies to direct writes (`write_file`, `patch_file`, `delete_file`) and to the **destination** of copy and move operations — so copying or moving a file into a path outside the envelope is also denied.
 
 ### Denial response
 
@@ -143,9 +143,9 @@ For every filesystem function call, the three lists are checked in this order:
 
 ### REPL support and the default secrets deny list
 
-`FileSystemPermissions.Deny` is enforced in both `fuseraft run` orchestration and the REPL — the REPL loads it from `Security.FileSystemPermissions` in `.fuseraft/config/orchestration.yaml`, if that file exists, no orchestration session needs to actually run for it to apply.
+`fileSystemPermissions.deny` is enforced in both `fuseraft run` orchestration and the REPL — the REPL loads it from `security.fileSystemPermissions` in `.fuseraft/config/orchestration.yaml`, if that file exists, no orchestration session needs to actually run for it to apply.
 
-Both surfaces also always deny `.env` and `.env.*` — at **any depth** (`backend/.env` and `apps/web/.env.local`, not only in the sandbox root) — for every FileSystem tool (`read_file`, `write_file`, `patch_file`, `delete_file`, `copy_file`, `move_file`, `grep_file`, `get_file_summary`, …) and for the [Search plugin](plugins.md#search) (`search_content`, `search_symbol`, and `search_callers` skip those files, so searching for a secret's name can't surface its line) — even with no `Security` config declared anywhere, and even for a subagent's own `FileSystem` tool set — "don't leak secrets into context" shouldn't require opting in. Any `Deny` patterns from config are merged on top of this default, never replacing it. `run_skill_script` is intentionally exempt: a vetted, path-verified skill script may still `source .env` internally (see [Skills execution trust model](#skills-execution-trust-model)) — the point is stopping the *model* from reading the file's content directly, not stopping a trusted script from using it.
+Both surfaces also always deny `.env` and `.env.*` — at **any depth** (`backend/.env` and `apps/web/.env.local`, not only in the sandbox root) — for every FileSystem tool (`read_file`, `write_file`, `patch_file`, `delete_file`, `copy_file`, `move_file`, `grep_file`, `get_file_summary`, …) and for the [Search plugin](plugins.md#search) (`search_content`, `search_symbol`, and `search_callers` skip those files, so searching for a secret's name can't surface its line) — even with no `security` config declared anywhere, and even for a subagent's own `FileSystem` tool set — "don't leak secrets into context" shouldn't require opting in. Any `deny` patterns from config are merged on top of this default, never replacing it. `run_skill_script` is intentionally exempt: a vetted, path-verified skill script may still `source .env` internally (see [Skills execution trust model](#skills-execution-trust-model)) — the point is stopping the *model* from reading the file's content directly, not stopping a trusted script from using it.
 
 ### Credential files
 
@@ -163,11 +163,11 @@ The list is deliberately narrow. Files that merely *might* contain a token — `
 
 The Shell plugin applies the same protection to commands: one that names a credentials file (`cat ~/.ssh/id_rsa`, `base64 ~/.aws/credentials`, `cp ~/.netrc /tmp`, `cat ~/.ssh/id_*`) is denied with rule `credential-file`, before any approval prompt. The exception is `ssh`, `ssh-add`, and `git`, which take a key path only to authenticate with it: `ssh -i ~/.ssh/id_rsa host` and `git -c core.sshCommand='ssh -i …' fetch` still work. The denial tells the agent to let the tool read the file itself, or to ask you to run the command.
 
-To turn the credential-file protection off — say the agent's actual job is managing SSH keys — set `DenyCredentialFiles: false`. `.env` stays denied either way.
+To turn the credential-file protection off — say the agent's actual job is managing SSH keys — set `denyCredentialFiles: false`. `.env` stays denied either way.
 
 ```yaml
-Security:
-  DenyCredentialFiles: false
+security:
+  denyCredentialFiles: false
 ```
 
 ### A deny rule is never a prompt
@@ -198,8 +198,8 @@ The rules above would be easy to walk around if the file tools were the only one
 - **Shell and Probe output** goes through the same patch filter as Git: a `git diff`, `git log -p`, or `git show` run through `shell_run`, `shell_run_script`, `shell_run_background`, or `probe_*` has a protected file's body replaced by the `[content hidden: …]` line. `shell_run "git diff"` names no protected file, so the [shell guard](#credential-files) has nothing to object to; the output filter is what stops it. The repository is found by walking up from the directory the command ran in, so `git -C <other-repo> diff` is filtered against the wrong top-level and can miss a pattern anchored to the sandbox root (`**/.env`-style patterns match at any depth and are unaffected). A `cat` of a saved patch file is filtered too.
 - **Values inside protected files are masked** wherever a command prints them — see [Secret values in tool output](#secret-values-in-tool-output). `cat .e*`, `grep -r API_KEY .`, and a Python one-liner that opens the file itself no longer print it, although none of them name `.env`.
 - **`Document`** (`document_extract_text`, `document_get_info`, `document_list_sheets`, `document_get_sheet`) applies the deny rules before opening a file, so a deny-ruled `.xlsx` or `.pdf` is not readable through it either.
-- **`Probe`** runs every command it starts through the shell guard: the [dangerous-command](#dangerous-command-guard) and `sudo` rules, `ShellPolicy`, the HITL prompt, and the sandbox working directory. Before this, `probe_code` was an alternative shell with none of those. For a non-shell language (`python`, `javascript`, …) only the credential-file rule, `ShellPolicy`, and approval apply — the snippet isn't shell syntax, so the `sudo` and fetch-to-exec parsers don't run on it.
-- **`Http`** follows redirects itself. Every hop is checked against `HttpAllowedHosts` and the private-address rules, exactly like the first request, so an allowlisted host can no longer bounce a request to a host that isn't. Credentials stay on their origin: once a redirect leaves the origin, every header except `Accept`, `Accept-Language`, `Accept-Encoding`, `Cache-Control`, and `Pragma` is dropped for the rest of the chain — .NET alone strips only `Authorization`, so an API profile's `X-Api-Key` used to follow a cross-host redirect. An `https` → `http` redirect is refused, and a chain is cut off after 10 hops. A refused hop returns `[DENIED] The server redirected to '<url>', which is not permitted: <reason>`.
+- **`Probe`** runs every command it starts through the shell guard: the [dangerous-command](#dangerous-command-guard) and `sudo` rules, `shellPolicy`, the HITL prompt, and the sandbox working directory. Before this, `probe_code` was an alternative shell with none of those. For a non-shell language (`python`, `javascript`, …) only the credential-file rule, `shellPolicy`, and approval apply — the snippet isn't shell syntax, so the `sudo` and fetch-to-exec parsers don't run on it.
+- **`Http`** follows redirects itself. Every hop is checked against `httpAllowedHosts` and the private-address rules, exactly like the first request, so an allowlisted host can no longer bounce a request to a host that isn't. Credentials stay on their origin: once a redirect leaves the origin, every header except `Accept`, `Accept-Language`, `Accept-Encoding`, `Cache-Control`, and `Pragma` is dropped for the rest of the chain — .NET alone strips only `Authorization`, so an API profile's `X-Api-Key` used to follow a cross-host redirect. An `https` → `http` redirect is refused, and a chain is cut off after 10 hops. A refused hop returns `[DENIED] The server redirected to '<url>', which is not permitted: <reason>`.
 
 :::caution[What the output filter and the masker cannot do]
 Both work on text after the fact. They stop a command that prints a protected file *by accident or by an unnamed path*; they do not stop a model that deliberately re-encodes a value (`base64`, `rev`, splitting it across lines), and the file tools (`read_file`, `search_*`) are not masked — rewriting a file from text with `<secret-hidden>` substituted into it would corrupt the file, so those tools rely on the deny rules alone. If a tracked secret matters to you, keep it out of the repository (`.gitignore` it), or run in `/hitl on` and read the commands you approve.
@@ -209,16 +209,16 @@ Both work on text after the fact. They stop a command that prints a protected fi
 
 ## Shell policy
 
-`Security.ShellPolicy` controls which shell commands agents may execute. It is enforced in the Shell plugin before execution and **does not require a filesystem sandbox** — it works even when `FileSystemSandboxPath` is not set.
+`security.shellPolicy` controls which shell commands agents may execute. It is enforced in the Shell plugin before execution and **does not require a filesystem sandbox** — it works even when `fileSystemSandboxPath` is not set.
 
 ```yaml
-Security:
-  ShellPolicy:
-    Allow:
+security:
+  shellPolicy:
+    allow:
       - "go test"
       - "npm test"
       - "dotnet test"
-    Deny:
+    deny:
       - "rm -rf"
       - "curl | bash"
       - "wget | sh"
@@ -227,7 +227,7 @@ Security:
 
 ### Evaluation
 
-- **Deny is checked first.** If the command text contains any `Deny` pattern (case-insensitive substring match), the command is blocked regardless of the `Allow` list.
+- **Deny is checked first.** If the command text contains any `deny` pattern (case-insensitive substring match), the command is blocked regardless of the `Allow` list.
 - **Allow is evaluated next.** When the `Allow` list is non-empty, the command must contain at least one `Allow` pattern (case-insensitive substring match) to proceed. Commands that match no allow pattern are rejected. (This is the default `AllowMode: substring`; see [Per-segment allow lists](#per-segment-allow-lists) for a stricter mode.)
 - When both lists are empty, the shell is unrestricted (subject to the existing `sudo` block).
 
@@ -246,10 +246,10 @@ A substring deny list cannot enumerate every spelling of a dangerous command (`r
 `AllowMode: segments` changes what `Allow` means from "the text contains one of these" to "**every command in it starts with one of these**":
 
 ```yaml
-Security:
-  ShellPolicy:
-    AllowMode: segments
-    Allow:
+security:
+  shellPolicy:
+    allowMode: segments
+    allow:
       - "go test"
       - "go build"
       - "cd "
@@ -268,11 +268,11 @@ The command is split into its simple commands — each stage of a pipeline, each
 | `go test "$(cat args.txt)"` | rejected — a substitution hidden inside quotes can't be checked, so it isn't attempted |
 | `sh -c 'go test; rm -rf x'` | rejected unless `sh` is listed — the outer command is what is matched |
 
-Redirection targets (`> out.txt`) aren't commands and aren't checked. `Deny` works the same in both modes: it always matches the full text. An unknown `AllowMode` is an error in `fuseraft validate-config`, and `segments` with an empty `Allow` list is warned about (an empty list means everything is allowed).
+Redirection targets (`> out.txt`) aren't commands and aren't checked. `deny` works the same in both modes: it always matches the full text. An unknown `AllowMode` is an error in `fuseraft validate`, and `segments` with an empty `Allow` list is warned about (an empty list means everything is allowed).
 
 ### Applies to all shell execution
 
-The policy is enforced in `shell_run`, `shell_run_script`, and `shell_run_background`. Commands from any of these three tools are checked against the same `ShellPolicy`.
+The policy is enforced in `shell_run`, `shell_run_script`, and `shell_run_background`. Commands from any of these three tools are checked against the same `shellPolicy`.
 
 ### Denial response
 
@@ -284,7 +284,7 @@ The policy is enforced in `shell_run`, `shell_run_script`, and `shell_run_backgr
 
 ### Default: `.env` always denied
 
-Like `FileSystemPermissions.Deny` above, both the REPL and orchestration merge a built-in `.env` deny pattern into `ShellPolicy.Deny` by default — even with no `Security` config at all — so `cat .env`, `echo $(cat .env)`, and similar are blocked regardless of project configuration. Any `Deny` patterns declared in config are added on top, never replaced. Commands that name a [credentials file](#credential-files) (an SSH private key, `~/.aws/credentials`, …) are blocked the same way, by the `credential-file` rule of the [dangerous-command guard](#dangerous-command-guard).
+Like `fileSystemPermissions.deny` above, both the REPL and orchestration merge a built-in `.env` deny pattern into `shellPolicy.deny` by default — even with no `security` config at all — so `cat .env`, `echo $(cat .env)`, and similar are blocked regardless of project configuration. Any `deny` patterns declared in config are added on top, never replaced. Commands that name a [credentials file](#credential-files) (an SSH private key, `~/.aws/credentials`, …) are blocked the same way, by the `credential-file` rule of the [dangerous-command guard](#dangerous-command-guard).
 
 ---
 
@@ -298,12 +298,12 @@ A user-defined agent's *default* tool set is strictly read-only — it excludes 
 
 ## Change envelope
 
-Restricts **write** operations (`write_file`, `patch_file`, `delete_file`) to files matching at least one declared glob pattern. Read operations (`read_file`, `list_files`) are never affected. Requires `FileSystemSandboxPath` to be set — patterns are evaluated relative to the sandbox root.
+Restricts **write** operations (`write_file`, `patch_file`, `delete_file`) to files matching at least one declared glob pattern. Read operations (`read_file`, `list_files`) are never affected. Requires `fileSystemSandboxPath` to be set — patterns are evaluated relative to the sandbox root.
 
 ```yaml
-Security:
-  FileSystemSandboxPath: /home/user/projects/myapp
-  ChangeEnvelope:
+security:
+  fileSystemSandboxPath: /home/user/projects/myapp
+  changeEnvelope:
     - src/billing/**
     - src/payments/processor.go
     - tests/billing/**
@@ -319,9 +319,9 @@ Ask the Planner to expand the scope if this file needs to change.
 
 **Glob syntax** — standard glob patterns using `*` (single directory level), `**` (any depth), and `?` (single character). Patterns are matched case-insensitively on Windows and case-sensitively on Unix.
 
-**Brownfield auto-population** — when `Brownfield.SeedEnvelopeFromBrief: true` is set and a discovery brief exists at `Brownfield.DiscoveryBriefPath`, the brief's `in_scope_files` list is automatically merged into `ChangeEnvelope` at session startup. The envelope grows as the Archaeologist expands scope; it never shrinks during a session. See [Configuration → Brownfield mode](configuration.md#brownfield-mode).
+**Brownfield auto-population** — when `brownfield.seedEnvelopeFromBrief: true` is set and a discovery brief exists at `brownfield.discoveryBriefPath`, the brief's `in_scope_files` list is automatically merged into `changeEnvelope` at session startup. The envelope grows as the Archaeologist expands scope; it never shrinks during a session. See [Configuration → Brownfield mode](configuration.md#brownfield-mode).
 
-**Enforcement is additive** — any pattern already in `ChangeEnvelope` at config load is retained alongside the patterns seeded from the brief.
+**Enforcement is additive** — any pattern already in `changeEnvelope` at config load is retained alongside the patterns seeded from the brief.
 
 **When no envelope is set** — all writes within the sandbox root are permitted (default behaviour).
 
@@ -329,11 +329,11 @@ Ask the Planner to expand the scope if this file needs to change.
 
 ## File read size limit
 
-`read_file` returns at most `Security.ReadFileSizeLimit` characters per call (default 20,000 ≈ 5k tokens). Files larger than the limit are truncated with a notice telling the agent how to read further with `shell_run + tail`.
+`read_file` returns at most `security.readFileSizeLimit` characters per call (default 20,000 ≈ 5k tokens). Files larger than the limit are truncated with a notice telling the agent how to read further with `shell_run + tail`.
 
 ```yaml
-Security:
-  ReadFileSizeLimit: 40000   # raise to ~10k tokens per read for large-file workloads
+security:
+  readFileSizeLimit: 40000   # raise to ~10k tokens per read for large-file workloads
 ```
 
 Tune this when agents need to read large files in one call, or lower it to reduce per-read token cost for agents with small context windows. The limit applies globally to all agents in the session.
@@ -342,11 +342,11 @@ Tune this when agents need to read large files in one call, or lower it to reduc
 
 ## HTTP allowlist
 
-Set `Security.HttpAllowedHosts` to a list of permitted hostnames. If the list is non-empty, any `Http` plugin call to a hostname not on the list is denied.
+Set `security.httpAllowedHosts` to a list of permitted hostnames. If the list is non-empty, any `Http` plugin call to a hostname not on the list is denied.
 
 ```yaml
-Security:
-  HttpAllowedHosts:
+security:
+  httpAllowedHosts:
     - api.github.com
     - registry.npmjs.org
     - pypi.org
@@ -366,13 +366,13 @@ Private and loopback addresses are **always blocked** regardless of the allowlis
 
 This prevents SSRF-style attacks where an agent is tricked into making requests to internal infrastructure.
 
-An empty `HttpAllowedHosts` list means unrestricted (but private IPs are still blocked).
+An empty `httpAllowedHosts` list means unrestricted (but private IPs are still blocked).
 
-Entries in `HttpAllowedHosts` support `${ENV_VAR}` token expansion — the token is replaced with the environment variable's value at startup:
+Entries in `httpAllowedHosts` support `${ENV_VAR}` token expansion — the token is replaced with the environment variable's value at startup:
 
 ```yaml
-Security:
-  HttpAllowedHosts:
+security:
+  httpAllowedHosts:
     - "${SNOW_HOST}"       # e.g. mycompany.service-now.com
     - api.github.com
 ```
@@ -381,26 +381,26 @@ Tokens referencing unset variables expand to an empty string. See [Configuration
 
 ### AllowPrivateHosts
 
-Set `Security.AllowPrivateHosts: true` to bypass the private/loopback IP check. This allows agents to reach locally-running servers such as a mock API or a development service.
+Set `security.allowPrivateHosts: true` to bypass the private/loopback IP check. This allows agents to reach locally-running servers such as a mock API or a development service.
 
 ```yaml
-Security:
-  AllowPrivateHosts: true
-  HttpAllowedHosts:
+security:
+  allowPrivateHosts: true
+  httpAllowedHosts:
     - localhost
     - "127.0.0.1"
 ```
 
-**Do not set this in production configs.** It is intended exclusively for local development and sandbox environments where agents must contact a server running on the same machine. The `HttpAllowedHosts` allowlist is still enforced when set — `AllowPrivateHosts` only disables the private-IP range check, not the host allowlist.
+**Do not set this in production configs.** It is intended exclusively for local development and sandbox environments where agents must contact a server running on the same machine. The `httpAllowedHosts` allowlist is still enforced when set — `allowPrivateHosts` only disables the private-IP range check, not the host allowlist.
 
 ---
 
 ## Combining both
 
 ```yaml
-Security:
-  FileSystemSandboxPath: /home/user/projects/myapp
-  HttpAllowedHosts:
+security:
+  fileSystemSandboxPath: /home/user/projects/myapp
+  httpAllowedHosts:
     - api.github.com
 ```
 
@@ -420,21 +420,20 @@ For the highest isolation, use the `CodeExecution` plugin's `sandbox_run` instea
 - Container is removed after execution
 
 ```yaml
-Plugins:
-  - CodeExecution
+tools: [CodeExecution]
 ```
 
 ```
 sandbox_run(language="python", code="import os; print(os.listdir('/'))")
 ```
 
-This gives a fully isolated execution environment regardless of what the `FileSystemSandboxPath` is set to.
+This gives a fully isolated execution environment regardless of what the `fileSystemSandboxPath` is set to.
 
 ---
 
 ## Execution rings
 
-When `Security.FileSystemSandboxPath` is configured, each agent is placed in an execution ring based on its `TrustScore`. Rings layer on top of the path-level sandbox to control which *operations* the agent may perform within those paths.
+When `security.fileSystemSandboxPath` is configured, each agent is placed in an execution ring based on its `trustScore`. Rings layer on top of the path-level sandbox to control which *operations* the agent may perform within those paths.
 
 | Ring | TrustScore | Writes allowed | Shell allowed |
 |------|-----------|----------------|---------------|
@@ -445,10 +444,10 @@ When `Security.FileSystemSandboxPath` is configured, each agent is placed in an 
 Ring 3 agents can read files and list directories but are blocked from writing, deleting, running shell commands, or making network requests. This is useful for review-only agents or auditors that should not be able to modify state.
 
 ```yaml
-- Name: Auditor
-  TrustScore: 0.5
-  Plugins:
-    - FileSystem
+Auditor:
+  tools: [FileSystem]
+  advanced:
+    trustScore: 0.5
 ```
 
 See [Governance — Execution rings](governance.md#execution-rings) for details.
@@ -457,14 +456,14 @@ See [Governance — Execution rings](governance.md#execution-rings) for details.
 
 ## Dangerous-command guard
 
-Beyond `sudo`, the Shell plugin unconditionally blocks the few commands that are never a legitimate thing for an agent to run unattended. Unlike a `ShellPolicy.Deny` substring, the check parses the command — quoting, escapes, pipelines, `;` `&&` `||`, sub-shells, `env`/`nice`/`timeout`/`command` wrappers, and `sh -c` / `eval` arguments (a few levels deep) — so it is not defeated by flag order, extra whitespace, a path-qualified binary, or a quoted command name. It applies to `shell_run`, `shell_run_script`, and `shell_run_background`, needs no configuration, and — like `sudo` — is **not** lifted by `--yolo` or an empty `ShellPolicy`.
+Beyond `sudo`, the Shell plugin unconditionally blocks the few commands that are never a legitimate thing for an agent to run unattended. Unlike a `shellPolicy.deny` substring, the check parses the command — quoting, escapes, pipelines, `;` `&&` `||`, sub-shells, `env`/`nice`/`timeout`/`command` wrappers, and `sh -c` / `eval` arguments (a few levels deep) — so it is not defeated by flag order, extra whitespace, a path-qualified binary, or a quoted command name. It applies to `shell_run`, `shell_run_script`, and `shell_run_background`, needs no configuration, and — like `sudo` — is **not** lifted by `--yolo` or an empty `shellPolicy`.
 
 | Rule | Blocks | Examples |
 |------|--------|----------|
 | `catastrophic-delete` | A recursive delete of `/`, `~`, `$HOME`, your literal home directory, or a top-level system directory (`/etc`, `/usr`, `/var`, `/home`, …); or an unfiltered `find <those> -delete`. | `rm -rf /`, `rm -fr ~/`, `rm -r -f "$HOME"`, `/bin/rm -rf /etc/*`, `bash -c 'rm -rf /'`, `find / -delete` |
 | `raw-disk-op` | Formatting a filesystem or writing straight to a block device. | `mkfs.ext4 /dev/sda1`, `dd if=x of=/dev/nvme0n1`, `cat img > /dev/sdb`, `wipefs -a /dev/sda` |
 | `fetch-to-exec` | Downloading and executing in one step. | `curl … \| sh`, `wget -qO- … \| bash -s`, `bash <(curl …)`, `sh -c "$(curl …)"`, `eval "$(curl …)"` |
-| `credential-file` | Naming a [credentials file](#credential-files) — SSH private key, `~/.aws/credentials`, `.netrc`, `.pgpass`, `.git-credentials`. Off with `DenyCredentialFiles: false`. | `cat ~/.ssh/id_rsa`, `base64 ~/.aws/credentials`, `curl -T ~/.ssh/id_ed25519 …`, `cat ~/.ssh/id_*` |
+| `credential-file` | Naming a [credentials file](#credential-files) — SSH private key, `~/.aws/credentials`, `.netrc`, `.pgpass`, `.git-credentials`. Off with `denyCredentialFiles: false`. | `cat ~/.ssh/id_rsa`, `base64 ~/.aws/credentials`, `curl -T ~/.ssh/id_ed25519 …`, `cat ~/.ssh/id_*` |
 
 The agent receives, for example:
 
@@ -549,7 +548,7 @@ A variable counts as secret-looking when its name ends in, or contains as an `_`
 
 The agent never needs the value itself: a command can reference `$NAME` and the shell expands it. The environment is re-read on every call, so a variable added with `shell_set_env` mid-session is covered too.
 
-**Secrets inside protected files are masked too.** The [FileSystem deny rules](#filesystem-permissions-read--write--deny-globs) stop the file tools from reading `.env`, but `cat .e*` or `grep -r API_KEY .` doesn't name it. So the values in every file a deny rule matches under the sandbox root (and the well-known credential files in your home directory, unless `DenyCredentialFiles: false`) are masked the same way. What counts as a secret there: the value of a secret-named `KEY=VALUE` / `KEY: VALUE` line (the same name test as above, plus `PASS`, `PWD`, `DSN`, `BEARER`, `SALT`); a password inside a URL (`postgres://user:PASSWORD@host`, every `.git-credentials` line); the body of a PEM private key; a `.netrc` `password`; and the last field of a `.pgpass` line. `PORT=3000` and `NODE_ENV=production` are not secrets and stay readable.
+**Secrets inside protected files are masked too.** The [FileSystem deny rules](#filesystem-permissions-read--write--deny-globs) stop the file tools from reading `.env`, but `cat .e*` or `grep -r API_KEY .` doesn't name it. So the values in every file a deny rule matches under the sandbox root (and the well-known credential files in your home directory, unless `denyCredentialFiles: false`) are masked the same way. What counts as a secret there: the value of a secret-named `KEY=VALUE` / `KEY: VALUE` line (the same name test as above, plus `PASS`, `PWD`, `DSN`, `BEARER`, `SALT`); a password inside a URL (`postgres://user:PASSWORD@host`, every `.git-credentials` line); the body of a PEM private key; a `.netrc` `password`; and the last field of a `.pgpass` line. `PORT=3000` and `NODE_ENV=production` are not secrets and stay readable.
 
 The scan skips dependency directories (`node_modules`, `bin`, `obj`, `.git`, `vendor`, …) and symlinked directories, looks at most 8 levels deep and 20,000 entries, reads files up to 256 KB, and is cached for 10 seconds — a `.env` created mid-session is picked up within that window. With no deny rules configured, nothing is scanned.
 

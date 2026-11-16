@@ -24,7 +24,7 @@ public sealed class ScheduleAddSettings : CommandSettings
     public string Task { get; set; } = string.Empty;
 
     [CommandOption("-c|--config")]
-    [Description("Path to the orchestration config YAML. Defaults to config/orchestration.yaml.")]
+    [Description("Path to the team file. Defaults to .fuseraft/config/orchestration.yaml.")]
     public string? Config { get; set; }
 
     [CommandOption("--work-dir")]

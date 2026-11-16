@@ -24,14 +24,14 @@ public static partial class InitTemplates
     public static GeneratedConfig Build(string template, string model, string? endpoint) =>
         template switch
         {
-            "solo"        => GeneratedConfig.Inline(Solo(model, endpoint)),
+            "solo"        => Solo(model, endpoint),
             "research"    => Research(model, endpoint),
             "pipeline"    => Pipeline(model, endpoint),
             "swe"         => Swe(model, endpoint),
             "greenfield"  => Greenfield(model, endpoint),
             "brownfield"  => Brownfield(model, endpoint),
-            "magentic"    => GeneratedConfig.Inline(Magentic(model, endpoint)),
-            "debate"      => GeneratedConfig.Inline(Debate(model, endpoint)),
+            "magentic"    => Magentic(model, endpoint),
+            "debate"      => Debate(model, endpoint),
             "audit"       => Audit(model, endpoint),
             "data"        => Data(model, endpoint),
             "devops"      => DevOps(model, endpoint),
@@ -40,11 +40,8 @@ public static partial class InitTemplates
 
     /// <summary>Returns a newline-prefixed <c>Endpoint:</c> line for inline agent blocks, or empty when <paramref name="endpoint"/> is unset.</summary>
     private static string Ep(string? endpoint, string pad) =>
-        string.IsNullOrWhiteSpace(endpoint) ? string.Empty : $"\n{pad}Endpoint: {endpoint}";
+        string.IsNullOrWhiteSpace(endpoint) ? string.Empty : $"\n{pad}endpoint: {endpoint}";
 
-    /// <summary>Returns a newline-prefixed <c>Endpoint:</c> line sized for agent YAML files (two-space indent under <c>Model:</c>), or empty when <paramref name="endpoint"/> is unset.</summary>
-    private static string EpAgent(string? endpoint) =>
-        string.IsNullOrWhiteSpace(endpoint) ? string.Empty : $"\n  Endpoint: {endpoint}";
 
     // File-reading protocol, the same rule the REPL prompt gives: read a file whole when it fits, and only range a
     // file too big for that. Told "get_file_summary first, then startLine/maxLines; never cold-read", grok-4.7 read
@@ -93,8 +90,8 @@ public static partial class InitTemplates
         "approve on an earlier lucky result, and do not treat a response from a process you " +
         "did not start this turn as evidence (a server left running by an earlier agent is " +
         "not proof the change works). If every spot-check attempt this turn fails, do not " +
-        "call APPROVED — fix the command and retry once, or call handoff(route_keyword: " +
-        "\"REVISION REQUIRED\") noting that verification could not be completed.";
+        "approve — fix the command and retry once, or send the work back for revision, " +
+        "noting that verification could not be completed.";
 
     // Exact schema RequireReviewJudgementValidator parses deterministically (graph edges
     // gated with [RequireReviewJudgement]). The validator requires a fenced ```json block
@@ -103,7 +100,7 @@ public static partial class InitTemplates
     // ("emit a JSON review block...") lets the model drift from the schema and get stuck
     // failing the same gate on every retry until the graph aborts.
     private const string ReviewerJudgementBlockRule =
-        "Before writing your routing keyword, emit a fenced ```json block (not prose) with " +
+        "Before you hand off, emit a fenced ```json block (not prose) with " +
         "this exact shape: {\"review\": [{\"criterion\": \"...\", \"verdict\": \"PASS\", " +
         "\"evidence\": \"...\"}, ...]}. The validator checks this mechanically: " +
         "(a) one review entry per acceptance criterion in the brief — fewer entries than " +
@@ -112,9 +109,8 @@ public static partial class InitTemplates
         "evidence naming what you actually ran or inspected; " +
         "(c) if any verdict is PASS, a shell_run you executed THIS turn must have succeeded — " +
         "a non-zero exit, timeout, denial, or a result from an earlier turn does not count. " +
-        "If any criterion is FAIL, do not write APPROVED — route REVISION REQUIRED (or " +
-        "REPLAN REQUIRED) instead. Write the ```json block first, then the routing keyword " +
-        "on its own line.";
+        "If any criterion is FAIL, do not approve — send the work back for revision (or " +
+        "replanning) instead. Write the ```json block first, then hand off.";
 
     // The HasAssertions contract check (ContractEngine.EvaluateTestReportAsync) verifies each
     // test-report result's claimed command is a literal substring of a command that actually
@@ -139,130 +135,4 @@ public static partial class InitTemplates
         "Call session_context_read. If a prior summary exists, use it to catch up — do not re-read files that are already described there.";
     private const string ContextWriteStep =
         "Call session_context_write with a short bullet summary: what you accomplished, which files changed, and any open issues (keep it under 200 words).";
-
-    // Standard ContextWindow blocks used by developer and tester agents to strip tool
-    // frames from cross-turn history and cap how far back each turn looks.
-    private const string DeveloperContextWindow = """
-        MaxInTurnContextTokens: 60000
-        ContextWindow:
-          TextOnly: true
-          MaxTurnAge: 5
-        """;
-    private const string TesterContextWindow = """
-        ContextWindow:
-          TextOnly: true
-          MaxTurnAge: 6
-        """;
-    private const string VerifierContextWindow = """
-        ContextWindow:
-          TextOnly: true
-          MaxTurnAge: 6
-        """;
-
-    private const string AgentFileOptions = """
-
-        # -- Optional overrides -------------------------------------------------------
-        # ContextWindow:
-        #   TextOnly: true          # strip tool frames from cross-turn history
-        #   MaxTurnAge: 10          # keep only the last N agent turns in this agent's context
-        #   MaxTailMessages: 40     # hard cap: keep only the last N messages after other filters
-        #   ExcludeAgents: []       # remove all messages authored by these agents
-        # FunctionChoice: required  # force at least one tool call per turn (auto|required|none)
-        # TrustScore: 0.8           # 0.0–1.0; governs sandbox ring (≥0.8 → ring 1)
-        # MaxToolCallsPerTurn: 20
-        # MaxInTurnToolPairs: 12        # sliding window: keep only last N tool results per turn (deterministic)
-        # MaxTokens: 4096
-        # Capabilities:             # per-plugin tool allowlist
-        #   Shell: [shell_run]
-        #   FileSystem: [read_file, list_files]
-        """;
-
-    private static string OptionalSections(string model, string? endpoint) => $"""
-
-          # ---------------------------------------------------------------------------
-          # OPTIONAL SECTIONS — uncomment and fill in as needed
-          # ---------------------------------------------------------------------------
-
-          # Named model aliases. Agents reference these by alias so you only need to
-          # change the model ID in one place. Supports any OpenAI-compatible endpoint.
-          # Models:
-          #   fast:
-          #     ModelId: {model}
-          #     Endpoint: {(string.IsNullOrWhiteSpace(endpoint) ? "https://api.openai.com/v1" : endpoint)}
-          #     ApiKeyEnvVar: OPENAI_API_KEY
-          #     MaxContextTokens: 128000
-          #   reasoning:
-          #     ModelId: {model}
-          #     ReasoningEffort: low
-
-          # Sandbox agents to a directory and restrict outbound HTTP hosts.
-          # Security:
-          #   FileSystemSandboxPath: ~/my-project
-          #   HttpAllowedHosts:
-          #     - api.github.com
-          #     - registry.npmjs.org
-
-          # EvidenceStore: structured evidence graph — required for contracts and lossless compaction.
-          # EvidenceStore:
-          #   Path: {FuseraftPaths.LocalEvidence}
-
-          # Contracts: evidence-gated guards on routes or state machine transitions.
-          # Contracts:
-          #   - Name: BriefExists
-          #     Requires:
-          #       - Type: FileExists
-          #         Path: {FuseraftPaths.LocalBrief}
-          #   - Name: ImplementationComplete
-          #     Requires:
-          #       - Type: CommandSucceeded
-          #         Pattern: "build|compile"
-
-          # FailureHandling: targeted correction policy per failure type.
-          # FailureHandling:
-          #   MissingEvidence:
-          #     Action: Reinstruct
-          #     Threshold: 3
-          #   ConflictingEvidence:
-          #     Action: Reinstruct
-          #     Threshold: 2
-
-          # Verifier: meta-agent that audits the evidence graph for inconsistencies.
-          # Verifier:
-          #   AgentName: Verifier          # must match an agent name in Agents
-          #   EveryNTurns: 5
-          #   TriggerOnSuspiciousTransition: true
-          #   FindingsKeyword: INCONSISTENCY
-
-          Compaction:
-            TriggerTurnCount: 30
-            KeepRecentTurns: 8
-            Mode: lossless
-
-          # Checkpoint: save and resume sessions across restarts.
-          # Checkpoint:
-          #   Mode: json
-          #   Path: {FuseraftPaths.LocalCheckpoints}
-
-          # ChangeTracking: record every file write/delete made by agents.
-          # ChangeTracking:
-          #   Path: {FuseraftPaths.LocalChanges}
-
-          # Validation: paths used by built-in routing validators.
-          # Validation:
-          #   BriefPath: {FuseraftPaths.LocalBrief}
-          #   TestReportPath: {FuseraftPaths.LocalTestReport}
-          #   ChangeLogPath: {FuseraftPaths.LocalChanges}
-
-          Events:
-            Path: {FuseraftPaths.LocalEventsLog}
-
-          # MaxTotalTokens: token budget (input + output combined) — session halts when exceeded.
-          # MaxTotalTokens: 200000
-
-          # McpServers: connect to Model Context Protocol tool servers.
-          # McpServers:
-          #   - Name: my-mcp-server
-          #     Command: npx
-          #     Args: [-y, "@modelcontextprotocol/server-filesystem", "."]
-        """;
 }

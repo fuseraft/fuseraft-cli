@@ -49,14 +49,6 @@ public record SessionCheckpoint
     public bool IsComplete { get; set; }
 
     /// <summary>
-    /// Executor ID to resume from after a compaction or mid-session restart.
-    /// Set by the orchestration layer immediately before compaction fires so that
-    /// the correct agent is selected even when the retained history contains no
-    /// handoff keyword.  Null means "let the orchestrator infer from history."
-    /// </summary>
-    public string? ResumeExecutorId { get; set; }
-
-    /// <summary>
     /// State machine state name at the moment compaction fired (e.g. "Testing").
     /// Persisted so the orchestrator can restore the correct state when the next
     /// StreamAsync call creates a fresh StateMachineSelectionStrategy instance.
@@ -77,15 +69,6 @@ public record SessionCheckpoint
     /// was introduced (backward compatible — callers fall back to <see cref="Task"/>).
     /// </summary>
     public TaskModel? StructuredTask { get; set; }
-
-    /// <summary>
-    /// Ordered list of immutable <see cref="AgentState"/> snapshots produced during the
-    /// session, one per successful agent handoff. The first entry is the version-0 seed
-    /// created at session start; each subsequent entry is produced by
-    /// <see cref="fuseraft.Orchestration.Workflow.StateHandoff.Advance"/>. Null for sessions
-    /// that use orchestrators other than <c>GraphOrchestrator</c>.
-    /// </summary>
-    public IReadOnlyList<AgentState>? StateHistory { get; set; }
 
     /// <summary>
     /// Failure-tracking counters for the state machine, captured at compaction time and

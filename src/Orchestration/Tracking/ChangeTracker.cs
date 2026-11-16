@@ -688,16 +688,16 @@ public sealed class ChangeTracker
         }
 
         // Only enqueue state-changing calls to _pending — these feed changes.json and are
-        // used by routing validators (RequireShellPass, RequireAllFilesWritten, etc.).
+        // read by gate checks (commandSucceeded, filesWritten, ...).
         // Read-only calls (read_file, list_files, search_content) are visible in events
         // but do not belong in the change log.
         if (!isTracked)
             return result;
 
-        // Capture shell output for post-hoc verification by routing validators.
+        // Capture shell output for post-hoc verification by gate checks.
         // Capture for ALL shell_run calls (succeeded or not) so that commands which are
         // expected to exit non-zero (e.g. exit-code tests) can still be fingerprint-matched
-        // by HandoffToReviewerValidator check 8.
+        // by the testReport gate.
         // Cap at 4 096 chars so changes.json stays compact even for verbose test suites.
         string? output = null;
         if (FunctionNameMatches(name, "shell_run"))

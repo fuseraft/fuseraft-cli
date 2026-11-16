@@ -21,7 +21,6 @@ using fuseraft.Infrastructure;
 using fuseraft.Infrastructure.KeyStore;
 using fuseraft.Infrastructure.Plugins;
 using fuseraft.Orchestration;
-using fuseraft.Orchestration.Saga;
 using fuseraft.Orchestration.Strategies;
 
 namespace fuseraft.Cli;
@@ -41,7 +40,6 @@ public sealed record OrchestratorBuildResult(
     SkillCurator?                SkillCurator,
     RepositoryMemoryExtractor?   RepositoryMemoryExtractor,
     ChatClientFactory            ChatClientFactory,
-    fuseraft.Orchestration.DependencyPlanner? DependencyPlanner = null,
     fuseraft.Cli.Telemetry.SessionMetrics?    SessionMetrics    = null,
     AdaptiveTrimTracker?          AdaptiveTrimTracker = null,
     Action<string?>?              RebindSessionScopedState = null)
@@ -58,8 +56,6 @@ public sealed record OrchestratorBuildResult(
 internal sealed record OrchestratorKindFlags(
     bool HitlMode,
     bool UseMagentic,
-    bool UseGraph,
-    bool UseWorkflow,
     bool UseAdversarial,
     bool UseMapReduce,
     bool UseScatterGather);
@@ -90,7 +86,6 @@ internal sealed record OrchestratorKnowledgeServices(
     fuseraft.Infrastructure.Knowledge.KnowledgeLayer KnowledgeLayer,
     fuseraft.Infrastructure.Objectives.ObjectiveManager ObjectiveManager,
     EvidenceStore? EvidenceStore,
-    fuseraft.Orchestration.DependencyPlanner? DependencyPlanner,
     MemoryManager? MemoryManager);
 
 /// <summary>
@@ -169,19 +164,17 @@ public static class OrchestratorBuilder
             profiles, shellApprover, toolActionApprover, fileWriteApprover, cancellationToken);
         config = infra.Config;
 
-        var (governanceKernel, chatClientFactory, identityRegistry, dependencyPlanner) =
+        var (governanceKernel, chatClientFactory, identityRegistry) =
             InitGovernanceKernel(
                 config, loggerFactory, configPath, projectSlug,
                 pluginRegistry, infra.EventEmitter);
 
         bool useMagentic      = config.Selection.Type.Equals(OrchestratorTypes.Magentic,      StringComparison.OrdinalIgnoreCase);
-        bool useGraph         = config.Selection.Type.Equals(OrchestratorTypes.Graph,         StringComparison.OrdinalIgnoreCase);
-        bool useWorkflow      = config.Selection.Type.Equals(OrchestratorTypes.Workflow,      StringComparison.OrdinalIgnoreCase);
         bool useAdversarial   = config.Selection.Type.Equals(OrchestratorTypes.Adversarial,   StringComparison.OrdinalIgnoreCase);
         bool useMapReduce     = config.Selection.Type.Equals(OrchestratorTypes.MapReduce,     StringComparison.OrdinalIgnoreCase);
         bool useScatterGather = config.Selection.Type.Equals(OrchestratorTypes.ScatterGather, StringComparison.OrdinalIgnoreCase);
         var kindFlags = new OrchestratorKindFlags(
-            hitlMode, useMagentic, useGraph, useWorkflow, useAdversarial, useMapReduce, useScatterGather);
+            hitlMode, useMagentic, useAdversarial, useMapReduce, useScatterGather);
 
         var (configAfterStrategy, compactor, skillCurator) = await ValidateAndSelectStrategy(
             config, loggerFactory, chatClientFactory, kindFlags,
@@ -203,14 +196,14 @@ public static class OrchestratorBuilder
             adaptiveTrimTracker);
         var knowledgeServices = new OrchestratorKnowledgeServices(
             infra.KnowledgeLayer, infra.ObjectiveManager, infra.EvidenceStore,
-            dependencyPlanner, MemoryManager.FromConfig(config.Memory));
+            MemoryManager.FromConfig(config.Memory));
         var sessionPaths = new OrchestratorSessionPaths(
             projectSlug, sessionId, infra.ExecutionStatePath, infra.InvestigationLogPath);
 
         var (orchestrator, repoMemoryExtractor, agentFactory) = CreateOrchestrator(
             config, kindFlags, infraServices, knowledgeServices, sessionPaths, humanApprovalService);
 
-        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, dependencyPlanner, infra.SessionMetrics, adaptiveTrimTracker, infra.RebindSessionScopedState)
+        return new OrchestratorBuildResult(orchestrator, config, infra.McpManager, compactor, infra.ChangeTracker, infra.EventEmitter, governanceKernel, skillCurator, repoMemoryExtractor, chatClientFactory, infra.SessionMetrics, adaptiveTrimTracker, infra.RebindSessionScopedState)
         {
             AgentFactory = agentFactory,
         };
@@ -572,7 +565,7 @@ public static class OrchestratorBuilder
     // InitGovernanceKernel
     // -------------------------------------------------------------------------
 
-    private static (GovernanceKernel GovernanceKernel, ChatClientFactory ChatClientFactory, IdentityRegistry IdentityRegistry, fuseraft.Orchestration.DependencyPlanner? DependencyPlanner) InitGovernanceKernel(
+    private static (GovernanceKernel GovernanceKernel, ChatClientFactory ChatClientFactory, IdentityRegistry IdentityRegistry) InitGovernanceKernel(
         OrchestrationConfig config,
         ILoggerFactory loggerFactory,
         string configPath,
@@ -624,8 +617,8 @@ public static class OrchestratorBuilder
         });
 
         // Bridge ToolCallBlocked events (from sandbox + injection checks) into the JSONL log.
-        // PolicyViolation is NOT bridged here — KeywordSelectionStrategy emits those directly
-        // via _eventEmitter to preserve the richer per-turn context (consecutive count, etc.).
+        // PolicyViolation is NOT bridged here — StateMachineSelectionStrategy emits gate failures
+        // directly to preserve the richer per-turn context (consecutive count, etc.).
         if (eventEmitter is not null)
         {
             governanceKernel.OnEvent(GovernanceEventType.ToolCallBlocked, async evt =>
@@ -712,35 +705,8 @@ public static class OrchestratorBuilder
                     $"Agent '{agent.Name}' has an unresolvable model: {ex.Message}", ex);
             }
         }
-        if (config.Selection.Model is { } selectionModel)
-        {
-            try { chatClientFactory.Resolve(selectionModel); }
-            catch (InvalidOperationException ex)
-            {
-                throw new InvalidOperationException(
-                    $"Selection strategy has an unresolvable model: {ex.Message}", ex);
-            }
-        }
 
-        // Dependency planner: validate Produces/Requires graph and detect cycles at startup.
-        // Active only when at least one agent declares a dependency token.
-        fuseraft.Orchestration.DependencyPlanner? dependencyPlanner = null;
-        if (config.Agents.Any(a => a.Produces.Count > 0 || a.Requires.Count > 0))
-        {
-            // Constructor throws InvalidOperationException on cycles.
-            dependencyPlanner = new fuseraft.Orchestration.DependencyPlanner(config.Agents);
-
-            if (dependencyPlanner.ExecutionLayers.Count > 0)
-            {
-                var layerSummary = string.Join(" → ",
-                    dependencyPlanner.ExecutionLayers.Select(layer => $"[{string.Join(", ", layer)}]"));
-                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogInformation(
-                    "DependencyPlanner active — {LayerCount} layer(s): {Layers}",
-                    dependencyPlanner.ExecutionLayers.Count, layerSummary);
-            }
-        }
-
-        return (governanceKernel, chatClientFactory, identityRegistry, dependencyPlanner);
+        return (governanceKernel, chatClientFactory, identityRegistry);
     }
 
     /// <summary>
@@ -805,147 +771,14 @@ public static class OrchestratorBuilder
         string? readCachePath,
         CancellationToken cancellationToken)
     {
-        var goLogger = loggerFactory.CreateLogger<GraphOrchestrator>();
-
-        // Eagerly validate the adversarial config when that strategy is selected.
-        if (config.Selection.Type.Equals(OrchestratorTypes.Adversarial, StringComparison.OrdinalIgnoreCase))
+        // The team compiler has already validated the flow; only the manager model needs
+        // resolving here, since that needs the chat client factory.
+        if (config.Selection.Magentic?.Model is { } managerModel)
         {
-            if (config.Selection.Adversarial is null)
-                throw new InvalidOperationException(
-                    "Selection.Type 'adversarial' requires a 'Selection.Adversarial' configuration block.");
-
-            var advCfg = config.Selection.Adversarial;
-
-            if (advCfg.Stages.Count == 0)
-                throw new InvalidOperationException(
-                    "Selection.Adversarial.Stages must contain at least one stage.");
-
-            if (advCfg.Rounds < 1)
-                throw new InvalidOperationException(
-                    $"Selection.Adversarial.Rounds must be at least 1 (got {advCfg.Rounds}).");
-
-            if (string.IsNullOrWhiteSpace(advCfg.PassKeyword))
-                throw new InvalidOperationException(
-                    "Selection.Adversarial.PassKeyword must be a non-empty string.");
-
-            var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            for (int si = 0; si < advCfg.Stages.Count; si++)
-            {
-                var stage = advCfg.Stages[si];
-                if (string.IsNullOrWhiteSpace(stage.Generator))
-                    throw new InvalidOperationException(
-                        $"Selection.Adversarial.Stages[{si}]: Generator must be a non-empty agent name.");
-                if (!agentNames.Contains(stage.Generator))
-                    throw new InvalidOperationException(
-                        $"Selection.Adversarial.Stages[{si}].Generator '{stage.Generator}' " +
-                        "is not defined in 'Orchestration.Agents'.");
-                if (string.IsNullOrWhiteSpace(stage.Critic))
-                    throw new InvalidOperationException(
-                        $"Selection.Adversarial.Stages[{si}]: Critic must be a non-empty agent name.");
-                if (!agentNames.Contains(stage.Critic))
-                    throw new InvalidOperationException(
-                        $"Selection.Adversarial.Stages[{si}].Critic '{stage.Critic}' " +
-                        "is not defined in 'Orchestration.Agents'.");
-            }
-        }
-
-        // Warn when Selection.Adversarial is configured but Selection.Type is not "adversarial".
-        if (config.Selection.Adversarial is not null &&
-            !config.Selection.Type.Equals(OrchestratorTypes.Adversarial, StringComparison.OrdinalIgnoreCase))
-            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Selection.Adversarial is configured but Selection.Type is '{Type}', not 'adversarial'. " +
-                "The Adversarial block will be ignored. Set Selection.Type: adversarial to enable it.",
-                config.Selection.Type);
-
-        // Eagerly validate the Magentic manager model and loop-counter config when that strategy is selected.
-        if (config.Selection.Type.Equals(OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
-        {
-            if (config.Selection.Magentic?.Model is null)
-                throw new InvalidOperationException(
-                    "Selection.Type 'magentic' requires a 'Selection.Magentic.Model' configuration block.");
-
-            try { chatClientFactory.Resolve(config.Selection.Magentic.Model); }
+            try { chatClientFactory.Resolve(managerModel); }
             catch (InvalidOperationException ex)
             {
-                throw new InvalidOperationException(
-                    $"Magentic manager has an unresolvable model: {ex.Message}", ex);
-            }
-
-            var mag = config.Selection.Magentic;
-            if (mag.MaxRoundCount < 1)
-                throw new InvalidOperationException(
-                    $"Selection.Magentic.MaxRoundCount must be at least 1 (got {mag.MaxRoundCount}). " +
-                    "A value of 0 would exit immediately without invoking any participant agents.");
-            if (mag.MaxStallCount < 1)
-                throw new InvalidOperationException(
-                    $"Selection.Magentic.MaxStallCount must be at least 1 (got {mag.MaxStallCount}). " +
-                    "A value of 0 would trigger a replan on every single round.");
-
-            if (mag.MaxResetCount < 0)
-                throw new InvalidOperationException(
-                    $"Selection.Magentic.MaxResetCount must be >= 0 (got {mag.MaxResetCount}). " +
-                    "Use 0 to disable replanning entirely.");
-
-            // Warn when a Termination section is configured alongside the magentic type — it is
-            // silently ignored and users may not realise termination is driven by MaxRoundCount,
-            // MaxStallCount, and MaxResetCount in the Magentic block instead.
-            var t = config.Termination;
-            bool hasNonDefaultTermination = t is not null && (
-                !t.Type.Equals("composite", StringComparison.OrdinalIgnoreCase) ||
-                t.Pattern    is not null ||
-                t.Strategies is { Count: > 0 });
-            if (hasNonDefaultTermination)
-                loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                    "The 'Termination' section is ignored for Selection.Type 'magentic'. " +
-                    "Session termination is controlled by MaxRoundCount, MaxStallCount, and MaxResetCount " +
-                    "in the 'Selection.Magentic' block.");
-        }
-
-        // Warn when Selection.Magentic is configured but Selection.Type is not "magentic" —
-        // the Magentic block would be silently ignored and the session would run as sequential.
-        if (config.Selection.Magentic is not null &&
-            !config.Selection.Type.Equals(OrchestratorTypes.Magentic, StringComparison.OrdinalIgnoreCase))
-            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Selection.Magentic is configured but Selection.Type is '{Type}', not 'magentic'. " +
-                "The Magentic block will be ignored. Set Selection.Type: magentic to enable it.",
-                config.Selection.Type);
-
-        // Warn when Selection.Graph is configured but Selection.Type is neither "graph" nor
-        // "workflow" (both consume the same Selection.Graph block) — it would be silently
-        // ignored and the session would run as sequential.
-        if (config.Selection.Graph is not null &&
-            !config.Selection.Type.Equals(OrchestratorTypes.Graph, StringComparison.OrdinalIgnoreCase) &&
-            !config.Selection.Type.Equals(OrchestratorTypes.Workflow, StringComparison.OrdinalIgnoreCase))
-            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Selection.Graph is configured but Selection.Type is '{Type}', not 'graph' or 'workflow'. " +
-                "The Graph block will be ignored. Set Selection.Type: graph or workflow to enable it.",
-                config.Selection.Type);
-
-        // Validate verifier config: the named agent must exist in the agent pool.
-        if (config.Verifier is { AgentName: { Length: > 0 } verifierAgentName })
-        {
-            var agentNameSet = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (!agentNameSet.Contains(verifierAgentName))
-                throw new InvalidOperationException(
-                    $"Verifier.AgentName '{verifierAgentName}' is not defined in 'Orchestration.Agents'. " +
-                    $"Add an agent with that name or correct the verifier configuration.");
-        }
-
-        // Validate state machine config at startup when that strategy is selected.
-        if (config.Selection.Type.Equals(OrchestratorTypes.StateMachine, StringComparison.OrdinalIgnoreCase))
-        {
-            if (config.Selection.StateMachine is null)
-                throw new InvalidOperationException(
-                    "Selection.Type 'statemachine' requires a 'Selection.StateMachine' configuration block.");
-
-            // Eagerly validate that every agent referenced in state machine states exists.
-            var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var (stateName, state) in config.Selection.StateMachine.States)
-            {
-                if (!string.IsNullOrWhiteSpace(state.Agent) && !agentNames.Contains(state.Agent))
-                    throw new InvalidOperationException(
-                        $"State machine state '{stateName}' references agent '{state.Agent}' " +
-                        $"which is not defined in 'Orchestration.Agents'.");
+                throw new InvalidOperationException($"Magentic manager has an unresolvable model: {ex.Message}", ex);
             }
         }
 
@@ -998,365 +831,22 @@ public static class OrchestratorBuilder
             };
         }
 
-        // Validate map-reduce config at startup when that strategy is selected.
-        if (flags.UseMapReduce)
-        {
-            if (config.Selection.MapReduce is null)
-                throw new InvalidOperationException(
-                    "Selection.Type 'mapreduce' requires a 'Selection.MapReduce' configuration block.");
-
-            var mr        = config.Selection.MapReduce;
-            var mrAgents  = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            if (string.IsNullOrWhiteSpace(mr.Splitter))
-                throw new InvalidOperationException("Selection.MapReduce.Splitter must be a non-empty agent name.");
-            if (!mrAgents.Contains(mr.Splitter))
-                throw new InvalidOperationException(
-                    $"Selection.MapReduce.Splitter '{mr.Splitter}' is not defined in 'Orchestration.Agents'.");
-
-            if (string.IsNullOrWhiteSpace(mr.Mapper))
-                throw new InvalidOperationException("Selection.MapReduce.Mapper must be a non-empty agent name.");
-            if (!mrAgents.Contains(mr.Mapper))
-                throw new InvalidOperationException(
-                    $"Selection.MapReduce.Mapper '{mr.Mapper}' is not defined in 'Orchestration.Agents'.");
-
-            if (string.IsNullOrWhiteSpace(mr.Reducer))
-                throw new InvalidOperationException("Selection.MapReduce.Reducer must be a non-empty agent name.");
-            if (!mrAgents.Contains(mr.Reducer))
-                throw new InvalidOperationException(
-                    $"Selection.MapReduce.Reducer '{mr.Reducer}' is not defined in 'Orchestration.Agents'.");
-
-            if (mr.MaxConcurrency < 0)
-                throw new InvalidOperationException(
-                    $"Selection.MapReduce.MaxConcurrency must be >= 0 (got {mr.MaxConcurrency}). Use 0 for unlimited.");
-
-            if (mr.MaxSplitterRetries < 1)
-                throw new InvalidOperationException(
-                    $"Selection.MapReduce.MaxSplitterRetries must be at least 1 (got {mr.MaxSplitterRetries}).");
-
-            if (string.IsNullOrWhiteSpace(mr.ItemsJsonPath))
-                throw new InvalidOperationException("Selection.MapReduce.ItemsJsonPath must be a non-empty string.");
-        }
-
-        // Warn when Selection.MapReduce is configured but Selection.Type is not "mapreduce".
-        if (config.Selection.MapReduce is not null &&
-            !config.Selection.Type.Equals(OrchestratorTypes.MapReduce, StringComparison.OrdinalIgnoreCase))
-            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Selection.MapReduce is configured but Selection.Type is '{Type}', not 'mapreduce'. " +
-                "The MapReduce block will be ignored. Set Selection.Type: mapreduce to enable it.",
-                config.Selection.Type);
-
-        if (flags.UseScatterGather)
-        {
-            if (config.Selection.ScatterGather is null)
-                throw new InvalidOperationException(
-                    "Selection.Type 'scattergather' requires a 'Selection.ScatterGather' configuration block.");
-
-            var sg        = config.Selection.ScatterGather;
-            var sgAgents  = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            if (sg.Participants.Count == 0)
-                throw new InvalidOperationException("Selection.ScatterGather.Participants must contain at least one agent name.");
-
-            foreach (var p in sg.Participants)
-            {
-                if (string.IsNullOrWhiteSpace(p) || !sgAgents.Contains(p))
-                    throw new InvalidOperationException(
-                        $"Selection.ScatterGather.Participants contains '{p}' which is not defined in 'Orchestration.Agents'.");
-            }
-
-            if (string.IsNullOrWhiteSpace(sg.Synthesizer))
-                throw new InvalidOperationException("Selection.ScatterGather.Synthesizer must be a non-empty agent name.");
-            if (!sgAgents.Contains(sg.Synthesizer))
-                throw new InvalidOperationException(
-                    $"Selection.ScatterGather.Synthesizer '{sg.Synthesizer}' is not defined in 'Orchestration.Agents'.");
-            if (sg.MaxConcurrency < 0)
-                throw new InvalidOperationException(
-                    $"Selection.ScatterGather.MaxConcurrency must be >= 0 (got {sg.MaxConcurrency}). Use 0 for unlimited.");
-        }
-
-        // Warn when Selection.ScatterGather is configured but Selection.Type is not "scattergather".
-        if (config.Selection.ScatterGather is not null &&
-            !config.Selection.Type.Equals(OrchestratorTypes.ScatterGather, StringComparison.OrdinalIgnoreCase))
-            loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                "Selection.ScatterGather is configured but Selection.Type is '{Type}', not 'scattergather'. " +
-                "The ScatterGather block will be ignored. Set Selection.Type: scattergather to enable it.",
-                config.Selection.Type);
-
-        // Validate graph config at startup when the graph strategy is selected.
-        if (flags.UseGraph)
-        {
-            if (config.Selection.Graph is null)
-                throw new InvalidOperationException(
-                    "Selection.Type 'graph' requires a 'Selection.Graph' configuration block.");
-
-            var graphCfg   = config.Selection.Graph;
-            var agentNames = config.Agents.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var nodeIds    = graphCfg.Nodes.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            if (graphCfg.Nodes.Count == 0)
-                throw new InvalidOperationException(
-                    "Selection.Graph.Nodes must contain at least one node.");
-
-            // Validate node agent references and uniqueness.
-            var seenNodeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var node in graphCfg.Nodes)
-            {
-                if (string.IsNullOrWhiteSpace(node.Id))
-                    throw new InvalidOperationException(
-                        "Every node in Selection.Graph.Nodes must have a non-empty 'Id'.");
-                if (!seenNodeIds.Add(node.Id))
-                    throw new InvalidOperationException(
-                        $"Duplicate node Id '{node.Id}' found in Selection.Graph.Nodes. Node Ids must be unique.");
-
-                bool isSubGraphNode = !string.IsNullOrWhiteSpace(node.SubGraphId);
-
-                if (isSubGraphNode)
-                {
-                    if (!string.IsNullOrWhiteSpace(node.Agent))
-                        throw new InvalidOperationException(
-                            $"Graph node '{node.Id}' has both 'Agent' and 'SubGraphId' set. " +
-                            $"Use one or the other — leave 'Agent' empty when using 'SubGraphId'.");
-
-                    if (graphCfg.SubGraphs is null || !graphCfg.SubGraphs.TryGetValue(node.SubGraphId!, out var subSpec))
-                        throw new InvalidOperationException(
-                            $"Graph node '{node.Id}' references SubGraphId '{node.SubGraphId}' " +
-                            $"which is not defined in Selection.Graph.SubGraphs.");
-
-                    if (!subSpec.IsValid)
-                        throw new InvalidOperationException(
-                            $"SubGraph '{node.SubGraphId}' must set exactly one of 'Graph', 'MapReduce', or 'ScatterGather'.");
-
-                    if (subSpec.IsMapReduce)
-                    {
-                        var mr = subSpec.MapReduce!;
-                        if (string.IsNullOrWhiteSpace(mr.Splitter) || !agentNames.Contains(mr.Splitter))
-                            throw new InvalidOperationException(
-                                $"SubGraph '{node.SubGraphId}' MapReduce.Splitter '{mr.Splitter}' is not defined in 'Orchestration.Agents'.");
-                        if (string.IsNullOrWhiteSpace(mr.Mapper) || !agentNames.Contains(mr.Mapper))
-                            throw new InvalidOperationException(
-                                $"SubGraph '{node.SubGraphId}' MapReduce.Mapper '{mr.Mapper}' is not defined in 'Orchestration.Agents'.");
-                        if (string.IsNullOrWhiteSpace(mr.Reducer) || !agentNames.Contains(mr.Reducer))
-                            throw new InvalidOperationException(
-                                $"SubGraph '{node.SubGraphId}' MapReduce.Reducer '{mr.Reducer}' is not defined in 'Orchestration.Agents'.");
-                        if (mr.MaxConcurrency < 0)
-                            throw new InvalidOperationException(
-                                $"SubGraph '{node.SubGraphId}' MapReduce.MaxConcurrency must be >= 0 (got {mr.MaxConcurrency}).");
-                        if (mr.MaxSplitterRetries < 1)
-                            throw new InvalidOperationException(
-                                $"SubGraph '{node.SubGraphId}' MapReduce.MaxSplitterRetries must be at least 1 (got {mr.MaxSplitterRetries}).");
-                        if (string.IsNullOrWhiteSpace(mr.ItemsJsonPath))
-                            throw new InvalidOperationException(
-                                $"SubGraph '{node.SubGraphId}' MapReduce.ItemsJsonPath must be a non-empty string.");
-                    }
-                    else if (subSpec.IsScatterGather)
-                    {
-                        var sg = subSpec.ScatterGather!;
-                        if (sg.Participants.Count == 0)
-                            throw new InvalidOperationException(
-                                $"SubGraph '{node.SubGraphId}' ScatterGather.Participants must contain at least one agent name.");
-                        foreach (var p in sg.Participants)
-                        {
-                            if (string.IsNullOrWhiteSpace(p) || !agentNames.Contains(p))
-                                throw new InvalidOperationException(
-                                    $"SubGraph '{node.SubGraphId}' ScatterGather.Participants contains '{p}' which is not defined in 'Orchestration.Agents'.");
-                        }
-                        if (string.IsNullOrWhiteSpace(sg.Synthesizer) || !agentNames.Contains(sg.Synthesizer))
-                            throw new InvalidOperationException(
-                                $"SubGraph '{node.SubGraphId}' ScatterGather.Synthesizer '{sg.Synthesizer}' is not defined in 'Orchestration.Agents'.");
-                        if (sg.MaxConcurrency < 0)
-                            throw new InvalidOperationException(
-                                $"SubGraph '{node.SubGraphId}' ScatterGather.MaxConcurrency must be >= 0 (got {sg.MaxConcurrency}).");
-                    }
-                }
-                else
-                {
-                    if (string.IsNullOrWhiteSpace(node.Agent))
-                        throw new InvalidOperationException(
-                            $"Graph node '{node.Id}' must specify an 'Agent' name (or set 'SubGraphId' for a sub-graph node).");
-                    if (!agentNames.Contains(node.Agent))
-                        throw new InvalidOperationException(
-                            $"Graph node '{node.Id}' references agent '{node.Agent}' " +
-                            $"which is not defined in 'Orchestration.Agents'.");
-                }
-            }
-
-            // Validate edge node references.
-            foreach (var edge in graphCfg.Edges)
-            {
-                if (!nodeIds.Contains(edge.From))
-                    throw new InvalidOperationException(
-                        $"Graph edge From='{edge.From}' does not match any node Id in Selection.Graph.Nodes.");
-                if (!nodeIds.Contains(edge.To))
-                    throw new InvalidOperationException(
-                        $"Graph edge To='{edge.To}' does not match any node Id in Selection.Graph.Nodes.");
-            }
-
-            // Validate entry node when explicitly set.
-            if (!string.IsNullOrWhiteSpace(graphCfg.EntryNode) && !nodeIds.Contains(graphCfg.EntryNode))
-                throw new InvalidOperationException(
-                    $"Selection.Graph.EntryNode '{graphCfg.EntryNode}' does not match any node Id in Selection.Graph.Nodes.");
-
-            // GAP-5: Warn about no-keyword edges mixed with keyword edges on the same source node.
-            // When a node has both keyword and no-keyword edges the no-keyword edge is silently ignored
-            // at runtime because the unconditional routing path only activates for all-no-keyword nodes.
-            foreach (var edge in graphCfg.Edges.Where(e => string.IsNullOrEmpty(e.Keyword)))
-            {
-                bool hasOtherKeywordEdges = graphCfg.Edges.Any(e =>
-                    string.Equals(e.From, edge.From, StringComparison.OrdinalIgnoreCase)
-                    && !string.IsNullOrEmpty(e.Keyword));
-                if (hasOtherKeywordEdges)
-                    goLogger.LogWarning(
-                        "[GraphOrchestrator] Node '{From}' has a no-keyword edge to '{To}' alongside " +
-                        "keyword edges — the no-keyword edge will be ignored at runtime. " +
-                        "Add a keyword to use it, or remove all keyword edges to use unconditional routing.",
-                        edge.From, edge.To);
-            }
-
-            // GAP-6: Warn when the same keyword appears on both a forward and a back-edge from the
-            // same source node. The back-edge takes priority at runtime (PhaseBreakKeywords is checked
-            // before Routes), so the forward route for that keyword will never fire.
-            // NOTE: Uses node list index as a BFS-layer proxy. This is accurate when nodes are listed
-            // in topological order (entry node first). If the list order differs from BFS discovery
-            // order, the warning may produce a false positive or miss a real ambiguity.
-            var nodeIndexMap = graphCfg.Nodes
-                .Select((n, i) => (n.Id, i))
-                .ToDictionary(x => x.Id, x => x.i, StringComparer.OrdinalIgnoreCase);
-
-            var keywordEdgeGroups = graphCfg.Edges
-                .Where(e => !string.IsNullOrEmpty(e.Keyword))
-                .GroupBy(e => (From: e.From, Keyword: e.Keyword!), (k, _) => k,
-                    EqualityComparer<(string From, string Keyword)>.Create(
-                        (a, b) => string.Equals(a.From, b.From, StringComparison.OrdinalIgnoreCase)
-                                  && string.Equals(a.Keyword, b.Keyword, StringComparison.OrdinalIgnoreCase),
-                        x => StringComparer.OrdinalIgnoreCase.GetHashCode(x.From)
-                             ^ StringComparer.OrdinalIgnoreCase.GetHashCode(x.Keyword)));
-
-            foreach (var (fromNode, keyword) in keywordEdgeGroups)
-            {
-                var edgesForKw = graphCfg.Edges.Where(e =>
-                    string.Equals(e.From, fromNode, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(e.Keyword, keyword, StringComparison.OrdinalIgnoreCase)).ToList();
-                int fromIdx = nodeIndexMap.GetValueOrDefault(fromNode, 0);
-                bool hasFwd  = edgesForKw.Any(e => nodeIndexMap.GetValueOrDefault(e.To, 0) > fromIdx);
-                bool hasBack = edgesForKw.Any(e => nodeIndexMap.GetValueOrDefault(e.To, 0) <= fromIdx);
-                if (hasFwd && hasBack)
-                    goLogger.LogWarning(
-                        "[GraphOrchestrator] Node '{From}' has keyword '{Keyword}' on both a forward " +
-                        "and a back-edge — the back-edge takes priority at runtime. " +
-                        "The forward route for this keyword will never fire.",
-                        fromNode, keyword);
-            }
-        }
-
-        // Validate workflow config at startup when the cycle-native workflow strategy is
-        // selected. WorkflowOrchestrator reuses Selection.Graph (same schema as 'graph') but
-        // is a v1 implementation — Parallel, SubGraphId, RequireHumanApproval, RecoveryAgent,
-        // and no-keyword (unconditional) edges are rejected here rather than silently ignored.
-        // See WorkflowOrchestrator's class doc comment and docs/strategies.md for rationale.
-        if (flags.UseWorkflow)
-        {
-            if (config.Selection.Graph is null)
-                throw new InvalidOperationException(
-                    "Selection.Type 'workflow' requires a 'Selection.Graph' configuration block.");
-
-            var wfCfg      = config.Selection.Graph;
-            var agentByName = config.Agents.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
-            var agentNames = agentByName.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var nodeIds    = wfCfg.Nodes.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            if (wfCfg.Nodes.Count == 0)
-                throw new InvalidOperationException(
-                    "Selection.Graph.Nodes must contain at least one node.");
-
-            var seenNodeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var node in wfCfg.Nodes)
-            {
-                if (string.IsNullOrWhiteSpace(node.Id))
-                    throw new InvalidOperationException(
-                        "Every node in Selection.Graph.Nodes must have a non-empty 'Id'.");
-                if (!seenNodeIds.Add(node.Id))
-                    throw new InvalidOperationException(
-                        $"Duplicate node Id '{node.Id}' found in Selection.Graph.Nodes. Node Ids must be unique.");
-
-                if (!string.IsNullOrWhiteSpace(node.SubGraphId))
-                    throw new InvalidOperationException(
-                        $"Workflow node '{node.Id}' sets 'SubGraphId', which Selection.Type 'workflow' " +
-                        "does not support in this version. Use Selection.Type 'graph' for sub-graph nodes.");
-
-                if (node.Parallel)
-                    throw new InvalidOperationException(
-                        $"Workflow node '{node.Id}' sets 'Parallel: true', which Selection.Type 'workflow' " +
-                        "does not support in this version. Use Selection.Type 'graph' for parallel fan-out.");
-
-                if (string.IsNullOrWhiteSpace(node.Agent))
-                    throw new InvalidOperationException(
-                        $"Workflow node '{node.Id}' must specify an 'Agent' name.");
-                if (!agentByName.TryGetValue(node.Agent, out var nodeAgentCfg))
-                    throw new InvalidOperationException(
-                        $"Workflow node '{node.Id}' references agent '{node.Agent}' " +
-                        $"which is not defined in 'Orchestration.Agents'.");
-
-                // Selection.Type 'workflow' routes exclusively via the Handoff plugin's
-                // handoff(route_keyword: ...) tool call — there is no text-on-its-own-line
-                // fallback the way 'graph' has. Reject rather than silently fail every turn.
-                if (!nodeAgentCfg.Plugins.Contains(HandoffPlugin.PluginName, StringComparer.OrdinalIgnoreCase))
-                    throw new InvalidOperationException(
-                        $"Workflow node '{node.Id}' agent '{node.Agent}' does not have the " +
-                        $"'{HandoffPlugin.PluginName}' plugin enabled. " +
-                        "Selection.Type 'workflow' routes exclusively via handoff(route_keyword: ...) " +
-                        "tool calls (no text-keyword fallback) — add 'Handoff' to this agent's Plugins list.");
-            }
-
-            foreach (var edge in wfCfg.Edges)
-            {
-                if (!nodeIds.Contains(edge.From))
-                    throw new InvalidOperationException(
-                        $"Workflow edge From='{edge.From}' does not match any node Id in Selection.Graph.Nodes.");
-                if (!nodeIds.Contains(edge.To))
-                    throw new InvalidOperationException(
-                        $"Workflow edge To='{edge.To}' does not match any node Id in Selection.Graph.Nodes.");
-
-                if (string.IsNullOrEmpty(edge.Keyword))
-                    throw new InvalidOperationException(
-                        $"Workflow edge From='{edge.From}' To='{edge.To}' has no 'Keyword'. " +
-                        "Selection.Type 'workflow' requires every edge to declare a Keyword in this version " +
-                        "(no unconditional routing). Use Selection.Type 'graph' for unconditional edges.");
-
-                if (edge.RequireHumanApproval)
-                    throw new InvalidOperationException(
-                        $"Workflow edge From='{edge.From}' To='{edge.To}' sets 'RequireHumanApproval: true', " +
-                        "which Selection.Type 'workflow' does not support in this version. " +
-                        "Use Selection.Type 'graph' for human-approval gates.");
-
-                if (edge.RecoveryAgent is not null)
-                    throw new InvalidOperationException(
-                        $"Workflow edge From='{edge.From}' To='{edge.To}' sets 'RecoveryAgent', " +
-                        "which Selection.Type 'workflow' does not support in this version. " +
-                        "Use Selection.Type 'graph' for recovery agents.");
-            }
-
-            if (!string.IsNullOrWhiteSpace(wfCfg.EntryNode) && !nodeIds.Contains(wfCfg.EntryNode))
-                throw new InvalidOperationException(
-                    $"Selection.Graph.EntryNode '{wfCfg.EntryNode}' does not match any node Id in Selection.Graph.Nodes.");
-        }
-
         ConversationCompactor? compactor = null;
         if (config.Compaction is { } compactionConfig)
         {
             if (compactionConfig.TriggerTurnCount <= 0)
                 throw new InvalidOperationException(
-                    $"Compaction.TriggerTurnCount must be a positive integer (got {compactionConfig.TriggerTurnCount}). " +
+                    $"advanced.compaction.triggerTurnCount must be a positive integer (got {compactionConfig.TriggerTurnCount}). " +
                     "A value of 0 or less would compact the conversation on every turn.");
 
             if (compactionConfig.KeepRecentTurns < 1)
                 throw new InvalidOperationException(
-                    "Compaction.KeepRecentTurns must be at least 1.");
+                    "advanced.compaction.keepRecentTurns must be at least 1.");
 
             if (compactionConfig.KeepRecentTurns >= compactionConfig.TriggerTurnCount)
                 throw new InvalidOperationException(
-                    $"Compaction.KeepRecentTurns ({compactionConfig.KeepRecentTurns}) must be " +
-                    $"less than Compaction.TriggerTurnCount ({compactionConfig.TriggerTurnCount}).");
+                    $"advanced.compaction.keepRecentTurns ({compactionConfig.KeepRecentTurns}) must be " +
+                    $"less than advanced.compaction.triggerTurnCount ({compactionConfig.TriggerTurnCount}).");
 
             var summaryModel = compactionConfig.Model ?? config.Agents[0].Model;
             // Magentic, adversarial, and map-reduce sessions have no brief.json or change log,
@@ -1388,7 +878,7 @@ public static class OrchestratorBuilder
                 && intentLog is null)
             {
                 loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                    "Compaction.Mode is 'intent' but no ChangeTracking.IntentLogPath is configured — " +
+                    "advanced.compaction.mode is 'intent' but no ChangeTracking.IntentLogPath is configured — " +
                     "compaction will fall back to lossless or LLM mode at runtime. " +
                     "Set ChangeTracking.IntentLogPath to enable deterministic intent compaction.");
             }
@@ -1414,13 +904,13 @@ public static class OrchestratorBuilder
             bool budgetNeedsCompactor = budget.CutoverAt > 0 || budget.MaxSingleTurnInputTokens > 0;
             if (budgetNeedsCompactor && compactor is null)
                 throw new InvalidOperationException(
-                    "ContextBudget.CutoverAt and ContextBudget.MaxSingleTurnInputTokens require a " +
-                    "Compaction configuration. Add a Compaction section to your orchestration config " +
+                    "advanced.contextBudget.cutoverAt and maxSingleTurnInputTokens require " +
+                    "compaction. Add advanced.compaction to your team file " +
                     "so the compactor is available when the context budget triggers.");
 
             if (budget.WarnAt > 0 && budget.CutoverAt > 0 && budget.WarnAt >= budget.CutoverAt)
                 throw new InvalidOperationException(
-                    $"ContextBudget.WarnAt ({budget.WarnAt:N0}) must be less than " +
+                    $"advanced.contextBudget.warnAt ({budget.WarnAt:N0}) must be less than " +
                     $"CutoverAt ({budget.CutoverAt:N0}).");
 
             // Warn when WarnTurnTokens >= CutoverAt: a turn that fires the per-turn warning
@@ -1431,7 +921,7 @@ public static class OrchestratorBuilder
                 config.WarnTurnTokens >= budget.CutoverAt)
             {
                 loggerFactory.CreateLogger(nameof(OrchestratorBuilder)).LogWarning(
-                    "WarnTurnTokens ({WarnTurnTokens:N0}) is >= ContextBudget.CutoverAt ({CutoverAt:N0}). " +
+                    "advanced.warnTurnTokens ({WarnTurnTokens:N0}) is >= advanced.contextBudget.cutoverAt ({CutoverAt:N0}). " +
                     "The per-turn warning fires in the same turn that triggers compaction — it cannot " +
                     "provide advance warning. Set WarnTurnTokens below CutoverAt to get an early signal " +
                     "before the compaction threshold is crossed.",
@@ -1481,7 +971,6 @@ public static class OrchestratorBuilder
         var knowledgeLayer       = knowledge.KnowledgeLayer;
         var objectiveManager     = knowledge.ObjectiveManager;
         var evidenceStore        = knowledge.EvidenceStore;
-        var dependencyPlanner    = knowledge.DependencyPlanner;
         var memoryManager        = knowledge.MemoryManager;
         var projectSlug          = sessionPaths.ProjectSlug;
         var sessionId            = sessionPaths.SessionId;
@@ -1489,8 +978,6 @@ public static class OrchestratorBuilder
         var investigationLogPath = sessionPaths.InvestigationLogPath;
 
         var aoLogger = loggerFactory.CreateLogger<AgentOrchestrator>();
-        var goLogger = loggerFactory.CreateLogger<GraphOrchestrator>();
-
         var resolvedSandbox = config.Security?.FileSystemSandboxPath is { Length: > 0 } sbx
             ? FuseraftPaths.ExpandPath(sbx) : null;
 
@@ -1501,8 +988,7 @@ public static class OrchestratorBuilder
             brokerMemoryStore,
             knowledgeLayer.ProvenanceRegistry);
 
-        // Shared assembler used by both the state machine (HandoffContext) and the
-        // orchestrator (AgentConfig.Context). One instance so session ID updates propagate.
+        // Shared assembler for agents' context sources (AgentConfig.Context). One instance so session ID updates propagate.
         // Sources the graph store and ADR registry from the shared knowledge layer so
         // adr_graph traversal sees the same state as the plugins and change tracker.
         var contextAssembler = new ContextAssembler(
@@ -1518,7 +1004,7 @@ public static class OrchestratorBuilder
         if (!string.IsNullOrEmpty(sessionId))
             contextAssembler.SetSessionId(sessionId);
 
-        var strategyFactory = new StrategyFactory(chatClientFactory.Create, eventEmitter, loggerFactory, governanceKernel, humanApprovalService, evidenceStore, knowledgeLayer.ProvenanceRegistry, config.TestSelector, resolvedSandbox, contextAssembler);
+        var strategyFactory = new StrategyFactory(eventEmitter, loggerFactory, governanceKernel, evidenceStore, config.TestSelector, resolvedSandbox, humanApprovalService);
 
         var agentFactory = new AgentFactory(chatClientFactory, infra.PluginRegistry, config.Security, changeTracker, config.Scratchpad, config.Chatroom, governanceKernel, infra.IdentityRegistry, eventEmitter, loggerFactory, BuildSkillsProvider(loggerFactory), infra.ToolArtifactStore, infra.AdaptiveTrimTracker, FileLedger.Shared);
 
@@ -1543,38 +1029,11 @@ public static class OrchestratorBuilder
         if (!string.IsNullOrEmpty(sessionId))
             contextPipeline.SetSessionId(sessionId);
 
-        // MagenticOrchestrator handles the "magentic" selection type: a manager LLM drives
-        // dynamic planning, speaker selection, and stall detection without hard-coded routing.
-        //
-        // GraphOrchestrator handles the "graph" selection type: declarative directed-graph
-        // execution with per-node agents, keyword-driven edges, and optional back-edges.
-        //
-        // AdversarialOrchestrator handles the "adversarial" selection type: GAN-style
-        // generate → critique → revise loops where critics receive isolated context windows.
-        //
-        // AgentOrchestrator is the general-purpose path: it drives any selection strategy
-        // (sequential, llm, keyword, structured) through StrategyFactory and works with
-        // any agent names and any team size.
+        // Each pattern has its own orchestrator; a Steps flow runs on AgentOrchestrator with
+        // the state machine selector.
         IOrchestrator orchestrator;
 
-        if (flags.UseGraph)
-        {
-            orchestrator = new GraphOrchestrator(
-                config, agentFactory, goLogger,
-                changeTracker, eventEmitter, governanceKernel,
-                flags.HitlMode ? humanApprovalService : null,
-                contextPipeline, knowledgeStore,
-                loggerFactory);
-        }
-        else if (flags.UseWorkflow)
-        {
-            var wfLogger = loggerFactory.CreateLogger<WorkflowOrchestrator>();
-            orchestrator  = new WorkflowOrchestrator(
-                config, agentFactory, wfLogger,
-                changeTracker, eventEmitter, governanceKernel,
-                contextPipeline);
-        }
-        else if (flags.UseAdversarial)
+        if (flags.UseAdversarial)
         {
             var advLogger = loggerFactory.CreateLogger<AdversarialOrchestrator>();
             orchestrator  = new AdversarialOrchestrator(
@@ -1614,7 +1073,7 @@ public static class OrchestratorBuilder
         }
         else
         {
-            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager, contextAssembler, dependencyPlanner, contextPipeline, knowledgeStore);
+            orchestrator = new AgentOrchestrator(config, agentFactory, strategyFactory, aoLogger, changeTracker, eventEmitter, governanceKernel, memoryManager, contextAssembler, contextPipeline, knowledgeStore);
         }
 
         // Repository memory extractor — runs after the session to generate candidates.
@@ -1628,11 +1087,6 @@ public static class OrchestratorBuilder
                 evidenceStore, extractorStore);
         }
 
-        // Wrap with SagaOrchestrator when the saga pattern is enabled.
-        // The wrapper preserves the IOrchestrator contract so the rest of the pipeline
-        // is unaffected; it adds compensating-rollback behaviour on failure.
-        if (config.Saga?.Enabled == true)
-            orchestrator = new SagaOrchestrator(orchestrator, config.Saga, compensators: null, eventEmitter);
 
         return (orchestrator, repoMemoryExtractor, agentFactory);
     }
