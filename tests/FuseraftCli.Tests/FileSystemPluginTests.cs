@@ -1142,4 +1142,58 @@ public sealed class FileSystemPluginTests : IDisposable
         Assert.False(File.Exists(TempPath("\"MainForm.Designer.cs\"")));
     }
 
+    // -----------------------------------------------------------------------
+    // patch_file recovery: the write lock, end-of-file line breaks, mismatch excerpts
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WriteFile_AfterPatch_IsBlocked_UntilTheFileIsReRead()
+    {
+        await File.WriteAllTextAsync(TempPath("lock.sql"), "select 1;\nGo\n");
+        await _plugin.ReadFileAsync(TempPath("lock.sql"));
+        await _plugin.PatchFileAsync(TempPath("lock.sql"), "select 1;", "select 2;");
+
+        Assert.Contains("WRITE BLOCKED", await _plugin.WriteFileAsync(TempPath("lock.sql"), "select 3;\nGo\n"));
+
+        await _plugin.ReadFileAsync(TempPath("lock.sql"));
+        Assert.StartsWith("[OK]", await _plugin.WriteFileAsync(TempPath("lock.sql"), "select 3;\nGo\n"));
+        Assert.Equal("select 3;\nGo\n", await ReadBack("lock.sql"));
+    }
+
+    [Fact]
+    public async Task PatchFile_OldTextWithALineBreakTheFileEndsWithout_MatchesAtTheEnd()
+    {
+        await File.WriteAllTextAsync(TempPath("eof.sql"), "select 1;\n\nEND\nGo\nleftover\nEND\nGo");
+
+        var result = await _plugin.PatchFileAsync(TempPath("eof.sql"), "leftover\nEND\nGo\n", "");
+
+        Assert.StartsWith("[OK]", result);
+        Assert.Equal("select 1;\n\nEND\nGo\n", await ReadBack("eof.sql"));
+    }
+
+    [Fact]
+    public async Task PatchFile_OldTextWithALineBreakTheFileEndsWithout_KeepsNoFinalNewline()
+    {
+        await File.WriteAllTextAsync(TempPath("eof2.sql"), "a\nEND\nGo");
+
+        Assert.StartsWith("[OK]", await _plugin.PatchFileAsync(TempPath("eof2.sql"), "END\nGo\n", "END\nGO\n"));
+        Assert.Equal("a\nEND\nGO", await ReadBack("eof2.sql"));
+    }
+
+    [Fact]
+    public async Task PatchFile_Mismatch_ExcerptShowsTheLineTheHintNames()
+    {
+        var lines = new List<string> { "--select @OwningOrg as OwningOrg;" };
+        lines.AddRange(Enumerable.Range(0, 30).Select(i => $"filler {i}"));
+        lines.Add("--select @OwningOrg as OwningOrg, @AllocationOrg as AllocationOrg;");
+        lines.Add("END");
+        lines.Add("Go");
+        await File.WriteAllTextAsync(TempPath("far.sql"), string.Join("\n", lines) + "\n");
+
+        var result = await _plugin.PatchFileAsync(TempPath("far.sql"),
+            "--select @OwningOrg as OwningOrg, @AllocationOrg as AllocationOrg;\nEND\nGO", "x");
+
+        Assert.Contains("up to line 34", result);
+        Assert.Contains(">>>   34: Go", result);
+    }
 }
