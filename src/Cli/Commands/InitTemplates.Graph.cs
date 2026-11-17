@@ -76,10 +76,7 @@ public static partial class InitTemplates
               functionChoice: required
               contextWindow:
                 textOnly: true
-                maxTailMessages: 0
                 maxTurnAge: 5
-                maxToolResultChars: 0
-                maxReplayChars: 0
               maxInTurnContextTokens: 60000
               maxInTurnToolPairs: 12
           Tester:
@@ -110,10 +107,7 @@ public static partial class InitTemplates
               functionChoice: required
               contextWindow:
                 textOnly: true
-                maxTailMessages: 0
                 maxTurnAge: 6
-                maxToolResultChars: 0
-                maxReplayChars: 0
               maxInTurnToolPairs: 12
           Reviewer:
             role: Reviews implementation and test results; gives final approval or requests changes.
@@ -134,10 +128,6 @@ public static partial class InitTemplates
             advanced:
               contextWindow:
                 textOnly: true
-                maxTailMessages: 0
-                maxTurnAge: 0
-                maxToolResultChars: 0
-                maxReplayChars: 0
               capabilities:
                 FileSystem: [read]
           Approved:
@@ -145,9 +135,7 @@ public static partial class InitTemplates
             model: default
             instructions: |
               All acceptance criteria have already been verified and approved.
-              Write exactly one sentence confirming the task is complete. Nothing else.
-            advanced:
-              functionChoice: none
+              Write exactly one sentence confirming the task is complete, then hand off to end.
 
         flow:
           start: Planner

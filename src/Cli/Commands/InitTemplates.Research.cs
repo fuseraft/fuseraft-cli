@@ -40,8 +40,6 @@ public static partial class InitTemplates
               functionChoice: required
               context:
                 - source: file:.fuseraft/docs/research-review.json
-                  maxChars: 0
-                  label: null
               capabilities:
                 FileSystem: [read]
           Critic:
@@ -85,14 +83,9 @@ public static partial class InitTemplates
               functionChoice: required
               context:
                 - source: session_context
-                  maxChars: 0
-                  label: null
                 - source: file:.fuseraft/docs/research-findings.md
                   maxChars: 8000
-                  label: null
                 - source: own_history:2
-                  maxChars: 0
-                  label: null
               capabilities:
                 FileSystem: [read]
           Writer:

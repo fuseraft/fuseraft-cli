@@ -194,10 +194,6 @@ agents:
     advanced:
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
-        maxTurnAge: 0
-        maxToolResultChars: 0
-        maxReplayChars: 0
   Verifier:
     role: Evidence auditor who checks for inconsistencies between claims and recorded actions.
     model:

@@ -175,10 +175,7 @@ public static partial class InitTemplates
               functionChoice: required
               contextWindow:
                 textOnly: true
-                maxTailMessages: 0
                 maxTurnAge: 5
-                maxToolResultChars: 0
-                maxReplayChars: 0
               maxInTurnContextTokens: 60000
               maxInTurnToolPairs: 12
           Reviewer:
@@ -204,14 +201,8 @@ public static partial class InitTemplates
             advanced:
               context:
                 - source: session_context
-                  maxChars: 0
-                  label: null
                 - source: changes_recent:3
-                  maxChars: 0
-                  label: null
                 - source: own_history:2
-                  maxChars: 0
-                  label: null
               capabilities:
                 FileSystem: [read]
           Approved:
@@ -219,9 +210,7 @@ public static partial class InitTemplates
             model: default
             instructions: |
               All acceptance criteria have already been verified and approved.
-              Write exactly one sentence confirming the task is complete. Nothing else.
-            advanced:
-              functionChoice: none
+              Write exactly one sentence confirming the task is complete, then hand off to end.
 
         flow:
           start: Archaeologist

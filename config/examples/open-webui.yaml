@@ -98,10 +98,6 @@ agents:
       functionChoice: required
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
-        maxTurnAge: 0
-        maxToolResultChars: 0
-        maxReplayChars: 0
   Tester:
     role: QA engineer who independently verifies changes with real tool calls.
     model:
@@ -154,10 +150,6 @@ agents:
       functionChoice: required
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
-        maxTurnAge: 0
-        maxToolResultChars: 0
-        maxReplayChars: 0
   Reviewer:
     role: "Tech lead who approves only after reading the code, running a spot-check, and confirming all acceptance criteria are verified passing."
     model:
@@ -213,10 +205,6 @@ agents:
     advanced:
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
-        maxTurnAge: 0
-        maxToolResultChars: 0
-        maxReplayChars: 0
   Verifier:
     role: Evidence auditor who checks for inconsistencies between claims and recorded actions.
     model:

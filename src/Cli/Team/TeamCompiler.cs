@@ -466,6 +466,9 @@ public static class TeamCompiler
 
         var tools = new List<string>(agent.Tools);
         var routes = flow.Routes.TryGetValue(name, out var r) ? r : null;
+        if (routes is { Count: > 0 } && agent.RemoteAgent is null && baseAgent.FunctionChoice.Equals("none", StringComparison.OrdinalIgnoreCase))
+            throw new TeamConfigException(
+                $"{at}.advanced.functionChoice: 'none' stops {name} from calling handoff, so it could never leave its step. Remove it.");
         if (routes is { Count: > 0 } && agent.RemoteAgent is null && !tools.Contains(Infrastructure.Plugins.HandoffPlugin.PluginName, StringComparer.OrdinalIgnoreCase))
             tools.Add(Infrastructure.Plugins.HandoffPlugin.PluginName);
 
@@ -506,8 +509,8 @@ public static class TeamCompiler
         foreach (var p in adv.EnumerateObject())
             if (!AdvancedTopLevel.Contains(p.Name))
                 throw new TeamConfigException(
-                    $"Advanced: '{p.Name}' isn't an advanced field. Fields: {string.Join(", ", AdvancedTopLevel.Order())}.");
+                    $"advanced: '{p.Name}' isn't an advanced field. Fields: {string.Join(", ", AdvancedTopLevel.Order())}.");
 
-        return TeamConfigLoader.Deserialize<OrchestrationConfig>(adv, "Advanced");
+        return TeamConfigLoader.Deserialize<OrchestrationConfig>(adv, "advanced");
     }
 }

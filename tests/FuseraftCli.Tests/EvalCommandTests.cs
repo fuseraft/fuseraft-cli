@@ -210,6 +210,28 @@ public sealed class EvalCommandTests
     }
 
     [Fact]
+    public void Score_NamedRouteToEnd_UsesTheFinishingHandoff()
+    {
+        var messages = new List<AgentMessage>
+        {
+            new()
+            {
+                AgentName = "Reviewer", Content = "", Role = "assistant",
+                ToolCalls = [new ToolCallRecord("handoff", "route_keyword=APPROVED", true)],
+            },
+            new() { AgentName = "Reviewer", Content = "Review complete.", Role = "assistant" },
+        };
+        var sessionResult = new SessionResult(true, null, messages, TimeSpan.FromMilliseconds(500));
+
+        var result = EvalCommand.Score(
+            new EvalCase { Id = "t1", ExpectRegex = [@"\bAPPROVED\b"] },
+            sessionResult,
+            "sid1");
+
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
     public void Score_NoHandoffToEnd_FallsBackToLastAssistantMessage()
     {
         var messages = new List<AgentMessage>

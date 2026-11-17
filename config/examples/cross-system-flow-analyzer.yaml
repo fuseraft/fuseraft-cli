@@ -197,10 +197,7 @@ agents:
       functionChoice: required
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
         maxTurnAge: 5
-        maxToolResultChars: 0
-        maxReplayChars: 0
       capabilities:
         FileSystem: [read, write]
       subagentModel: scout
@@ -265,10 +262,7 @@ agents:
       functionChoice: required
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
         maxTurnAge: 3
-        maxToolResultChars: 0
-        maxReplayChars: 0
       capabilities:
         FileSystem: [read, write]
       subagentModel: scout
@@ -308,10 +302,7 @@ agents:
       functionChoice: required
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
         maxTurnAge: 3
-        maxToolResultChars: 0
-        maxReplayChars: 0
       capabilities:
         FileSystem: [read, write]
   Normalizer:
@@ -376,10 +367,7 @@ agents:
       functionChoice: required
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
         maxTurnAge: 5
-        maxToolResultChars: 0
-        maxReplayChars: 0
       capabilities:
         FileSystem: [read, write]
   Synthesizer:
@@ -483,10 +471,7 @@ agents:
       functionChoice: required
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
         maxTurnAge: 10
-        maxToolResultChars: 0
-        maxReplayChars: 0
       capabilities:
         FileSystem: [read, write]
   DiagramBuilder:
@@ -538,10 +523,7 @@ agents:
       functionChoice: required
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
         maxTurnAge: 2
-        maxToolResultChars: 0
-        maxReplayChars: 0
       capabilities:
         FileSystem: [read, write]
   OutputValidator:
@@ -591,10 +573,7 @@ agents:
       functionChoice: required
       contextWindow:
         textOnly: true
-        maxTailMessages: 0
         maxTurnAge: 2
-        maxToolResultChars: 0
-        maxReplayChars: 0
       capabilities:
         FileSystem: [read, write]
 

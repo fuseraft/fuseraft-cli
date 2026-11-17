@@ -94,10 +94,7 @@ public static partial class InitTemplates
               functionChoice: required
               contextWindow:
                 textOnly: true
-                maxTailMessages: 0
                 maxTurnAge: 1
-                maxToolResultChars: 0
-                maxReplayChars: 0
               skipExecutionState: true
               capabilities:
                 FileSystem: [read]
@@ -274,11 +271,7 @@ public static partial class InitTemplates
               functionChoice: required
               context:
                 - source: session_context
-                  maxChars: 0
-                  label: null
                 - source: changes_recent
-                  maxChars: 0
-                  label: null
               capabilities:
                 FileSystem: [read]
           Developer:
@@ -351,17 +344,10 @@ public static partial class InitTemplates
               functionChoice: required
               contextWindow:
                 textOnly: true
-                maxTailMessages: 0
                 maxTurnAge: 6
-                maxToolResultChars: 0
-                maxReplayChars: 0
               context:
                 - source: session_context
-                  maxChars: 0
-                  label: null
                 - source: changes_recent
-                  maxChars: 0
-                  label: null
               maxInTurnContextTokens: 60000
               maxInTurnToolPairs: 12
           Tester:
@@ -417,23 +403,11 @@ public static partial class InitTemplates
               functionChoice: required
               context:
                 - source: session_context
-                  maxChars: 0
-                  label: null
                 - source: changes_recent:5
-                  maxChars: 0
-                  label: null
                 - source: brief_field:test_targets
-                  maxChars: 0
-                  label: null
                 - source: brief_field:build_command
-                  maxChars: 0
-                  label: null
                 - source: own_history:6
-                  maxChars: 0
-                  label: null
                 - source: changes_recent
-                  maxChars: 0
-                  label: null
               maxInTurnContextTokens: 30000
               maxInTurnToolPairs: 12
           Reviewer:
@@ -458,17 +432,9 @@ public static partial class InitTemplates
             advanced:
               context:
                 - source: session_context
-                  maxChars: 0
-                  label: null
                 - source: changes_recent:3
-                  maxChars: 0
-                  label: null
                 - source: own_history:2
-                  maxChars: 0
-                  label: null
                 - source: changes_recent
-                  maxChars: 0
-                  label: null
               capabilities:
                 FileSystem: [read]
 
