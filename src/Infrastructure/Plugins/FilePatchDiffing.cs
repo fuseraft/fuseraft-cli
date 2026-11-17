@@ -103,6 +103,15 @@ internal static class FilePatchDiffing
 
         if (bestLine < 0 || bestScore < 4) return string.Empty;
 
+        return ExcerptAroundLine(fileLines, bestLine, contextLines);
+    }
+
+    // The excerpt around a 1-based line, so it shows the place a mismatch hint names.
+    internal static string ExcerptAroundLine(string fileContent, int line, int contextLines)
+        => ExcerptAroundLine(fileContent.Split('\n'), line - 1, contextLines);
+
+    private static string ExcerptAroundLine(string[] fileLines, int bestLine, int contextLines)
+    {
         var from = Math.Max(0, bestLine - contextLines);
         var to   = Math.Min(fileLines.Length - 1, bestLine + contextLines);
         var sb   = new System.Text.StringBuilder();
@@ -123,7 +132,12 @@ internal static class FilePatchDiffing
     // em dash for "--", curly for straight quotes, trailing spaces, a non-breaking space — are
     // the usual reason a patch keeps missing. Both inputs must already be LF-normalised.
     internal static string FindFirstDifference(string fileContent, string searchText)
+        => FindFirstDifference(fileContent, searchText, out _);
+
+    // As above; line is the 1-based line of the difference, or 0 when there's no hint.
+    internal static string FindFirstDifference(string fileContent, string searchText, out int line)
     {
+        line = 0;
         // Prefix occurrence is monotonic (if the first k chars occur, so do the first k-1), so
         // binary search the length with IndexOf instead of comparing at every file offset.
         int lo = 0, hi = searchText.Length;
@@ -138,7 +152,7 @@ internal static class FilePatchDiffing
         if (matched < MinDifferenceAnchor || matched >= searchText.Length) return string.Empty;
 
         var at   = fileContent.IndexOf(searchText[..matched], StringComparison.Ordinal) + matched;
-        var line = 1;
+        line = 1;
         var lineStart = 0;
         for (int i = 0; i < at; i++)
             if (fileContent[i] == '\n') { line++; lineStart = i + 1; }

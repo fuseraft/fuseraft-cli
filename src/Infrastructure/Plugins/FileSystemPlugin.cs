@@ -430,6 +430,8 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (startLine <= 1 && maxLines <= 0 && !charTruncated && !budgetTrimmed)
         {
             ReadSet.Add(resolved);
+            // The agent now has the patched content, so a write_file can't be stale.
+            _patchedThisTurn.Remove(resolved);
             if (ReadScope.Current is null)
                 _sessionCache?.RecordRead(resolved, fileInfo);
         }
@@ -507,6 +509,21 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (elisionDenial is not null) return elisionDenial;
 
         var idx = normalContent.IndexOf(normalOld, StringComparison.Ordinal);
+
+        // An oldText copied from the end of a file usually carries a line break the file
+        // doesn't end with. Match it at the end, and keep the file's missing final newline.
+        if (idx < 0 && normalOld.EndsWith('\n'))
+        {
+            var trimmedOld = normalOld.TrimEnd('\n');
+            if (trimmedOld.Length > 0 && normalContent.EndsWith(trimmedOld, StringComparison.Ordinal))
+            {
+                idx = normalContent.Length - trimmedOld.Length;
+                for (var extra = normalOld.Length - trimmedOld.Length; extra > 0 && normalNew.EndsWith('\n'); extra--)
+                    normalNew = normalNew[..^1];
+                normalOld = trimmedOld;
+            }
+        }
+
         if (idx < 0)
         {
             // Release the write-once lock so write_file can serve as a recovery path.
@@ -515,9 +532,11 @@ public sealed class FileSystemPlugin : ITurnResettable
             _patchedThisTurn.Remove(resolved);
 
             // Give the agent enough information to correct itself without a full re-read.
-            var differenceHint = FilePatchDiffing.FindFirstDifference(normalContent, normalOld);
+            var differenceHint = FilePatchDiffing.FindFirstDifference(normalContent, normalOld, out var differenceLine);
             var lineHint       = differenceHint.Length > 0 ? string.Empty : FilePatchDiffing.CountLines(normalContent, normalOld);
-            var excerpt      = FilePatchDiffing.ExtractExcerpt(normalContent, normalOld, contextLines: 8);
+            var excerpt      = differenceLine > 0
+                ? FilePatchDiffing.ExcerptAroundLine(normalContent, differenceLine, contextLines: 8)
+                : FilePatchDiffing.ExtractExcerpt(normalContent, normalOld, contextLines: 8);
             var excerptNote  = excerpt.Length > 0
                 ? $"\nNearest content in file:\n{excerpt}\n"
                 : string.Empty;
