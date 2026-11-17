@@ -93,17 +93,10 @@ public static partial class InitTemplates
               functionChoice: required
               context:
                 - source: session_context
-                  maxChars: 0
-                  label: null
                 - source: file:.fuseraft/artifacts/ops-plan.yaml
                   maxChars: 4000
-                  label: null
                 - source: changes_recent:3
-                  maxChars: 0
-                  label: null
                 - source: own_history:2
-                  maxChars: 0
-                  label: null
               capabilities:
                 FileSystem: [read]
 

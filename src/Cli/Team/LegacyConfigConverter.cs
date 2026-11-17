@@ -259,7 +259,7 @@ internal sealed class LegacyConfigConverter
             edges.Add(new Edge(node.Agent, TeamCompiler.EndState, TeamCompiler.EndState, "your work is complete",
                 ValidatorChecks(node.Validators ?? [], null, null, $"node {node.Id}")));
         if (g.MaxRetries is > 0)
-            _notes.Add("Graph.MaxRetries dropped; gate retries follow Advanced.FailureHandling.");
+            _notes.Add("Graph.MaxRetries dropped; gate retries follow advanced.failureHandling.");
         return (agentOf[g.EntryNode ?? throw new TeamConfigException("Selection.Graph.EntryNode is missing.")], edges);
     }
 
@@ -323,7 +323,7 @@ internal sealed class LegacyConfigConverter
     private void DropRedundantTermination()
     {
         if (_legacy.Termination?.Strategies is { Count: > 0 } || _legacy.Termination?.Pattern is not null)
-            _notes.Add("Termination rules dropped; the run now ends on the edge to 'end' or at Limits.MaxTurns.");
+            _notes.Add("Termination rules dropped; the run now ends on the edge to 'end' or at limits.maxTurns.");
     }
 
     private static string? WhenFromSignal(string? signal, string to)
@@ -337,6 +337,7 @@ internal sealed class LegacyConfigConverter
 
     private JsonObject StepsNode(string start, List<Edge> edges)
     {
+        _routed.UnionWith(edges.Select(e => e.From));
         // Walk the flow from Start so steps read in the order they run.
         var order = new List<string>();
         var queue = new Queue<string>([start]);
@@ -585,15 +586,24 @@ internal sealed class LegacyConfigConverter
 
             node["Instructions"] = RewriteSignals(a.Name, a.Instructions ?? "");
 
+            // An agent that can't call tools can't hand off; in the old format a terminal node ended the run without one.
+            var functionChoice = a.FunctionChoice;
+            if (_routed.Contains(a.Name) && functionChoice.Equals("none", StringComparison.OrdinalIgnoreCase))
+            {
+                functionChoice = defaults.FunctionChoice;
+                _notes.Add($"{a.Name}: FunctionChoice 'none' dropped; it has to call handoff to leave its step.");
+            }
+
             var adv = Diff(a with
             {
+                FunctionChoice = functionChoice,
                 Name = defaults.Name, Instructions = defaults.Instructions, Description = defaults.Description,
                 Model = defaults.Model, Plugins = defaults.Plugins, Isolation = defaults.Isolation,
                 RemoteAgent = null, AgentFile = null,
                 Context = context.Count > 0 ? context.Distinct().ToList() : null,
             }, defaults);
             if (_legacy.AgentDependencies.ContainsKey(a.Name))
-                _notes.Add($"{a.Name}: Produces/Requires dependency tokens dropped; Flow order and Requires gates cover them.");
+                _notes.Add($"{a.Name}: Produces/Requires dependency tokens dropped; flow order and requires gates cover them.");
             if (adv is JsonObject advObj && advObj.Count > 0) node["Advanced"] = advObj;
 
             agents[a.Name] = node;
@@ -611,6 +621,7 @@ internal sealed class LegacyConfigConverter
     }
 
     private readonly Dictionary<string, List<string>> _extraWrites = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _routed = new(StringComparer.Ordinal);
 
     private void AddWrites(string agent, string artifact)
     {
@@ -662,8 +673,17 @@ internal sealed class LegacyConfigConverter
         Add("Memory", _cfg.Memory, new MemoryConfig());
         Add("Output", _cfg.Output, new OutputConfig());
 
+        var logs = new[]
+        {
+            ("Events.Path", _cfg.Events?.Path, new EventsConfig().Path),
+            ("ChangeTracking.Path", _cfg.ChangeTracking?.Path, new ChangeTrackingConfig().Path),
+            ("EvidenceStore.Path", _cfg.EvidenceStore?.Path, new EvidenceStoreConfig().Path),
+        }.Where(l => l.Item2 is not null && l.Item2 != l.Item3).Select(l => l.Item1).ToList();
+        if (logs.Count > 0)
+            _notes.Add($"{string.Join(", ", logs)} dropped; team runs always use the default log locations.");
+
         if (_legacy.TestAssertionPatterns is { Count: > 0 })
-            _notes.Add("Validation.TestAssertionPatterns dropped; the TestReport check uses the built-in patterns.");
+            _notes.Add("Validation.TestAssertionPatterns dropped; the testReport check uses the built-in patterns.");
         return adv;
     }
 
@@ -674,27 +694,44 @@ internal sealed class LegacyConfigConverter
     {
         var v = JsonSerializer.SerializeToNode(value, value.GetType(), Json);
         var d = JsonSerializer.SerializeToNode(defaults, defaults.GetType(), Json);
-        return DiffNodes(v, d);
+        return DiffNodes(v, d, value.GetType());
     }
 
-    private static JsonNode? DiffNodes(JsonNode? v, JsonNode? d)
+    private static JsonNode? DiffNodes(JsonNode? v, JsonNode? d, Type? type)
     {
+        // A nested record that defaults to null is compared against a fresh instance, so its own defaults drop out.
+        if (v is JsonObject && d is null && NewDefault(type) is { } fresh)
+            d = JsonSerializer.SerializeToNode(fresh, type!, Json);
         if (v is JsonObject vo && d is JsonObject dobj)
         {
             var result = new JsonObject();
             foreach (var (key, child) in vo)
             {
                 if (child is null) continue;
-                var diff = DiffNodes(child, dobj[key]);
+                var diff = DiffNodes(child, dobj[key], type?.GetProperty(key)?.PropertyType);
                 if (diff is not null) result[key] = diff;
             }
             return result.Count > 0 ? result : null;
         }
+        if (v is JsonArray va && va.Count > 0 && ElementType(type) is { } element && NewDefault(element) is not null
+            && (d is null || !JsonNode.DeepEquals(v, d)))
+            return new JsonArray(va.Select(item => DiffNodes(item, null, element) ?? new JsonObject()).ToArray());
         if (v is null) return null;
         if (d is not null && JsonNode.DeepEquals(v, d)) return null;
         if (v is JsonArray { Count: 0 } && d is null) return null;
         return Prune(v.DeepClone());
     }
+
+    private static object? NewDefault(Type? type)
+    {
+        if (type is null || type == typeof(string) || !type.IsClass || type.IsAbstract
+            || typeof(System.Collections.IEnumerable).IsAssignableFrom(type) || type.GetConstructor(Type.EmptyTypes) is null)
+            return null;
+        return Activator.CreateInstance(type);
+    }
+
+    private static Type? ElementType(Type? type) =>
+        type is { IsGenericType: true } && type.GetGenericTypeDefinition() == typeof(List<>) ? type.GetGenericArguments()[0] : null;
 
     // Drops nulls and empty collections from a node copied without a default to compare against.
     private static JsonNode? Prune(JsonNode? node)

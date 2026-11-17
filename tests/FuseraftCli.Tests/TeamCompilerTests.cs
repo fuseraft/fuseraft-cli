@@ -530,6 +530,11 @@ public class TeamCompilerTests : IDisposable
     public void Approve_MustBeABool() =>
         Assert.Contains("approve: expected true or false", Fails(Minimal.Replace("- To: end", "- To: end\n        Approve: maybe")).Message);
 
+    [Fact]
+    public void FunctionChoiceNone_OnAStep_IsAnError() =>
+        Assert.Contains("agents.Writer.advanced.functionChoice: 'none' stops Writer from calling handoff",
+            Fails(MinimalCamel.Replace("functionChoice: required", "functionChoice: none")).Message);
+
     private const string MinimalCamel = """
         team: T
         agents:

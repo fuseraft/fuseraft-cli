@@ -153,7 +153,7 @@ Don't repeat any of that in `instructions`. Write about the work itself.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `functionChoice` | `auto` | `auto`, `required` (must call a tool every turn; use for agents that act), or `none`. |
+| `functionChoice` | `auto` | `auto`, `required` (must call a tool every turn; use for agents that act), or `none` (only for pattern agents: an agent with `steps` routes has to call `handoff`). |
 | `capabilities` | `{}` | Per-plugin tool filter. See [Capabilities](#capabilities). |
 | `contextWindow` | — | Filters shared history for `conversation`/`fork` agents. See [`contextWindow`](#contextwindow). |
 | `context` | — | Extra context sources: `session_context`, `changes_recent:N`, `brief_field:FIELD`, `file:PATH`, `own_history:N`, `execution_state`, `investigation_log`. |

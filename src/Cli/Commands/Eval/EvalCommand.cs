@@ -325,8 +325,10 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
 
         // Score the message that finished the run — the one that handed off to "end" — so an
         // auxiliary agent (e.g. a Verifier) speaking afterwards isn't mistaken for the result.
+        // A named route to end (to: end, name: APPROVED) carries its name, so the last handoff counts too.
         var assistants = result.Messages.Where(m => m.Role == MessageRole.Assistant).ToList();
         var lastAssistant = assistants.LastOrDefault(m => m.ToolCalls?.Any(IsHandoffToEnd) == true)
+                            ?? (result.Succeeded ? assistants.LastOrDefault(m => m.ToolCalls?.Any(IsHandoff) == true) : null)
                             ?? assistants.LastOrDefault();
         var finalContent  = lastAssistant?.Content ?? string.Empty;
 
@@ -375,6 +377,9 @@ public sealed class EvalCommand(ILoggerFactory loggerFactory, PluginRegistry plu
             ErrorMessage      = result.ErrorMessage,
         };
     }
+
+    private static bool IsHandoff(ToolCallRecord call) =>
+        string.Equals(call.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsHandoffToEnd(ToolCallRecord call) =>
         string.Equals(call.Name, HandoffPlugin.FunctionName, StringComparison.OrdinalIgnoreCase)

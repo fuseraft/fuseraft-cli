@@ -126,6 +126,62 @@ public class LegacyConfigConverterTests : IDisposable
     }
 
     [Fact]
+    public void NestedRecords_KeepOnlyTheFieldsTheUserSet()
+    {
+        var legacy = StateMachine.Replace("""
+                  Isolation: Shared
+            """, """
+                  Isolation: Shared
+                  ContextWindow: { TextOnly: true, MaxTurnAge: 5 }
+                  Context:
+                    - Source: session_context
+                    - { Source: changes_recent, Label: Recent changes }
+            """);
+        var (yaml, _, cfg) = Convert(legacy);
+
+        Assert.DoesNotContain("maxChars", yaml);
+        Assert.DoesNotContain("label: null", yaml);
+        Assert.DoesNotContain("maxTailMessages", yaml);
+        Assert.Contains("label: Recent changes", yaml);
+        var developer = cfg.Agents.Single(a => a.Name == "Developer");
+        Assert.Equal(5, developer.ContextWindow!.MaxTurnAge);
+        Assert.Equal(["session_context", "changes_recent"], developer.Context!.Select(c => c.Source));
+    }
+
+    [Fact]
+    public void FunctionChoiceNone_IsDroppedFromAnAgentThatMustHandOff()
+    {
+        var legacy = StateMachine.Replace("""
+                    Review. Call handoff(route_keyword: "APPROVED").
+            """, """
+                    Review. Call handoff(route_keyword: "APPROVED").
+                  FunctionChoice: none
+            """);
+        var (yaml, notes, cfg) = Convert(legacy);
+
+        Assert.DoesNotContain("functionChoice", yaml);
+        Assert.Contains(notes, n => n.StartsWith("Reviewer: FunctionChoice 'none' dropped", StringComparison.Ordinal));
+        Assert.Equal("auto", cfg.Agents.Single(a => a.Name == "Reviewer").FunctionChoice);
+    }
+
+    [Fact]
+    public void CustomLogPaths_AreNotedWhenDropped()
+    {
+        var notes = Convert(StateMachine.Replace("  Name: Dev\n", "  Name: Dev\n  Events: { Path: .fuseraft/events.jsonl }\n")).Notes;
+
+        Assert.Contains(notes, n => n.StartsWith("Events.Path dropped", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DefaultLogPaths_AreNotNoted()
+    {
+        var notes = Convert(StateMachine.Replace("  Name: Dev\n",
+            "  Name: Dev\n  ChangeTracking: { Path: \"~/.fuseraft/state/{project_slug}/changes.json\" }\n")).Notes;
+
+        Assert.DoesNotContain(notes, n => n.Contains("dropped; team runs", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Signals_BecomeWhenText()
     {
         Assert.Contains("when: replan required", Convert(StateMachine).Yaml);

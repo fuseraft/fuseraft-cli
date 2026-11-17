@@ -77,14 +77,9 @@ public static partial class InitTemplates
               functionChoice: required
               context:
                 - source: session_context
-                  maxChars: 0
-                  label: null
                 - source: file:.fuseraft/artifacts/audit-findings.json
                   maxChars: 6000
-                  label: null
                 - source: own_history:2
-                  maxChars: 0
-                  label: null
               capabilities:
                 FileSystem: [read]
           Developer:
@@ -116,10 +111,7 @@ public static partial class InitTemplates
               functionChoice: required
               contextWindow:
                 textOnly: true
-                maxTailMessages: 0
                 maxTurnAge: 5
-                maxToolResultChars: 0
-                maxReplayChars: 0
               maxInTurnContextTokens: 60000
               maxInTurnToolPairs: 12
           Verifier:
@@ -143,17 +135,10 @@ public static partial class InitTemplates
               functionChoice: required
               context:
                 - source: session_context
-                  maxChars: 0
-                  label: null
                 - source: file:.fuseraft/artifacts/remediation-plan.json
                   maxChars: 6000
-                  label: null
                 - source: changes_recent:5
-                  maxChars: 0
-                  label: null
                 - source: own_history:2
-                  maxChars: 0
-                  label: null
               capabilities:
                 FileSystem: [read]
 
