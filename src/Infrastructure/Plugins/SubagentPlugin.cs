@@ -169,7 +169,7 @@ public sealed class SubagentPlugin(
     public async Task<string> ExploreAsync(
         [Description("Exploration question or task.")]
         string query,
-        [Description("Output format: 'prose' (default, narrative summary) or 'file_list' (bulleted list of relevant file paths with one-line roles).")]
+        [Description("'prose' (default) or 'file_list' (paths with one-line roles).")]
         string format = "prose",
         CancellationToken cancellationToken = default)
     {
@@ -196,11 +196,11 @@ public sealed class SubagentPlugin(
         say in your report what you couldn't check instead of retrying it.
         """;
 
-    [Description("Run up to 4 independent explorations at the same time and get every report back, in order. Use it when a question splits into separate parts (one module, service or concern each); use explore for a single question. These explorations are strictly read-only: no shell commands, and anything that would need approval is refused instead of asked.")]
+    [Description("Run up to 4 read-only explorations in parallel, one per independent part of a question; reports return in order.")]
     public async Task<string> ExploreManyAsync(
-        [Description("One complete, self-contained exploration question per subagent.")]
+        [Description("One self-contained question each.")]
         string[] queries,
-        [Description("Output format for every report: 'prose' (default) or 'file_list'.")]
+        [Description("'prose' (default) or 'file_list'.")]
         string format = "prose",
         CancellationToken cancellationToken = default)
     {
@@ -228,7 +228,7 @@ public sealed class SubagentPlugin(
 
     [Description("Locate where a symbol, type, method, interface, or file is defined. Returns file path and line number. Prefer over explore for single-target lookups.")]
     public async Task<string> LocateAsync(
-        [Description("Symbol, type, interface, method, or filename to locate (e.g. 'IOrchestrationHook', 'AgentFactory.Create', 'EventEmitter.cs').")]
+        [Description("Symbol, method or filename, e.g. 'AgentFactory.Create'.")]
         string target,
         CancellationToken cancellationToken = default)
     {
@@ -247,9 +247,9 @@ public sealed class SubagentPlugin(
     /// <summary>Tool name <see cref="DelegateAsync"/> is exposed under.</summary>
     public const string DelegateToolName = "subagent_delegate";
 
-    [Description("Delegate a self-contained coding subtask to a subagent with read/write file, shell, and git tools. Use for well-scoped work you want done without spending your own tool calls and context — e.g. 'add a null check to X and a regression test', 'rename Y across the codebase', 'run the test suite and fix any failures in Z'. The subagent works autonomously to completion and reports back a summary; it cannot ask clarifying questions mid-task, so give it a complete, unambiguous task description.")]
+    [Description("Hand a well-scoped coding subtask to a subagent with file, shell and git tools. It works to completion and returns a summary; it can't ask questions.")]
     public async Task<string> DelegateAsync(
-        [Description("Complete, self-contained task description. Include file paths, requirements, and acceptance criteria — enough context that the subagent never needs to ask a question.")]
+        [Description("The full task: file paths, requirements, acceptance criteria.")]
         string task,
         CancellationToken cancellationToken = default)
     {

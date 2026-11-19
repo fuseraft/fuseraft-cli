@@ -43,9 +43,7 @@ public sealed class ReplSessionPlugin(
             : Task.FromResult(PluginResult.Error("Compaction is not available in this session."));
 
     [Description(
-        "Returns the current context budget: estimated token count, budget ceiling, percentage used, remaining tokens, and turn index. " +
-        "Call this before starting a multi-file investigation, or any time you want to know how much headroom " +
-        "remains before deciding whether to call compact_context.")]
+        "Context budget: estimated tokens, ceiling, percent used, remaining, and turn index.")]
     public string GetContextStatus()
     {
         if (_statusDelegate is null)

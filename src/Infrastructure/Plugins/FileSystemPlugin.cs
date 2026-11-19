@@ -631,8 +631,8 @@ public sealed class FileSystemPlugin : ITurnResettable
     public async Task<string> WriteFileAsync(
         [Description("File path.")] string path,
         [Description("File content.")] string content,
-        [Description("Write content exactly as given. Otherwise common model artifacts are repaired: code fences around .json, literal \\n in single-line content, typographic quotes/dashes in source files. Set true when those are intended.")] bool raw = false,
-        [Description("Expected current version (0 = skip check). Write fails with VERSION_MISMATCH when the file has been modified since this version was read.")] int baseVersion = 0)
+        [Description("Write verbatim. Otherwise fences around .json, literal \\n in one-line content, and smart quotes/dashes in source are repaired.")] bool raw = false,
+        [Description("Fail with VERSION_MISMATCH if the file changed since this version (0 = no check).")] int baseVersion = 0)
     {
         if (content is null)
             return PluginResult.Error(

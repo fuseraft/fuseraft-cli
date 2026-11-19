@@ -725,7 +725,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             .AddToolGuidance(initialTools.Count)
             .AddOsEnvironment()
             .AddIncludedRoots(includedRoots.Snapshot())
-            .AddSessionInfo(sessionId, startedAt, cwd, initialTools.Count, activePlugins)
+            .AddSessionInfo(sessionId, startedAt, initialTools.Count, activePlugins)
             .AddProjectInstructions(cwd)
             .AddMemory(memoryBlock)
             .AddSkills(skillsCatalog)

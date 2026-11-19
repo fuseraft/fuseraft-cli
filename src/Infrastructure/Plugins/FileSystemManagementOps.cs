@@ -205,11 +205,11 @@ internal sealed class FileSystemManagementOps
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException) { return []; }
     }
 
-    [Description("List files recursively. Reports when results were truncated so you know to narrow the search — results come shallowest first, and a truncated listing names the top-level folders so you know where else to look. If you already know the exact filename, pass it as 'pattern' (e.g. 'Foo.cs') instead of '*' to skip truncation entirely.")]
+    [Description("List files recursively, shallowest first. A truncated listing says so and names the top-level folders.")]
     public string ListFiles(
         [Description("Directory path.")] string directory,
-        [Description("Glob pattern, e.g. '*.cs'. Pass an exact filename here to find a known file directly.")] string pattern = "*",
-        [Description("Max results, clamped to 500. Raise it only if the default cuts off a search you know needs to see more.")] int maxResults = 100)
+        [Description("Glob, e.g. '*.cs', or an exact filename to find a known file.")] string pattern = "*",
+        [Description("Max results (up to 500).")] int maxResults = 100)
     {
         var denial = FileSystemSandbox.ResolveSafe(directory, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved, _denyMatcher);
         if (denial is not null) return denial;
@@ -273,7 +273,7 @@ internal sealed class FileSystemManagementOps
         return PluginResult.Ok($"Deleted: {resolved}");
     }
 
-    [Description("Get file/directory metadata: size, timestamps, permissions, and (for files) the write-version counter. Cheaper than read_file when you only need to check existence or staleness. Version is NOT_TRACKED when the file exists but was never written through write_file.")]
+    [Description("File/directory metadata: size, timestamps, permissions, write version. Cheaper than read_file to check existence or staleness.")]
     public async Task<string> GetFileInfoAsync([Description("File or directory path.")] string path)
     {
         var denial = FileSystemSandbox.ResolveSafe(path, _sandboxRoot, _exemptedPrefixes, _includedRoots.Snapshot(), out var resolved, _denyMatcher);

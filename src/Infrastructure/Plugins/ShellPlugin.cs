@@ -53,18 +53,16 @@ public sealed class ShellPlugin : IDisposable
     }
 
     private const string TimeoutParamDescription =
-        "Timeout in seconds; 0 or less uses the default. The command is killed when it runs out, so " +
-        "never use this for a server or anything else that runs until stopped: start it with " +
-        "shell_run_background if that tool is available, otherwise tell the user to start it.";
+        "Seconds before the command is killed; 0 = default. Never run a server or other long-running " +
+        "process here: use shell_run_background if available, else ask the user to start it.";
 
     // A model that passes 0 usually means "don't wait" or "no limit". Neither is safe here: no
     // limit lets a server (dotnet run, npm start) block the turn forever, so take the default.
     internal static int EffectiveTimeout(int requested, int fallback) => requested > 0 ? requested : fallback;
 
     private const string ShellParamDescription =
-        "Windows only. 'powershell' runs the command in PowerShell exactly as written: no cmd.exe quoting " +
-        "or escaping to work around, so use it for anything with nested quotes (connection strings, JSON). " +
-        "'cmd' forces cmd.exe. Leave it out for cmd.exe, unless the command is plainly PowerShell.";
+        "Windows only. 'powershell' runs it verbatim in PowerShell (use for nested quotes, e.g. JSON); " +
+        "'cmd' forces cmd.exe. Omitted: cmd.exe, or PowerShell if the command plainly is.";
 
     // Parses the shell argument, and refuses one this platform can't honor.
     private static string? ResolveShellArg(string? shell, out WindowsShell? choice)
@@ -353,12 +351,12 @@ public sealed class ShellPlugin : IDisposable
 
     // Core execution
 
-    [Description("Run a shell command and return stdout/stderr. Pass quiet=true to get 'OK' on success instead of full output — cheaper when you only need to confirm success (e.g. scaffolding, 'dotnet restore', environment setup). Full output and exit code are always returned on failure regardless of quiet.")]
+    [Description("Run a shell command and return stdout/stderr.")]
     public async Task<string> RunAsync(
         [Description("Shell command to execute.")] string command,
         [Description("Working directory.")] string? workingDirectory = null,
         [Description(TimeoutParamDescription)] int timeoutSeconds = 60,
-        [Description("Return 'OK' instead of full output when the command succeeds.")] bool quiet = false,
+        [Description("Return just 'OK' on success; failures always return full output.")] bool quiet = false,
         [Description(ShellParamDescription)] string? shell = null,
         CancellationToken cancellationToken = default)
     {
