@@ -679,7 +679,7 @@ Naming a file or directory with `@` hands it to the model with your message (`wh
 | Key | Action |
 |-----|--------|
 | Enter | Send the message (or take the highlighted suggestion) |
-| Alt+Enter / Shift+Enter | Start a new line; a multi-line paste is one message, and one longer than 10 lines or 2,000 characters shows in the draft as `[pasted #1 · 40 lines]` (sent in full, and kept for Ctrl+O) |
+| Ctrl+J / Alt+Enter / Shift+Enter | Start a new line (on Windows, use Ctrl+J: Windows Terminal takes Alt+Enter for full screen, and Shift+Enter reaches the REPL only in terminals that report it); a multi-line paste is one message, and one longer than 10 lines or 2,000 characters shows in the draft as `[pasted #1 · 40 lines]` (sent in full, and kept for Ctrl+O) |
 | Up / Down arrow | Walk input history at the first or last line, or move through suggestions; on an empty prompt, ↑ first takes back a queued message |
 | Alt+Up / Alt+Down | Scroll to the message you sent before or after the one in view |
 | Ctrl+G | Write the draft in `$VISUAL` or `$EDITOR` (`vi` if neither is set); saving and quitting puts it back in the prompt. Not on Windows |
@@ -690,6 +690,7 @@ Naming a file or directory with `@` hands it to the model with your message (`wh
 | Ctrl+F | Find text in the conversation (Enter or ↑ for older matches, ↓ for newer, Esc to close) |
 | Ctrl+R | Search earlier messages; the chosen one replaces the draft |
 | Ctrl+O | Show the latest tool output (with the arguments the call was made with; an MCP server's JSON answer is indented), approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
+| Ctrl+V | Paste the system clipboard into the prompt or the field being asked (an API key, say). Your terminal's own paste (Ctrl+Shift+V, right-click) works too. Over SSH, only the terminal's paste reaches your clipboard |
 | Ctrl+U | Delete from the cursor to the start of the line |
 | Ctrl+C | Cancel the running turn (denying an open approval), else close or clear what's open; twice on an empty prompt exits. Pressed again on a turn that hasn't stopped, it kills the commands the turn's tools are waiting on |
 | Ctrl+D | Exit, on an empty prompt |

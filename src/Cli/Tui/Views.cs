@@ -228,7 +228,7 @@ sealed class StatusView : View
 
     /// <summary>The keys shown at the right: none while a question is asked, since the panel shows its own, or as the session ends.</summary>
     public static string Keys(bool working, bool asking, bool ending = false) =>
-        asking || ending ? "" : working ? "Enter adds to the turn · Ctrl+C cancel" : "Enter send · Alt+Enter newline · PgUp/PgDn scroll · Ctrl+O output";
+        asking || ending ? "" : working ? "Enter adds to the turn · Ctrl+C cancel" : $"Enter send · {PromptView.NewLineKey} newline · PgUp/PgDn scroll · Ctrl+O output";
 
     public void Set(string text, bool working)
     {

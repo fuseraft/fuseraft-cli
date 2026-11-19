@@ -12,7 +12,7 @@ internal sealed partial class ReplTui
     {
         if (OperatingSystem.IsWindows())
         {
-            _status.Flash("Ctrl+G needs a Unix terminal; on Windows, use Alt+Enter for new lines");
+            _status.Flash($"Ctrl+G needs a Unix terminal; on Windows, use {PromptView.NewLineKey} for new lines");
             return;
         }
         var editor = new[] { "VISUAL", "EDITOR" }.Select(Environment.GetEnvironmentVariable).FirstOrDefault(e => !string.IsNullOrWhiteSpace(e)) ?? "vi";
