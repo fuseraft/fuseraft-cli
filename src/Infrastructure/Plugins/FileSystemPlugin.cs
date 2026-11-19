@@ -208,7 +208,10 @@ public sealed class FileSystemPlugin : ITurnResettable
         var allLines   = await File.ReadAllLinesAsync(resolved);
         var totalLines = allLines.Length;
 
-        if (effectiveStart > totalLines)
+        // An empty file (an __init__.py, say) has nothing to page through: any read of it is a successful empty read.
+        if (totalLines == 0)
+            effectiveStart = 1;
+        else if (effectiveStart > totalLines)
             return PluginResult.Error(
                 $"startLine {effectiveStart} exceeds file length ({totalLines} lines): {resolved}");
 
@@ -221,7 +224,7 @@ public sealed class FileSystemPlugin : ITurnResettable
         if (budgetResult is not null) return budgetResult;
 
         NoteSeen(resolved);
-        return content!;
+        return totalLines == 0 ? "(empty file)" : content!;
     }
 
     // A subagent's reads and writes aren't the parent's: the parent's own check around the subagent call reports what it changed.
