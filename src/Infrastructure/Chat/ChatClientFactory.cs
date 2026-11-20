@@ -200,23 +200,7 @@ public sealed class ChatClientFactory(
     /// </summary>
     public IChatClient Create(ModelConfig config)
     {
-        config = Resolve(config);
-
-        // A keychain key belongs to the server it was saved for; a session pointed elsewhere
-        // (--endpoint, /model, another provider) must not carry it there.
-        if (!string.IsNullOrEmpty(config.ApiKey) && !string.IsNullOrEmpty(config.ApiKeyOrigin)
-            && ProviderKeys.Origin(EndpointFor(config.ModelId, config.Provider, config.Endpoint)) != config.ApiKeyOrigin)
-            config = config with { ApiKey = string.Empty };
-
-        // Primary API key — optional for Ollama. Literal ApiKey takes precedence over env-var lookup.
-        var primaryKey = !string.IsNullOrEmpty(config.ApiKey)
-            ? config.ApiKey
-            : string.IsNullOrEmpty(config.ApiKeyEnvVar)
-                ? string.Empty
-                : Environment.GetEnvironmentVariable(config.ApiKeyEnvVar)
-                  ?? throw new InvalidOperationException(
-                      $"API key environment variable '{config.ApiKeyEnvVar}' is not set " +
-                      $"(model: '{config.ModelId}', provider: '{config.Provider}').");
+        (config, var primaryKey) = ResolveForRequest(config);
 
         // Build a key pool when multiple keys are configured
         var primary = BuildPool(config, primaryKey) ?? CreateCore(config, primaryKey);
@@ -235,6 +219,65 @@ public sealed class ChatClientFactory(
         }
 
         return primary;
+    }
+
+    /// <summary>The resolved config and the primary API key a request to it carries (empty for none).</summary>
+    private (ModelConfig Config, string Key) ResolveForRequest(ModelConfig config)
+    {
+        config = Resolve(config);
+
+        // A keychain key belongs to the server it was saved for; a session pointed elsewhere
+        // (--endpoint, /model, another provider) must not carry it there.
+        if (!string.IsNullOrEmpty(config.ApiKey) && !string.IsNullOrEmpty(config.ApiKeyOrigin)
+            && ProviderKeys.Origin(EndpointFor(config.ModelId, config.Provider, config.Endpoint)) != config.ApiKeyOrigin)
+            config = config with { ApiKey = string.Empty };
+
+        // Primary API key — optional for Ollama. Literal ApiKey takes precedence over env-var lookup.
+        var key = !string.IsNullOrEmpty(config.ApiKey)
+            ? config.ApiKey
+            : string.IsNullOrEmpty(config.ApiKeyEnvVar)
+                ? string.Empty
+                : Environment.GetEnvironmentVariable(config.ApiKeyEnvVar)
+                  ?? throw new InvalidOperationException(
+                      $"API key environment variable '{config.ApiKeyEnvVar}' is not set " +
+                      $"(model: '{config.ModelId}', provider: '{config.Provider}').");
+        return (config, key);
+    }
+
+    /// <summary>The endpoint <paramref name="config"/>'s requests go to, or empty when it can't be resolved.</summary>
+    public string EndpointOf(ModelConfig config)
+    {
+        try
+        {
+            var resolved = Resolve(config);
+            return EndpointFor(resolved.ModelId, resolved.Provider, resolved.Endpoint);
+        }
+        catch (InvalidOperationException)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// The model's input limit from its provider's metadata (see <see cref="ModelLimitsClient"/>), asked with the same
+    /// endpoint and key its chat requests use; null when the provider doesn't report one or can't be reached.
+    /// </summary>
+    public async Task<ModelInputLimit?> LookupInputLimitAsync(ModelConfig config, CancellationToken cancellationToken = default)
+    {
+        ModelConfig resolved;
+        string key;
+        try
+        {
+            (resolved, key) = ResolveForRequest(config);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+        var endpoint = EndpointFor(resolved.ModelId, resolved.Provider, resolved.Endpoint);
+        return string.IsNullOrEmpty(endpoint)
+            ? null
+            : await ModelLimitsClient.FetchAsync(resolved.Provider, endpoint, resolved.ModelId, key, cancellationToken);
     }
 
     // Collects all unique API keys from the config (primary + ApiKeys list + ApiKeyEnvVars list).

@@ -318,6 +318,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         var connection  = ConnectionOverride.From(settings.Provider, settings.Endpoint);
         var modelConfig = ReplFactory.BuildModelConfig(modelId, userCfg, connection: connection);
         using var factory = new ChatClientFactory(transport: TransportOptions.From(userCfg));
+        fuseraft.Infrastructure.Storage.ModelLimitStore.Enable(factory);
 
         // Persisted REPL defaults (UserConfig.Repl) can only add to what the CLI flags for
         // this invocation already request, never take something away — e.g. a configured

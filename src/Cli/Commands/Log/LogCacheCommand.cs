@@ -62,8 +62,9 @@ public sealed class LogCacheCommand : AsyncCommand<LogCacheSettings>
         var compactAt = ReplLimits.From(config?.Repl).AutoCompactThreshold;
         (int, string)? Budget(CacheReport report) =>
             report.Model is null || report.Model.EndsWith(" models", StringComparison.Ordinal) ? null
-            : (ModelContextWindow.GetBudget(report.Model, config?.Repl?.ContextBudget),
-               config?.Repl?.ContextBudget is > 0 ? "repl.contextBudget" : "estimated from the model name");
+            : config?.Repl?.ContextBudget is > 0 || report.ModelLimit is null
+                ? ModelContextWindow.Describe(report.Model, config?.Repl?.ContextBudget)
+                : report.ModelLimit;
 
         if (reports.Count == 1)
         {

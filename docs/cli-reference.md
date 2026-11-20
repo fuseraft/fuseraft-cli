@@ -1054,6 +1054,8 @@ Two safeguards protect against a compaction that would do more harm than good: i
 
 **Automatic compaction:** the same logic fires on its own once context usage crosses 75% of the budget, so a long session doesn't have to be babysat with manual `/compact` calls. Usage here is the larger of the provider's reported input for the turn's first call and the estimated size of the history the REPL is keeping — the provider's figure is measured after in-turn trimming, so on its own it can stay well under the threshold while the kept history grows past it. Disable it with `fuseraft settings set repl.autoCompact false` — at the threshold you'll then just see a warning suggesting `/compact` instead.
 
+**The context budget** is the model's real input limit when its provider reports one: the model's `max_input_tokens`, or 90% of its context window, leaving the rest for the reply. The REPL asks when it starts and when you switch model, through the same endpoint and key it chats with: Anthropic's models API, the model list of providers that include a window there (xAI, OpenRouter, Groq, Mistral, vLLM, LM Studio), or a LiteLLM gateway's `/model_group/info`. The answer is cached in `~/.fuseraft/cache/model-limits.json` for a week (a provider that doesn't say is asked again after a day), and a lookup gives up after 3 seconds. When the provider doesn't report a limit (OpenAI, Ollama), the budget is estimated from the model's name: 256K tokens for Grok, 150K for Claude, Gemini, and GPT-5, less for others. `repl.contextBudget` overrides both. `/context` and `fuseraft log cache` show which one applies.
+
 Two values here are tunable: `repl.autoCompactThreshold` (0.5–0.95, default `0.75`) sets where the warning or auto-compaction fires — lower it for a model that degrades well before its window is full, raise it if compacting feels premature — and `repl.compactPreserveTailRatio` (0.05–0.5, default `0.2`) sets how much of the budget is kept verbatim as recent turns rather than folded into the summary. The most recent turn is always kept, whatever the ratio.
 
 **Unverified assumption tombstoning**
@@ -2686,7 +2688,7 @@ A request is a miss when less than half its prompt came from cache (prompts unde
 | `overflow retry` | The provider rejected the request as too large and it was retried with tool results cut down. | The budget is above the model's real limit. |
 | `tools changed` | The tool list changed (`/tools`, `/model`, an MCP server), and providers put tools ahead of every message. | Expected after a change. |
 
-`written` is how many tokens were stored in the cache. It's reported for Claude, natively or through a gateway such as LiteLLM; 0 there means the requests' cache breakpoints aren't reaching the provider. The `Budget` line is the context budget the REPL compacts against, from `repl.contextBudget` or estimated from the model's name.
+`written` is how many tokens were stored in the cache. It's reported for Claude, natively or through a gateway such as LiteLLM; 0 there means the requests' cache breakpoints aren't reaching the provider. The `Budget` line is the context budget the REPL compacts against and where it came from: `repl.contextBudget`, the model's input limit from its provider, or an estimate from the model's name (see "Compacting a session").
 
 ---
 

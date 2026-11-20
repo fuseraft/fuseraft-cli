@@ -109,7 +109,8 @@ internal static partial class ReplCommands
             $"[dim]{pct:F1}%[/]{deltaStr}" +
             (isActual ? "  [dim](as of last turn's request)[/]" : string.Empty));
         AnsiConsole.MarkupLine(
-            $"  [dim]Budget:[/]       [bold]{ctx.ContextTokenBudget:N0}[/]  [dim](context window ceiling)[/]");
+            $"  [dim]Budget:[/]       [bold]{ctx.ContextTokenBudget:N0}[/]  " +
+            $"[dim]({Markup.Escape(ModelContextWindow.Describe(ctx.ModelId, ctx.UserCfg?.Repl?.ContextBudget).Source)})[/]");
         AnsiConsole.MarkupLine(
             $"  [dim]Turns:[/]        [bold]{ctx.TurnIndex}[/]  " +
             $"[dim](messages: {ctx.History.Count} — " +

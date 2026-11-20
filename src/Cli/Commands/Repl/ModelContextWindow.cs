@@ -1,10 +1,11 @@
 namespace fuseraft.Cli.Commands.Repl;
 
 /// <summary>
-/// Rough per-family working context-token budgets for REPL history trimming.
+/// Working context-token budgets for REPL compaction and history trimming: the input limit the model's provider reports
+/// when it reports one (see <see cref="Describe"/>), else the rough per-family estimates below.
 ///
 /// <para>
-/// Not an authoritative model registry — a conservative heuristic so the REPL doesn't evict
+/// The estimates are not an authoritative model registry — a conservative heuristic so the REPL doesn't evict
 /// history at a fixed ceiling regardless of what the connected model can actually hold.
 /// Deliberately budgets well under each family's advertised maximum context window, since the
 /// REPL's own token estimate (<see cref="fuseraft.Core.TokenEstimator"/>) is rough and doesn't
@@ -43,12 +44,23 @@ internal static class ModelContextWindow
     /// <param name="modelId">The model ID whose family determines the heuristic budget.</param>
     /// <param name="overrideBudget">
     /// User-configured override (<see cref="fuseraft.Core.Models.Config.ReplDefaultsConfig.ContextBudget"/>).
-    /// When positive, takes precedence over the per-family heuristic below.
+    /// When positive, takes precedence over the model's own limit and the per-family heuristic below.
     /// </param>
-    internal static int GetBudget(string? modelId, int? overrideBudget = null)
-    {
-        if (overrideBudget is > 0) return overrideBudget.Value;
+    internal static int GetBudget(string? modelId, int? overrideBudget = null) => Describe(modelId, overrideBudget).Tokens;
 
+    /// <summary>
+    /// The working budget and where it came from: <c>repl.contextBudget</c>; else the input limit the model's provider
+    /// reports (see <see cref="fuseraft.Infrastructure.Storage.ModelLimitStore"/>); else a per-family estimate from its name.
+    /// </summary>
+    internal static (int Tokens, string Source) Describe(string? modelId, int? overrideBudget = null)
+    {
+        if (overrideBudget is > 0) return (overrideBudget.Value, "repl.contextBudget");
+        if (fuseraft.Infrastructure.Storage.ModelLimitStore.Known(modelId) is { } limit) return (limit.Tokens, limit.Source);
+        return (Estimate(modelId), "estimated from the model name");
+    }
+
+    private static int Estimate(string? modelId)
+    {
         if (string.IsNullOrWhiteSpace(modelId)) return DefaultBudget;
 
         if (modelId.Contains("grok", StringComparison.OrdinalIgnoreCase))

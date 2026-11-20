@@ -54,6 +54,9 @@ internal sealed class CacheReport
 
     public Dictionary<string, (int Count, long Uncached)> Misses { get; } = [];
 
+    /// <summary>The input limit the session learned from its model's provider, if it logged one.</summary>
+    public (int Tokens, string Source)? ModelLimit { get; private set; }
+
     public int MissCount => Misses.Values.Sum(m => m.Count);
 
     /// <summary>Reads one session's events, oldest first.</summary>
@@ -87,6 +90,11 @@ internal sealed class CacheReport
                     break;
                 case "history_trimmed":
                     trimmed = true;
+                    break;
+                case "model_limit":
+                    if (Long(payload, "input_tokens") is { } limit && Str(payload, "model") is { } limited
+                        && (report.Model is null || limited == report.Model))
+                        report.ModelLimit = ((int)limit, Str(payload, "source") ?? "the provider");
                     break;
                 case "model_response":
                     var run = Str(payload, "run");
