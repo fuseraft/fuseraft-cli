@@ -725,10 +725,10 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
             .AddToolGuidance(initialTools.Count)
             .AddOsEnvironment()
             .AddIncludedRoots(includedRoots.Snapshot())
-            .AddSessionInfo(sessionId, startedAt, initialTools.Count, activePlugins)
             .AddProjectInstructions(cwd)
-            .AddMemory(memoryBlock)
             .AddSkills(skillsCatalog)
+            .AddMemory(memoryBlock)
+            .AddSessionInfo(sessionId, startedAt, initialTools.Count, activePlugins)
             .Build();
 
         if (!jsonMode && !noBanner)

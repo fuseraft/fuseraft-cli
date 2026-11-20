@@ -74,8 +74,9 @@ internal sealed class SystemPromptBuilder
     }
 
     /// <summary>
-    /// Appends the current session metadata block and, when tools are enabled, the
-    /// <c>~/.fuseraft/</c> folder orientation map so the agent never scans for artifacts.
+    /// Appends the current session metadata block (with the date and time) and, when tools are enabled, the
+    /// <c>~/.fuseraft/</c> folder orientation map so the agent never scans for artifacts. Call it last: a provider's
+    /// prompt cache reuses a prompt only up to its first difference, so what changes per session goes at the end.
     /// </summary>
     internal SystemPromptBuilder AddSessionInfo(
         string? sessionId, DateTime? startedAt, int toolCount,
@@ -90,8 +91,13 @@ internal sealed class SystemPromptBuilder
                 $"\n\n# Current session\n" +
                 $"Session ID: {sessionId}\n" +
                 $"Started:    {sessionStarted}\n" +
+                $"{FuseraftPaths.DateTimeLine()}\n" +
                 $"Use repl_session_get_context_status to check how much of the context budget is used. fuseraft compacts older " +
                 $"messages on its own when it runs low.");
+        }
+        else
+        {
+            _sb.Append($"\n\n{FuseraftPaths.DateTimeLine()}");
         }
 
         // Orient the agent to the .fuseraft/ layout so it never wastes context
@@ -120,10 +126,10 @@ internal sealed class SystemPromptBuilder
         return this;
     }
 
-    /// <summary>Appends the OS/runtime environment block (OS, arch, shell, CWD, date/time).</summary>
+    /// <summary>Appends the OS/runtime environment block (OS, arch, shell, CWD); the date and time go in <see cref="AddSessionInfo"/>.</summary>
     internal SystemPromptBuilder AddOsEnvironment()
     {
-        _sb.Append($"\n\n{FuseraftPaths.BuildOsEnvironmentBlock()}");
+        _sb.Append($"\n\n{FuseraftPaths.BuildOsEnvironmentBlock(includeDateTime: false)}");
         return this;
     }
 

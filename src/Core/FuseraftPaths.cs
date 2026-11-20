@@ -359,7 +359,7 @@ public static class FuseraftPaths
     /// know the OS, architecture, shell, working directory, and current date/time without
     /// having to infer or probe for them.
     /// </summary>
-    public static string BuildOsEnvironmentBlock()
+    public static string BuildOsEnvironmentBlock(bool includeDateTime = true)
     {
         string os, shell;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -389,19 +389,22 @@ public static class FuseraftPaths
             _                  => RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()
         };
 
-        var now = DateTimeOffset.Now;
-        var tz  = TimeZoneInfo.Local.Id;
         var cwd = Directory.GetCurrentDirectory();
 
-        return new System.Text.StringBuilder()
+        var block = new System.Text.StringBuilder()
             .AppendLine("## Runtime Environment")
             .AppendLine($"OS: {os}")
             .AppendLine($"Architecture: {arch}")
             .AppendLine($"Shell: {shell}")
-            .AppendLine($"Working directory: {cwd}")
-            .Append(    $"Date/time: {now:yyyy-MM-dd HH:mm:ss zzz} ({tz})")
-            .ToString();
+            .Append(    $"Working directory: {cwd}");
+        if (includeDateTime)
+            block.AppendLine().Append(DateTimeLine());
+        return block.ToString();
     }
+
+    /// <summary>The current local date and time, as the environment block states it.</summary>
+    public static string DateTimeLine() =>
+        $"Date/time: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} ({TimeZoneInfo.Local.Id})";
 
     /// <param name="includeInfrastructure">
     /// When true (default), includes paths for orchestration-only artifacts: intent records,

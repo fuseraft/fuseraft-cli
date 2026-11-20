@@ -403,13 +403,16 @@ public sealed class ChatClientFactory(
                 {
                     InnerHandler = new AnthropicCacheControlInjectHandler
                     {
-                        InnerHandler = new ReasoningEffortInjectHandler(reasoningEfforts)
+                        InnerHandler = new SessionAffinityHandler
                         {
-                            InnerHandler = new FinishReasonNormalizerHandler
+                            InnerHandler = new ReasoningEffortInjectHandler(reasoningEfforts)
                             {
-                                InnerHandler = new RawReasoningCaptureHandler(eventEmitter)
+                                InnerHandler = new FinishReasonNormalizerHandler
                                 {
-                                    InnerHandler = new TransientRetryHandler(errorLogPath, retryLogger, transport) { InnerHandler = new SocketsHttpHandler() }
+                                    InnerHandler = new RawReasoningCaptureHandler(eventEmitter)
+                                    {
+                                        InnerHandler = new TransientRetryHandler(errorLogPath, retryLogger, transport) { InnerHandler = new SocketsHttpHandler() }
+                                    }
                                 }
                             }
                         }
@@ -426,6 +429,7 @@ public sealed class ChatClientFactory(
 //   FunctionStrictStripHandler       — strips "strict" from tool definitions
 //   AnthropicCacheControlInjectHandler — adds cache_control breakpoints for claude-* over an
 //                                       OpenAI-compatible gateway (e.g. LiteLLM/Bedrock)
+//   SessionAffinityHandler           — names the session so a gateway/provider keeps it on one cache
 //   ReasoningEffortInjectHandler     — injects reasoning effort for xAI grok-4.3+
 //   RawReasoningCaptureHandler       — captures xAI reasoning_content field
 //   FinishReasonNormalizerHandler    — normalizes empty finish_reason values
