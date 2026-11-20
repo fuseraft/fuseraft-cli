@@ -24,6 +24,11 @@ internal static class UsageDetailsCacheExtensions
         details?.AdditionalCounts?.TryGetValue(CacheCreationInputTokensKey, out var v) == true
             ? v : 0;
 
+    /// <summary>Prompt tokens written to cache this call, as Anthropic or a gateway in front of it reports them.</summary>
+    public static long CacheWriteTokens(this UsageDetails? details) =>
+        details.CacheCreationTokens() is > 0 and var anthropic ? anthropic
+        : details?.AdditionalCounts?.TryGetValue(CacheUsageBackfillChatClient.CacheWriteInputTokensKey, out var v) == true ? v : 0;
+
     private const string CacheCreationInputTokensKey = "CacheCreationInputTokens";
 
     /// <summary>

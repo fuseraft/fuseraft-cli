@@ -398,6 +398,12 @@ app.Configure(cfg =>
             .WithExample(["log", "repl", "--event", "command"])
             .WithExample(["log", "repl", "--session", "abc123"]);
 
+        branch.AddCommand<LogCacheCommand>("cache")
+            .WithDescription("Summarize how much of each REPL request the provider's prompt cache served, and why the rest missed.")
+            .WithExample(["log", "cache"])
+            .WithExample(["log", "cache", "--all"])
+            .WithExample(["log", "cache", "--session", "abc123"]);
+
         branch.AddCommand<LogAppCommand>("app")
             .WithDescription("View the application log (.fuseraft/logs/app.log).")
             .WithExample(["log", "app"])

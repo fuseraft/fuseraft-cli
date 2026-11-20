@@ -950,6 +950,9 @@ public sealed class SubagentPlugin(
 
     private sealed record RunTag(string Id, string Label);
 
+    /// <summary>The subagent run the current flow belongs to, or null on the main thread of work.</summary>
+    internal static string? CurrentRunId => CurrentRun.Value?.Id;
+
     // Adds the current run's id and label to a subagent_* payload; unchanged outside one.
     private static object Tagged(object payload)
     {

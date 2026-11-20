@@ -2640,6 +2640,56 @@ fuseraft log repl --event skill_curation_complete
 
 ---
 
+### `fuseraft log cache`
+
+Summarize how much of each REPL request the provider served from its prompt cache, and why the requests that mostly missed did. Run it from the directory you started `fuseraft repl` in. It reads the session's REPL event log and prints counts only: no prompts, code, or file contents.
+
+```
+fuseraft log cache [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--session <id>` | the latest session | Report on the matching session (ID or prefix). |
+| `--all` | — | Report on every session in the project, one line each, then all of them together. |
+| `--path <path>` | — | Read this REPL event log file instead. |
+
+**Example**
+
+```
+$ fuseraft log cache
+Session 380abb9b · grok-4.7 · 9 requests · 3 turns
+  Prompt tokens   68.6K   cached 32%   written 0
+  Subagents       3 of those requests
+  Cache misses    6 of 9 requests under 50% cached
+    first request          2        9K uncached
+    idle over 5 min        1      9.2K uncached
+    nothing changed        3       27K uncached
+  Compactions     none
+  Budget          200K (repl.contextBudget) · compacts at 75% (150K)
+```
+
+A request is a miss when less than half its prompt came from cache (prompts under 1,024 tokens, too small to cache, aren't counted). Each miss is put down to one of:
+
+| Reason | What happened | What to look at |
+|--------|---------------|-----------------|
+| `first request` | The first request of the session or of a subagent run: nothing was cached yet. | Expected. |
+| `idle over 5 min` | Nothing changed, but more than 5 minutes passed since the previous request, the shortest common cache lifetime. | Expected after a pause. |
+| `nothing changed` | The request resent the previous one unchanged and still missed: the provider's cache was cold or evicted, or the request reached a different server. | The provider or gateway: session affinity, or a model whose caching is best effort. |
+| `compaction` | Compaction replaced the history with a summary. | How often it compacts: `repl.contextBudget`, `repl.autoCompactThreshold`. |
+| `history trim` | The oldest turns were dropped to fit the budget. | As for compaction. |
+| `history rewritten` | The stored history changed some other way, such as a resumed or forked chat. | |
+| `stale-read drop` | Superseded file reads, writes, or shell output were removed from the request. | |
+| `in-turn trim` | A long turn neared the budget and its older rounds were shortened. | The budget. |
+| `overflow retry` | The provider rejected the request as too large and it was retried with tool results cut down. | The budget is above the model's real limit. |
+| `tools changed` | The tool list changed (`/tools`, `/model`, an MCP server), and providers put tools ahead of every message. | Expected after a change. |
+
+`written` is how many tokens were stored in the cache. It's reported for Claude, natively or through a gateway such as LiteLLM; 0 there means the requests' cache breakpoints aren't reaching the provider. The `Budget` line is the context budget the REPL compacts against, from `repl.contextBudget` or estimated from the model's name.
+
+---
+
 ### `fuseraft log app`
 
 View the application log. fuseraft writes Warning-level and above messages here for diagnostics that survive past the terminal session.

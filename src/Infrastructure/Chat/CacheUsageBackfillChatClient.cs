@@ -1,4 +1,6 @@
+using System.ClientModel.Primitives;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 
 namespace fuseraft.Infrastructure.Chat;
@@ -38,6 +40,13 @@ internal sealed class CacheUsageBackfillChatClient(IChatClient inner) : IChatCli
     /// </summary>
     internal const string CacheReadInputTokensKey = "CacheReadInputTokens";
 
+    /// <summary>
+    /// <see cref="UsageDetails.AdditionalCounts"/> key for prompt tokens a gateway reports writing to cache, such as
+    /// LiteLLM's <c>cache_creation_input_tokens</c> for Claude on Bedrock. Not Anthropic.SDK's key: that one also
+    /// says the input count excludes the cache (see <see cref="UsageDetailsCacheExtensions.UncachedInputTokens"/>).
+    /// </summary>
+    internal const string CacheWriteInputTokensKey = "CacheWriteInputTokens";
+
     public object? GetService(Type serviceType, object? serviceKey = null)
         => inner.GetService(serviceType, serviceKey);
 
@@ -75,5 +84,30 @@ internal sealed class CacheUsageBackfillChatClient(IChatClient inner) : IChatCli
 
         if (cached is > 0)
             (usage.AdditionalCounts ??= new())[CacheReadInputTokensKey] = cached.Value;
+
+        var written = CacheWrites(rawRepresentation switch
+        {
+            OpenAI.Chat.ChatCompletion cc => cc.Usage,
+            OpenAI.Chat.ChatTokenUsage tu => tu,
+            _ => null,
+        });
+        if (written is > 0)
+            (usage.AdditionalCounts ??= new())[CacheWriteInputTokensKey] = written.Value;
+    }
+
+    // The SDK has no property for it, but keeps fields it doesn't know and writes them back out.
+    private static long? CacheWrites(OpenAI.Chat.ChatTokenUsage? usage)
+    {
+        if (usage is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(ModelReaderWriter.Write(usage).ToMemory());
+            return doc.RootElement.TryGetProperty("cache_creation_input_tokens", out var v) && v.TryGetInt64(out var n)
+                ? n : null;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
+        {
+            return null;
+        }
     }
 }

@@ -832,12 +832,27 @@ internal static class AgentContextCompactionFilters
         int maxInTurnChars,
         int triggerChars = 0,
         CancellationToken cancellationToken = default,
-        int cacheStep = 1)
+        int cacheStep = 1) =>
+        await TrimNearBudget(
+            DropSupersededContent(messages), maxInTurnToolPairs, maxInTurnChars, triggerChars, cancellationToken, cacheStep);
+
+    /// <summary>The first stage of <see cref="ApplyInTurnFilters"/>: superseded writes, reads, and shell reruns, dropped in batches.</summary>
+    internal static IEnumerable<ChatMessage> DropSupersededContent(IEnumerable<ChatMessage> messages)
     {
         messages = DropSupersededWritePairs(messages, DefaultMinSupersededDropChars);
         messages = DropSupersededObservationalPairs(messages, DefaultMinSupersededDropChars);
-        messages = CompressSupersededShellPairs(messages, DefaultMinSupersededDropChars);
+        return CompressSupersededShellPairs(messages, DefaultMinSupersededDropChars);
+    }
 
+    /// <summary>The second stage of <see cref="ApplyInTurnFilters"/>, which only trims once the turn nears its budget.</summary>
+    internal static async Task<IEnumerable<ChatMessage>> TrimNearBudget(
+        IEnumerable<ChatMessage> messages,
+        int maxInTurnToolPairs,
+        int maxInTurnChars,
+        int triggerChars = 0,
+        CancellationToken cancellationToken = default,
+        int cacheStep = 1)
+    {
         // Nothing below runs until the turn nears its budget. Shortening every older call's arguments from the start
         // filled the history with writes whose content was only an "[ELIDED …]" note, and grok-4.7 wrote that note as
         // the whole content of new files and patches, 7 times in 5 minutes. Below the budget the request also stays
