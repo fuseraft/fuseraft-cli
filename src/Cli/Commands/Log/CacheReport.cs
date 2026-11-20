@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -206,7 +207,7 @@ internal sealed class CacheReport
             sb.AppendLine($"  Not measured    {Unmeasured:N0} requests from an older fuseraft");
 
         var measured = Requests + SubagentRequests - Unmeasured;
-        sb.AppendLine($"  Cache misses    {MissCount:N0} of {measured:N0} requests under {MissShare:P0} cached");
+        sb.AppendLine($"  Cache misses    {MissCount:N0} of {measured:N0} requests under {Percent(MissShare)} cached");
         foreach (var reason in Order.Where(Misses.ContainsKey))
         {
             var (count, uncached) = Misses[reason];
@@ -220,7 +221,7 @@ internal sealed class CacheReport
 
         if (budget is { } b)
         {
-            var at = compactAt is { } c ? $" · compacts at {c:P0} ({Tokens((long)(b.Tokens * c))})" : "";
+            var at = compactAt is { } c ? $" · compacts at {Percent(c)} ({Tokens((long)(b.Tokens * c))})" : "";
             sb.AppendLine($"  Budget          {Tokens(b.Tokens)} ({b.Source}){at}");
         }
         return sb.ToString().TrimEnd();
@@ -228,12 +229,16 @@ internal sealed class CacheReport
 
     internal static string Tokens(long n) => n switch
     {
-        >= 1_000_000 => $"{n / 1_000_000.0:0.#}M",
-        >= 1_000     => $"{n / 1_000.0:0.#}K",
-        _            => n.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        >= 1_000_000 => string.Create(CultureInfo.InvariantCulture, $"{n / 1_000_000.0:0.#}M"),
+        >= 1_000     => string.Create(CultureInfo.InvariantCulture, $"{n / 1_000.0:0.#}K"),
+        _            => n.ToString(CultureInfo.InvariantCulture),
     };
 
-    private static string Share(long part, long whole) => whole == 0 ? "-" : $"{(double)part / whole:P0}";
+    /// <summary>A share as a whole percentage, "75%", the same in every culture (some put a space before the sign).</summary>
+    internal static string Percent(double share) =>
+        ((int)Math.Round(share * 100)).ToString(CultureInfo.InvariantCulture) + "%";
+
+    private static string Share(long part, long whole) => whole == 0 ? "-" : Percent((double)part / whole);
 
     private static string? Str(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String

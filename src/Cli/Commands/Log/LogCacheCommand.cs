@@ -75,7 +75,7 @@ public sealed class LogCacheCommand : AsyncCommand<LogCacheSettings>
         foreach (var r in reports)
             Console.WriteLine(
                 $"{r.Session,-10} {r.Model,-24} {r.Requests + r.SubagentRequests,6:N0} requests  " +
-                (r.PromptTokens > 0 ? $"{(double)r.CachedTokens / r.PromptTokens,4:P0} cached  " : "  no cache data  ") +
+                (r.PromptTokens > 0 ? $"{CacheReport.Percent((double)r.CachedTokens / r.PromptTokens),4} cached  " : "  no cache data  ") +
                 $"{r.MissCount,4:N0} misses  {r.Compactions,3:N0} compactions");
         Console.WriteLine();
         var total = CacheReport.Combine(reports);
