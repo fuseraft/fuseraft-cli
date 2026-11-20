@@ -33,7 +33,6 @@ internal sealed class SystemPromptBuilder
                 $"{identity} You are a precise coding and research assistant with tools for files, shell, code search, and git.\n" +
                 "\nGuidelines:\n" +
                 "- If the request is broad, open-ended, or could reasonably mean several different things (e.g. \"diagram the flow of the application\", \"clean up the code\"), ask one focused clarifying question about scope before exploring — do not guess the interpretation and start working. This does not apply to requests that are already specific enough to act on directly.\n" +
-                "- Prefer tools over guessing.\n" +
                 "- Prefer the dedicated git, file, and search tools over shell_run when one covers the task — they return structured output and, when read-only, need no approval. Keep shell_run for builds, tests, and commands no other tool covers.\n" +
                 "- When several reads, searches, or lookups are independent of each other, issue them all in the same response instead of one per round — read-only calls run at the same time.\n" +
                 "- If the user denies a tool call, do not retry the same action through another tool or a rephrased command. Say what was blocked and ask how to proceed.\n" +
@@ -42,10 +41,9 @@ internal sealed class SystemPromptBuilder
                 "- Do not claim a file was created, updated, or modified unless you have called the tool that performed the action — never describe a planned or intended change as though it is complete.\n" +
                 "- Avoid destructive actions (rm, overwrite, force-push) unless explicitly requested.\n" +
                 "- Only write files the user explicitly requests — never create unsolicited summaries, changelogs, or status files.\n" +
-                "- For multi-step work, briefly state intent first. If the task has enough distinct steps that you could lose track of them (broad exploration, multi-file changes, anything spanning several tool calls), call todo_write up front with the full plan, then call it again after each step starts or finishes to keep statuses current — exactly one item in_progress at a time. Skip it for small, single-step requests.\n" +
-                "- For a well-scoped, self-contained subtask you want done without spending your own tool calls and context (e.g. a mechanical rename across files, a one-off script, fixing a specific known test failure), use subagent_delegate — give it a complete task description since it cannot ask you questions. Do not use it for the main thread of work the user is directly asking you to drive, and do not delegate a task you have not first understood well enough to describe unambiguously.\n" +
-                "- Keep replies short: lead with the answer or result, in markdown that reads well in a terminal. Do not narrate each tool call or repeat tool output back.\n" +
-                "- If a command fails due to missing project/config file: search subdirs for the entry point, then pass the found directory as the `workingDirectory` parameter to shell_run.\n");
+                "- For multi-step work, briefly state intent first. Track work spanning several tool calls with todo_write, exactly one item in_progress at a time; skip it for small, single-step requests.\n" +
+                "- Don't delegate the main thread of work, or a task you can't yet describe unambiguously.\n" +
+                "- Keep replies short: lead with the answer or result, in markdown that reads well in a terminal. Do not narrate each tool call or repeat tool output back.\n");
         }
         else
         {
@@ -69,33 +67,23 @@ internal sealed class SystemPromptBuilder
             "Only a file too big for that needs a range: find the part you need with grep_file or search_symbol, then read one range wide enough to cover it (a few hundred lines), not a series of 20–50 line windows.\n" +
             "- A file you read this session and haven't changed since is still verified while its content is in your context: take patch_file's oldText from that read instead of reading the lines again. Re-read when the file changed, or when its result was elided.\n" +
             "- Context may contain [UNVERIFIED ASSUMPTION: ...] markers from a prior compaction — treat these as unconfirmed claims that require tool verification before acting on them.\n" +
-            "\nBefore signaling completion, verify:\n" +
-            "  Tools & verification:\n" +
-            "  - Every action was performed with a tool call — not described as if done\n" +
-            "  - Tool calls succeeded (no errors, exit code 0 for shell)\n" +
-            "  Files:\n" +
-            "  - For file edits: trust a successful write_file/patch_file result; re-read only the changed range, and only when the result leaves doubt (e.g. content was normalised)\n" +
-            "  Shell:\n" +
-            "  - Shell output is shown; it confirms the goal was met\n" +
-            "  Completeness:\n" +
-            "  - Every part of the user's request has been addressed\n" +
-            "  - Nothing was deferred or skipped without explaining why\n" +
-            "  If any check fails, complete it before responding.\n");
+            "\nBefore finishing, confirm every tool call succeeded (exit code 0 for shell) and every part of the request was done or its skip explained. " +
+            "Trust a successful write_file/patch_file result; re-read the changed range only when the result leaves doubt.\n");
 
         return this;
     }
 
     /// <summary>
-    /// Appends the current session metadata block and, when tools are enabled, the
-    /// <c>~/.fuseraft/</c> folder orientation map so the agent never scans for artifacts.
+    /// Appends the current session metadata block (with the date and time) and, when tools are enabled, the
+    /// <c>~/.fuseraft/</c> folder orientation map so the agent never scans for artifacts. Call it last: a provider's
+    /// prompt cache reuses a prompt only up to its first difference, so what changes per session goes at the end.
     /// </summary>
     internal SystemPromptBuilder AddSessionInfo(
-        string? sessionId, DateTime? startedAt, string cwd, int toolCount,
+        string? sessionId, DateTime? startedAt, int toolCount,
         IEnumerable<IHasArtifact>? activePlugins = null)
     {
         if (sessionId is not null)
         {
-            var snapshotPath = Path.Combine(FuseraftPaths.GlobalReplSessions, $"repl-{sessionId}.json");
             var sessionStarted = startedAt.HasValue
                 ? startedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz")
                 : "unknown";
@@ -103,14 +91,17 @@ internal sealed class SystemPromptBuilder
                 $"\n\n# Current session\n" +
                 $"Session ID: {sessionId}\n" +
                 $"Started:    {sessionStarted}\n" +
-                $"Snapshot:   {snapshotPath}\n" +
-                $"Event log:  {FuseraftPaths.ExpandSessionPaths(FuseraftPaths.LocalReplEventsLog, sessionId, FuseraftPaths.ProjectSlug(cwd))}\n" +
+                $"{FuseraftPaths.DateTimeLine()}\n" +
                 $"Use repl_session_get_context_status to check how much of the context budget is used. fuseraft compacts older " +
                 $"messages on its own when it runs low.");
         }
+        else
+        {
+            _sb.Append($"\n\n{FuseraftPaths.DateTimeLine()}");
+        }
 
         // Orient the agent to the .fuseraft/ layout so it never wastes context
-        // scanning the directory. Logs excluded — the session block above covers them.
+        // scanning the directory. Logs excluded: the agent has no tools that read them.
         if (toolCount > 0)
         {
             var descriptors = activePlugins?
@@ -135,10 +126,10 @@ internal sealed class SystemPromptBuilder
         return this;
     }
 
-    /// <summary>Appends the OS/runtime environment block (OS, arch, shell, CWD, date/time).</summary>
+    /// <summary>Appends the OS/runtime environment block (OS, arch, shell, CWD); the date and time go in <see cref="AddSessionInfo"/>.</summary>
     internal SystemPromptBuilder AddOsEnvironment()
     {
-        _sb.Append($"\n\n{FuseraftPaths.BuildOsEnvironmentBlock()}");
+        _sb.Append($"\n\n{FuseraftPaths.BuildOsEnvironmentBlock(includeDateTime: false)}");
         return this;
     }
 

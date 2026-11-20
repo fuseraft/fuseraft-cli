@@ -435,7 +435,7 @@ internal sealed partial class ReplTui : IReplScreen
     });
 
     // Keys that mean the same everywhere: Ctrl+C, Ctrl+D, Esc (never quits), scrolling the transcript, and Ctrl+O.
-    // Alt+↑/↓ move between the messages sent, and Ctrl+G writes the draft in $EDITOR.
+    // Alt+↑/↓ move between the messages sent, Ctrl+G writes the draft in $EDITOR, and Ctrl+V pastes the clipboard.
     void OnKey(object? sender, Key key)
     {
         _lastKey = DateTime.UtcNow;
@@ -450,6 +450,7 @@ internal sealed partial class ReplTui : IReplScreen
             : key.KeyCode == (KeyCode.O | KeyCode.CtrlMask) ? Run(ToggleOutput)
             : _find is { } find ? FindKey(key, find)
             : _output is { } shown ? OutputKey(key, shown)
+            : key.KeyCode == (KeyCode.V | KeyCode.CtrlMask) ? Run(PasteClipboard)
             : key.KeyCode == (KeyCode.F | KeyCode.CtrlMask) ? Run(OpenFind)
             : key.KeyCode == (KeyCode.Home | KeyCode.CtrlMask) ? Run(_view.ScrollToTop)
             : key.KeyCode == (KeyCode.R | KeyCode.CtrlMask) && !_panel.Visible ? Run(() => _ = SearchHistoryAsync())
@@ -468,6 +469,22 @@ internal sealed partial class ReplTui : IReplScreen
             return true;
         }
     }
+
+    // Terminals paste on their own keys (Ctrl+Shift+V, right-click); Ctrl+V reaches us as a key, so read the clipboard.
+    // The clipboard tool runs off the UI thread, and the text lands wherever the focus is when it comes back.
+    void PasteClipboard() => _ = Task.Run(() =>
+    {
+        var text = Clipboard.ReadNatively();
+        Ui(() =>
+        {
+            if (string.IsNullOrEmpty(text))
+                _status.Flash("Nothing to paste: the clipboard is empty or can't be read here. Use your terminal's paste");
+            else if (_prompt.HasFocus)
+                _prompt.Insert(Fold(text.ReplaceLineEndings("\n")));
+            else if (_panel.Visible && _panel.MostFocused is TextField field)
+                field.InsertText(Clipboard.SingleLine(text), false);
+        });
+    });
 
     // Ending the session while a turn runs cancels the turn first.
     void EndSession()

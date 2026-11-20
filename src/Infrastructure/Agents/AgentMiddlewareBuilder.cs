@@ -64,6 +64,7 @@ internal sealed class AgentMiddlewareBuilder(
         // last request outran the estimate (see InputTokenCalibration).
         // Requests under a quarter of the trigger are too small to judge by (see InputTokenCalibration).
         var calibration = new InputTokenCalibration(minSampleChars: triggerChars / 4);
+        var rewrites = new RequestRewriteTracker();
 
         return chatClient.AsBuilder()
             .Use(
@@ -72,9 +73,8 @@ internal sealed class AgentMiddlewareBuilder(
                     // Drop superseded writes/reads/shells, truncate intermediate reasoning, then
                     // cap the sliding tool-pair window and char budget — see
                     // AgentContextCompactionFilters.ApplyInTurnFilters for the full rationale.
-                    messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                        messages, maxInTurnToolPairs, calibration.Scale(maxInTurnChars), calibration.Scale(triggerChars), ct,
-                        AgentContextCompactionFilters.CacheStableTrimStep);
+                    var run = SubagentPlugin.CurrentRunId;
+                    messages = await FilterAsync(messages, run, ct);
                     messages = WithPlainTextToolResults(messages);
 
                     // Stop the FunctionInvokingChatClient loop immediately after handoff —
@@ -127,6 +127,7 @@ internal sealed class AgentMiddlewareBuilder(
                                         call_seq      = callSeq,
                                     });
 
+                            var change = rewrites.ObserveSent(run, ctx, merged?.Tools, attempt);
                             var response = await inner.GetResponseAsync(ctx, merged, ct);
                             calibration.Record(
                                 AgentContextCompactionFilters.EstimateTotalChars(ctx) + toolSchemaChars,
@@ -135,14 +136,8 @@ internal sealed class AgentMiddlewareBuilder(
                             if (emitter is not null)
                                 _ = emitter.EmitAsync(EventTypes.ModelResponse,
                                     agent: config.Name, turn: null,
-                                    payload: new
-                                    {
-                                        model         = config.Model.ModelId,
-                                        finish_reason = response.FinishReason?.Value,
-                                        input_tokens  = response.Usage?.InputTokenCount,
-                                        output_tokens = response.Usage?.OutputTokenCount,
-                                        call_seq      = callSeq,
-                                    });
+                                    payload: ModelResponsePayload(
+                                        config.Model.ModelId, response.FinishReason, response.Usage, callSeq, change, attempt, run));
 
                             return response;
                         }
@@ -196,15 +191,26 @@ internal sealed class AgentMiddlewareBuilder(
         // so the streaming path — unlike getResponseFunc above, which is already async —
         // needs to be its own async iterator rather than a synchronous lambda that returns
         // inner.GetStreamingResponseAsync(...) directly.
+        // Drops superseded content, then trims near the budget (see ApplyInTurnFilters), noting the request at each
+        // step so model_response can say which one changed its prefix.
+        async Task<IEnumerable<ChatMessage>> FilterAsync(IEnumerable<ChatMessage> messages, string? run, CancellationToken ct)
+        {
+            var stored  = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
+            var dropped = AgentContextCompactionFilters.DropSupersededContent(stored).ToList();
+            rewrites.ObserveInputs(run, stored, dropped);
+            return await AgentContextCompactionFilters.TrimNearBudget(
+                dropped, maxInTurnToolPairs, calibration.Scale(maxInTurnChars), calibration.Scale(triggerChars), ct,
+                AgentContextCompactionFilters.CacheStableTrimStep);
+        }
+
         async IAsyncEnumerable<ChatResponseUpdate> StreamWithToolPairWindowAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options,
             IChatClient inner,
             [EnumeratorCancellation] CancellationToken ct)
         {
-            messages = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                messages, maxInTurnToolPairs, calibration.Scale(maxInTurnChars), calibration.Scale(triggerChars), ct,
-                AgentContextCompactionFilters.CacheStableTrimStep);
+            var run = SubagentPlugin.CurrentRunId;
+            messages = await FilterAsync(messages, run, ct);
             messages = WithPlainTextToolResults(messages);
             if (hasHandoff && HandoffWasInvoked(messages))
                 yield break;
@@ -253,6 +259,7 @@ internal sealed class AgentMiddlewareBuilder(
                             streaming     = true,
                         });
 
+                var change = rewrites.ObserveSent(run, ctxMsgs, merged?.Tools, attempt);
                 var enumerator = inner.GetStreamingResponseAsync(ctxMsgs, merged, ct).GetAsyncEnumerator(ct);
                 try
                 {
@@ -280,40 +287,24 @@ internal sealed class AgentMiddlewareBuilder(
                     // "last non-null wins" across every chunk in case a provider streams them
                     // earlier or progressively — mirrors SubagentPlugin's streaming variant.
                     ChatFinishReason? finishReason = enumerator.Current.FinishReason;
-                    long? inputTok = null, outputTok = null;
-                    long promptTok = 0;
-                    foreach (var usage in enumerator.Current.Contents.OfType<UsageContent>())
-                    {
-                        inputTok  = usage.Details.InputTokenCount  ?? inputTok;
-                        outputTok = usage.Details.OutputTokenCount ?? outputTok;
-                        promptTok = usage.Details.PromptTokens() is > 0 and var p ? p : promptTok;
-                    }
+                    // Usage typically lands only on the final update, but some providers report input and output on
+                    // separate updates, so each field keeps the last value reported for it.
+                    UsageDetails? usage = MergeUsage(enumerator.Current, null);
                     yield return enumerator.Current;
 
                     while (await enumerator.MoveNextAsync())
                     {
                         finishReason = enumerator.Current.FinishReason ?? finishReason;
-                        foreach (var usage in enumerator.Current.Contents.OfType<UsageContent>())
-                        {
-                            inputTok  = usage.Details.InputTokenCount  ?? inputTok;
-                            outputTok = usage.Details.OutputTokenCount ?? outputTok;
-                            promptTok = usage.Details.PromptTokens() is > 0 and var p ? p : promptTok;
-                        }
+                        usage = MergeUsage(enumerator.Current, usage);
                         yield return enumerator.Current;
                     }
-                    calibration.Record(AgentContextCompactionFilters.EstimateTotalChars(ctxMsgs) + toolSchemaChars, promptTok);
+                    calibration.Record(AgentContextCompactionFilters.EstimateTotalChars(ctxMsgs) + toolSchemaChars, usage.PromptTokens());
 
                     if (emitter is not null)
                         _ = emitter.EmitAsync(EventTypes.ModelResponse,
                             agent: config.Name, turn: null,
-                            payload: new
-                            {
-                                model         = config.Model.ModelId,
-                                finish_reason = finishReason?.Value,
-                                input_tokens  = inputTok,
-                                output_tokens = outputTok,
-                                call_seq      = callSeq,
-                            });
+                            payload: ModelResponsePayload(
+                                config.Model.ModelId, finishReason, usage, callSeq, change, attempt, run));
                     yield break;
                 }
                 finally
@@ -432,6 +423,44 @@ internal sealed class AgentMiddlewareBuilder(
     private const int AdaptiveContextTrimMaxRetries = 3;
 
     // Produces a trimmed copy of messages for the given retry stage.
+    internal static UsageDetails? MergeUsage(ChatResponseUpdate update, UsageDetails? merged)
+    {
+        foreach (var details in update.Contents.OfType<UsageContent>().Select(u => u.Details))
+        {
+            merged ??= new UsageDetails();
+            merged.InputTokenCount  = details.InputTokenCount  ?? merged.InputTokenCount;
+            merged.OutputTokenCount = details.OutputTokenCount ?? merged.OutputTokenCount;
+            merged.TotalTokenCount  = details.TotalTokenCount  ?? merged.TotalTokenCount;
+            foreach (var (key, value) in details.AdditionalCounts ?? [])
+                (merged.AdditionalCounts ??= new())[key] = value;
+        }
+        return merged;
+    }
+
+    /// <summary>
+    /// The model_response event: the request's token counts, how much of it the provider's cache served or newly
+    /// stored, and where it first differed from the request before it (null when it resent that one whole).
+    /// </summary>
+    internal static object ModelResponsePayload(
+        string? model, ChatFinishReason? finishReason, UsageDetails? usage, int callSeq, RequestChange change, int attempt = 0,
+        string? run = null) => new
+    {
+        model,
+        finish_reason          = finishReason?.Value,
+        input_tokens           = usage?.InputTokenCount,
+        output_tokens          = usage?.OutputTokenCount,
+        prompt_tokens          = usage is null ? (long?)null : usage.PromptTokens(),
+        cached_input_tokens    = usage is null ? (long?)null : usage.CacheReadTokens(),
+        cache_write_tokens     = usage is null ? (long?)null : usage.CacheWriteTokens(),
+        prefix_changed_at      = change.ChangedAt,
+        prefix_change_cause    = change.Cause,
+        tools_changed          = change.ToolsChanged,
+        previous_message_count = change.PreviousCount,
+        attempt,
+        run,
+        call_seq               = callSeq,
+    };
+
     internal static List<ChatMessage> AdaptiveTrimMessages(
         IReadOnlyList<ChatMessage> messages,
         int stage)

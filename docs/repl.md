@@ -53,7 +53,7 @@ After each response, a compact status line reports what happened:
   ── turn 1 · ~3,200 tok · 2 tools
 ```
 
-Enter sends and Alt+Enter starts a new line; ↑/↓ walk your history, Tab completes slash commands, `$skills` and `@paths`, PgUp/PgDn scroll, Ctrl+F finds text in the conversation, Ctrl+R searches what you've sent, Alt+↑/↓ move between your messages, Ctrl+G opens the draft in `$EDITOR`, and Ctrl+O shows a tool's whole output. See the full key tables, for both the full-screen and the line-based REPL, in [CLI Reference — Input and line editing](cli-reference.md#fuseraft-repl).
+Enter sends and Alt+Enter starts a new line (Ctrl+J works everywhere, and is the one to use on Windows); Ctrl+V pastes the clipboard; ↑/↓ walk your history, Tab completes slash commands, `$skills` and `@paths`, PgUp/PgDn scroll, Ctrl+F finds text in the conversation, Ctrl+R searches what you've sent, Alt+↑/↓ move between your messages, Ctrl+G opens the draft in `$EDITOR`, and Ctrl+O shows a tool's whole output. See the full key tables, for both the full-screen and the line-based REPL, in [CLI Reference — Input and line editing](cli-reference.md#fuseraft-repl).
 
 ---
 

@@ -124,7 +124,7 @@ internal static partial class ReplCommands
         if (ReplInput.Screen is not null)
         {
             // The full-screen prompt already takes a multi-line paste as one message.
-            AnsiConsole.MarkupLine("[dim]Paste straight into the prompt: a multi-line paste is sent as one message, and[/] [bold]Alt+Enter[/] [dim]starts a new line.[/]");
+            AnsiConsole.MarkupLine("[dim]Paste straight into the prompt: a multi-line paste is sent as one message, and[/] [bold]{fuseraft.Cli.Tui.PromptView.NewLineKey}[/] [dim]starts a new line.[/]");
             return CommandResult.Continue;
         }
 

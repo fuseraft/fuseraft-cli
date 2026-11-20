@@ -679,7 +679,7 @@ Naming a file or directory with `@` hands it to the model with your message (`wh
 | Key | Action |
 |-----|--------|
 | Enter | Send the message (or take the highlighted suggestion) |
-| Alt+Enter / Shift+Enter | Start a new line; a multi-line paste is one message, and one longer than 10 lines or 2,000 characters shows in the draft as `[pasted #1 · 40 lines]` (sent in full, and kept for Ctrl+O) |
+| Ctrl+J / Alt+Enter / Shift+Enter | Start a new line (on Windows, use Ctrl+J: Windows Terminal takes Alt+Enter for full screen, and Shift+Enter reaches the REPL only in terminals that report it); a multi-line paste is one message, and one longer than 10 lines or 2,000 characters shows in the draft as `[pasted #1 · 40 lines]` (sent in full, and kept for Ctrl+O) |
 | Up / Down arrow | Walk input history at the first or last line, or move through suggestions; on an empty prompt, ↑ first takes back a queued message |
 | Alt+Up / Alt+Down | Scroll to the message you sent before or after the one in view |
 | Ctrl+G | Write the draft in `$VISUAL` or `$EDITOR` (`vi` if neither is set); saving and quitting puts it back in the prompt. Not on Windows |
@@ -690,6 +690,7 @@ Naming a file or directory with `@` hands it to the model with your message (`wh
 | Ctrl+F | Find text in the conversation (Enter or ↑ for older matches, ↓ for newer, Esc to close) |
 | Ctrl+R | Search earlier messages; the chosen one replaces the draft |
 | Ctrl+O | Show the latest tool output (with the arguments the call was made with; an MCP server's JSON answer is indented), approval diff, or thinking in full, in place of the conversation: ←/→ for older and newer (the last 100 are kept), ↑/↓ and PgUp/PgDn to scroll, Esc to close |
+| Ctrl+V | Paste the system clipboard into the prompt or the field being asked (an API key, say). Your terminal's own paste (Ctrl+Shift+V, right-click) works too. Over SSH, only the terminal's paste reaches your clipboard |
 | Ctrl+U | Delete from the cursor to the start of the line |
 | Ctrl+C | Cancel the running turn (denying an open approval), else close or clear what's open; twice on an empty prompt exits. Pressed again on a turn that hasn't stopped, it kills the commands the turn's tools are waiting on |
 | Ctrl+D | Exit, on an empty prompt |
@@ -1052,6 +1053,8 @@ As a conversation grows, token usage climbs and the model's effective context wi
 Two safeguards protect against a compaction that would do more harm than good: if recent history alone already fits inside the preserved window, there's nothing old enough to summarise and compaction declines rather than spending an LLM call on nothing; if the summarizer's result isn't actually smaller than what it replaced, compaction is rejected outright and history is left completely untouched.
 
 **Automatic compaction:** the same logic fires on its own once context usage crosses 75% of the budget, so a long session doesn't have to be babysat with manual `/compact` calls. Usage here is the larger of the provider's reported input for the turn's first call and the estimated size of the history the REPL is keeping — the provider's figure is measured after in-turn trimming, so on its own it can stay well under the threshold while the kept history grows past it. Disable it with `fuseraft settings set repl.autoCompact false` — at the threshold you'll then just see a warning suggesting `/compact` instead.
+
+**The context budget** is the model's real input limit when its provider reports one: the model's `max_input_tokens`, or 90% of its context window, leaving the rest for the reply. The REPL asks when it starts and when you switch model, through the same endpoint and key it chats with: Anthropic's models API, the model list of providers that include a window there (xAI, OpenRouter, Groq, Mistral, vLLM, LM Studio), or a LiteLLM gateway's `/model_group/info`. The answer is cached in `~/.fuseraft/cache/model-limits.json` for a week (a provider that doesn't say is asked again after a day), and a lookup gives up after 3 seconds. When the provider doesn't report a limit (OpenAI, Ollama), the budget is estimated from the model's name: 256K tokens for Grok, 150K for Claude, Gemini, and GPT-5, less for others. `repl.contextBudget` overrides both. `/context` and `fuseraft log cache` show which one applies.
 
 Two values here are tunable: `repl.autoCompactThreshold` (0.5–0.95, default `0.75`) sets where the warning or auto-compaction fires — lower it for a model that degrades well before its window is full, raise it if compacting feels premature — and `repl.compactPreserveTailRatio` (0.05–0.5, default `0.2`) sets how much of the budget is kept verbatim as recent turns rather than folded into the summary. The most recent turn is always kept, whatever the ratio.
 
@@ -2636,6 +2639,56 @@ fuseraft log repl --event command
 # Show curation events only
 fuseraft log repl --event skill_curation_complete
 ```
+
+---
+
+### `fuseraft log cache`
+
+Summarize how much of each REPL request the provider served from its prompt cache, and why the requests that mostly missed did. Run it from the directory you started `fuseraft repl` in. It reads the session's REPL event log and prints counts only: no prompts, code, or file contents.
+
+```
+fuseraft log cache [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--session <id>` | the latest session | Report on the matching session (ID or prefix). |
+| `--all` | — | Report on every session in the project, one line each, then all of them together. |
+| `--path <path>` | — | Read this REPL event log file instead. |
+
+**Example**
+
+```
+$ fuseraft log cache
+Session 380abb9b · grok-4.7 · 9 requests · 3 turns
+  Prompt tokens   68.6K   cached 32%   written 0
+  Subagents       3 of those requests
+  Cache misses    6 of 9 requests under 50% cached
+    first request          2        9K uncached
+    idle over 5 min        1      9.2K uncached
+    nothing changed        3       27K uncached
+  Compactions     none
+  Budget          200K (repl.contextBudget) · compacts at 75% (150K)
+```
+
+A request is a miss when less than half its prompt came from cache (prompts under 1,024 tokens, too small to cache, aren't counted). Each miss is put down to one of:
+
+| Reason | What happened | What to look at |
+|--------|---------------|-----------------|
+| `first request` | The first request of the session or of a subagent run: nothing was cached yet. | Expected. |
+| `idle over 5 min` | Nothing changed, but more than 5 minutes passed since the previous request, the shortest common cache lifetime. | Expected after a pause. |
+| `nothing changed` | The request resent the previous one unchanged and still missed: the provider's cache was cold or evicted, or the request reached a different server. | The provider or gateway: session affinity, or a model whose caching is best effort. |
+| `compaction` | Compaction replaced the history with a summary. | How often it compacts: `repl.contextBudget`, `repl.autoCompactThreshold`. |
+| `history trim` | The oldest turns were dropped to fit the budget. | As for compaction. |
+| `history rewritten` | The stored history changed some other way, such as a resumed or forked chat. | |
+| `stale-read drop` | Superseded file reads, writes, or shell output were removed from the request. | |
+| `in-turn trim` | A long turn neared the budget and its older rounds were shortened. | The budget. |
+| `overflow retry` | The provider rejected the request as too large and it was retried with tool results cut down. | The budget is above the model's real limit. |
+| `tools changed` | The tool list changed (`/tools`, `/model`, an MCP server), and providers put tools ahead of every message. | Expected after a change. |
+
+`written` is how many tokens were stored in the cache. It's reported for Claude, natively or through a gateway such as LiteLLM; 0 there means the requests' cache breakpoints aren't reaching the provider. The `Budget` line is the context budget the REPL compacts against and where it came from: `repl.contextBudget`, the model's input limit from its provider, or an estimate from the model's name (see "Compacting a session").
 
 ---
 

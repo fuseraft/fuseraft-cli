@@ -39,16 +39,11 @@ public sealed class TodoPlugin
         new(StringComparer.OrdinalIgnoreCase) { "pending", "in_progress", "completed" };
 
     [Description(
-        "Replace the current todo list with the given items. Use this to plan and track " +
-        "multi-step or open-ended work: write the full plan before starting, then call this " +
-        "again after each step completes or starts to update status. Always pass the complete " +
-        "list, not just the changed item — this call replaces the whole list.")]
+        "Replace the todo list. For multi-step work: write the full plan first, then resend " +
+        "the complete list as each step starts or finishes.")]
     public string Write(
         [Description(
-            "JSON array of items, e.g. " +
-            "[{\"content\":\"Read entry point\",\"status\":\"completed\"}," +
-            "{\"content\":\"Map request flow\",\"status\":\"in_progress\"}]. " +
-            "status is one of pending, in_progress, completed. Replaces the entire list.")]
+            "JSON array of {\"content\",\"status\"}; status: pending, in_progress or completed.")]
         string itemsJson)
     {
         // Trimming replaces an old todo_write's list with an "[ELIDED …]" note, and a model updating the list copies

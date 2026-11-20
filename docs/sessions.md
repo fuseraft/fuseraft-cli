@@ -136,7 +136,7 @@ REPL agents can inspect their own session and diagnostic logs using the built-in
 | `turn_start` | Model starts processing a turn |
 | `inner_call_context` | Snapshot of the exact message-content breakdown about to be sent, taken after in-turn compaction — payload: `seq`, `msg_counts` (`user`/`assistant`/`tool`), `content_chars` (`text`, `reasoning_text`, `fn_call_args`, `fn_results`, `tool_schema_est`, `grand_total`), `est_tokens` |
 | `model_call` | One inner LLM HTTP request is about to be sent (a turn with tool calls fires several) — payload: `model`, `attempt`, `message_count`, `call_seq`, `streaming` — correlates with `inner_call_context` via `call_seq` |
-| `model_response` | LLM response received for that inner call — payload: `model`, `finish_reason`, `input_tokens`, `output_tokens`, `call_seq` |
+| `model_response` | LLM response received for that inner call — payload: `model`, `finish_reason`, `input_tokens`, `output_tokens`, `prompt_tokens` (the whole prompt), `cached_input_tokens` (served from the provider's prompt cache), `cache_write_tokens` (newly cached; Anthropic, or a gateway such as LiteLLM in front of it), `prefix_changed_at` (the first message that differs from the previous request in the same conversation, which is where the cache stops serving it; null when that request was resent unchanged), `prefix_change_cause` (what changed it: `tools`, `history`, `stale_drop`, `in_turn_trim`, or `overflow_trim`), `tools_changed`, `previous_message_count`, `attempt`, `run` (the subagent run, or null on the main thread), `call_seq`. `fuseraft log cache` summarizes these |
 | `turn_end` | Model finishes a turn — payload: `elapsed_ms`, `estimated_tokens`, `tool_rounds` (model calls the turn made, retried attempts included), `tool_count`, `is_step`, `is_correction` |
 | `assistant_response` | Final assistant message for the turn |
 | `tool_call` | Each individual tool invocation |
@@ -198,7 +198,7 @@ All REPL events are tagged with the session ID (`session` field in the JSONL), s
 | Event type | When emitted | Key payload fields |
 |------------|-------------|-------------------|
 | `model_call` | LLM HTTP request is about to be sent — payload: `model`, `attempt`, `message_count`, `call_seq` | correlates with `inner_call_context` via `call_seq` |
-| `model_response` | LLM response received — payload: `model`, `finish_reason`, `input_tokens`, `output_tokens`, `call_seq` | |
+| `model_response` | LLM response received — payload: `model`, `finish_reason`, `input_tokens`, `output_tokens`, `prompt_tokens` (the whole prompt), `cached_input_tokens` (served from the provider's prompt cache), `cache_write_tokens` (newly cached; Anthropic, or a gateway such as LiteLLM in front of it), `prefix_changed_at` (the first message that differs from the previous request in the same conversation, which is where the cache stops serving it; null when that request was resent unchanged), `prefix_change_cause` (what changed it: `tools`, `history`, `stale_drop`, `in_turn_trim`, or `overflow_trim`), `tools_changed`, `previous_message_count`, `attempt`, `run` (the subagent run, or null on the main thread), `call_seq`. `fuseraft log cache` summarizes these | |
 | `model_error` | LLM call failed (non-timeout) — payload: `model`, `attempt`, `call_seq`, `error` | includes context-limit exhaustion |
 | `model_timeout` | LLM call or streaming response timed out — payload: `model`, `attempt`, `message` | |
 

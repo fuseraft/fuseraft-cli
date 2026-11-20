@@ -7,7 +7,7 @@ using Terminal.Gui.Text;
 namespace fuseraft.Cli.Tui;
 
 /// <summary>
-/// The message being written: Enter sends, Alt+Enter or Shift+Enter starts a new line, ↑/↓ at the edges walk history.
+/// The message being written: Enter sends, Ctrl+J, Alt+Enter or Shift+Enter starts a new line, ↑/↓ at the edges walk history.
 /// While it suggests completions (a slash command, a $skill), ↑/↓ choose one and Tab or Enter takes it.
 /// </summary>
 internal sealed class PromptView : Editor
@@ -17,6 +17,9 @@ internal sealed class PromptView : Editor
     string _draft = "";
     int _start; // where the text the suggestions would replace begins
     string? _dismissed; // the draft as it was when Esc hid the suggestions; they stay hidden until it changes
+
+    /// <summary>The new-line key the hints name. Windows Terminal takes Alt+Enter for full screen, so Windows gets Ctrl+J.</summary>
+    public static string NewLineKey => OperatingSystem.IsWindows() ? "Ctrl+J" : "Alt+Enter";
 
     public PromptView()
     {
@@ -125,8 +128,9 @@ internal sealed class PromptView : Editor
         }
         if (Document is not { } document)
             return base.OnKeyDown(key);
-        // Alt+Enter often arrives as Ctrl+Alt+M, since Enter is a carriage return.
-        if (key.KeyCode is (KeyCode.Enter | KeyCode.ShiftMask) or (KeyCode.Enter | KeyCode.AltMask) or (KeyCode.M | KeyCode.CtrlMask | KeyCode.AltMask))
+        // Alt+Enter often arrives as Ctrl+Alt+M, since Enter is a carriage return; Ctrl+J, a line feed, as Ctrl+Enter.
+        if (key.KeyCode is (KeyCode.Enter | KeyCode.ShiftMask) or (KeyCode.Enter | KeyCode.AltMask) or (KeyCode.M | KeyCode.CtrlMask | KeyCode.AltMask)
+            or (KeyCode.Enter | KeyCode.CtrlMask) or (KeyCode.J | KeyCode.CtrlMask))
         {
             Insert("\n");
             return true;

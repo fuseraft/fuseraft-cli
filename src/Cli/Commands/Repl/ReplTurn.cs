@@ -835,6 +835,9 @@ internal static class ReplTurn
         string? mentioned = null,
         bool toolsOff = false)
     {
+        // Every request this turn makes, its subagents' included, names the session (see SessionAffinityHandler).
+        fuseraft.Infrastructure.Context.RequestSession.Id.Value = ctx.SessionId;
+
         // The true original user request, preserved across every level of recursive
         // self-correction below — `input` itself becomes the injected correction text on
         // recursive calls, but the todo-critic escalation needs the real task, not the last

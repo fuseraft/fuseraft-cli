@@ -12,13 +12,11 @@ public sealed class AskPlugin(IHumanApprovalService person)
     public const int MaxOptions = 8;
 
     [Description(
-        "Ask the user a multiple-choice question and wait for the answer. Use it only when you're blocked on a decision " +
-        "that is genuinely the user's (a preference, or intent the request and the code don't settle), not for facts you can " +
-        "look up or for permission, which the tools ask for themselves. Offer 2 to 8 short, distinct options, the one you " +
-        "recommend first. The user can also type their own answer unless allow_other is false.")]
+        "Ask the user a multiple-choice question. Only for a decision that is genuinely theirs (preference, intent), " +
+        "not facts you can look up or permission, which tools ask for themselves.")]
     public async Task<string> UserAsync(
         [Description("The question, as one clear sentence.")] string question,
-        [Description("The answers to choose from, 2 to 8, most recommended first.")] string[] options,
+        [Description("2 to 8 short options, recommended first.")] string[] options,
         [Description("Let the user type an answer that isn't in the options.")] bool allow_other = true,
         CancellationToken ct = default)
     {

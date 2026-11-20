@@ -52,12 +52,12 @@ public sealed class GitPlugin
     // queries included — see the sandboxRoot doc comment above for why.
     // Returns a [DENIED] error string on violation, null when safe.
     private string? ValidateRepoPath(string? repoPath, out string? resolved) =>
-        FileSystemSandbox.ResolveSafeDirectory(repoPath, _sandboxRoot, _includedRoots.Snapshot(), out resolved);
+        FileSystemSandbox.ResolveSafeDirectory(string.IsNullOrWhiteSpace(repoPath) ? null : repoPath, _sandboxRoot, _includedRoots.Snapshot(), out resolved);
 
     // Read-only queries
 
     [Description("Get working-tree status.")]
-    public async Task<string> StatusAsync([Description("Repo path.")] string? repoPath = null)
+    public async Task<string> StatusAsync([Description("Repo path.")] string repoPath = "")
     {
         var denial = ValidateRepoPath(repoPath, out var resolved);
         if (denial is not null) return denial;
@@ -68,7 +68,7 @@ public sealed class GitPlugin
 
     [Description("Show working-tree or staged diff.")]
     public async Task<string> DiffAsync(
-        [Description("Repo path.")] string? repoPath = null,
+        [Description("Repo path.")] string repoPath = "",
         [Description("Show staged diff.")] bool staged = false,
         [Description("Max output lines.")] int maxLines = 200)
     {
@@ -82,7 +82,7 @@ public sealed class GitPlugin
 
     [Description("Show commit history.")]
     public async Task<string> LogAsync(
-        [Description("Repo path.")] string? repoPath = null,
+        [Description("Repo path.")] string repoPath = "",
         [Description("Max commits.")] int count = 10,
         [Description("Branch or ref.")] string? @ref = null)
     {
@@ -99,7 +99,7 @@ public sealed class GitPlugin
     [Description("Show a specific commit.")]
     public async Task<string> ShowAsync(
         [Description("Commit hash or ref.")] string commitRef,
-        [Description("Repo path.")] string? repoPath = null,
+        [Description("Repo path.")] string repoPath = "",
         [Description("Max output lines.")] int maxLines = 300)
     {
         var denial = ValidateRepoPath(repoPath, out var resolved);
@@ -117,7 +117,7 @@ public sealed class GitPlugin
 
     [Description("List branches.")]
     public async Task<string> BranchListAsync(
-        [Description("Repo path.")] string? repoPath = null,
+        [Description("Repo path.")] string repoPath = "",
         [Description("Include remote-tracking branches.")] bool includeRemotes = false)
     {
         var denial = ValidateRepoPath(repoPath, out var resolved);
@@ -143,7 +143,7 @@ public sealed class GitPlugin
     [Description("Stage files for commit.")]
     public async Task<string> AddAsync(
         [Description("File path(s) or '.' for everything.")] string paths,
-        [Description("Repo path.")] string? repoPath = null)
+        [Description("Repo path.")] string repoPath = "")
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
         if (pathDenial is not null) return pathDenial;
@@ -164,7 +164,7 @@ public sealed class GitPlugin
     [Description("Create a commit.")]
     public async Task<string> CommitAsync(
         [Description("Commit message.")] string message,
-        [Description("Repo path.")] string? repoPath = null,
+        [Description("Repo path.")] string repoPath = "",
         [Description("Stage all tracked changes before commit.")] bool stageAll = false)
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
@@ -190,7 +190,7 @@ public sealed class GitPlugin
     [Description("Switch branch or restore files.")]
     public async Task<string> CheckoutAsync(
         [Description("Branch, commit, or file path.")] string target,
-        [Description("Repo path.")] string? repoPath = null,
+        [Description("Repo path.")] string repoPath = "",
         [Description("Create branch if it doesn't exist.")] bool createBranch = false)
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
@@ -209,7 +209,7 @@ public sealed class GitPlugin
     [Description("Create a new branch from HEAD.")]
     public async Task<string> CreateBranchAsync(
         [Description("Branch name.")] string branchName,
-        [Description("Repo path.")] string? repoPath = null)
+        [Description("Repo path.")] string repoPath = "")
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
         if (pathDenial is not null) return pathDenial;
@@ -239,7 +239,7 @@ public sealed class GitPlugin
                  "has no .git of its own — use is_repo_root instead when the question is whether " +
                  "it is safe to commit here as this project's own history.")]
     public async Task<string> IsInsideWorkTreeAsync(
-        [Description("Repo path to check (defaults to CWD).")] string? repoPath = null)
+        [Description("Repo path to check (defaults to CWD).")] string repoPath = "")
     {
         var denial = ValidateRepoPath(repoPath, out var resolved);
         if (denial is not null) return denial;
@@ -258,7 +258,7 @@ public sealed class GitPlugin
                  "dotfiles-tracked home directory) — committing there would land in that ancestor's " +
                  "history and be subject to its .gitignore, not this project's own.")]
     public async Task<string> IsRepoRootAsync(
-        [Description("Directory to check (defaults to CWD).")] string? repoPath = null)
+        [Description("Directory to check (defaults to CWD).")] string repoPath = "")
     {
         var denial = ValidateRepoPath(repoPath, out var resolved);
         if (denial is not null) return denial;
@@ -279,7 +279,7 @@ public sealed class GitPlugin
         [Description("Remote name.")] string? remote = null,
         [Description("Branch to push.")] string? branch = null,
         [Description("Set upstream tracking reference.")] bool setUpstream = false,
-        [Description("Repo path.")] string? repoPath = null)
+        [Description("Repo path.")] string repoPath = "")
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
         if (pathDenial is not null) return pathDenial;
@@ -299,7 +299,7 @@ public sealed class GitPlugin
     public async Task<string> PullAsync(
         [Description("Remote name.")] string? remote = null,
         [Description("Branch to pull.")] string? branch = null,
-        [Description("Repo path.")] string? repoPath = null)
+        [Description("Repo path.")] string repoPath = "")
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
         if (pathDenial is not null) return pathDenial;
@@ -317,7 +317,7 @@ public sealed class GitPlugin
     [Description("Stash working-tree changes.")]
     public async Task<string> StashAsync(
         [Description("Stash message.")] string? message = null,
-        [Description("Repo path.")] string? repoPath = null)
+        [Description("Repo path.")] string repoPath = "")
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
         if (pathDenial is not null) return pathDenial;
@@ -332,7 +332,7 @@ public sealed class GitPlugin
 
     [Description("List stashed changesets.")]
     public async Task<string> StashListAsync(
-        [Description("Repo path.")] string? repoPath = null)
+        [Description("Repo path.")] string repoPath = "")
     {
         var denial = ValidateRepoPath(repoPath, out var resolved);
         if (denial is not null) return denial;
@@ -343,7 +343,7 @@ public sealed class GitPlugin
 
     [Description("Apply and remove the most recent stash.")]
     public async Task<string> StashPopAsync(
-        [Description("Repo path.")] string? repoPath = null)
+        [Description("Repo path.")] string repoPath = "")
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
         if (pathDenial is not null) return pathDenial;
@@ -359,7 +359,7 @@ public sealed class GitPlugin
     public async Task<string> ResetAsync(
         [Description("Reset mode: 'soft', 'mixed', or 'hard'.")] string mode = "mixed",
         [Description("Target ref.")] string @ref = "HEAD",
-        [Description("Repo path.")] string? repoPath = null)
+        [Description("Repo path.")] string repoPath = "")
     {
         mode = mode.ToLowerInvariant();
         if (mode is not ("soft" or "mixed" or "hard"))
@@ -382,7 +382,7 @@ public sealed class GitPlugin
         [Description("Upstream ref (branch, commit, or HEAD~N). Required unless using control.")] string? upstream = null,
         [Description("New base for --onto rebase. Requires upstream.")] string? onto = null,
         [Description("Control an in-progress rebase: 'abort', 'continue', or 'skip'.")] string? control = null,
-        [Description("Repo path.")] string? repoPath = null)
+        [Description("Repo path.")] string repoPath = "")
     {
         var pathDenial = ValidateRepoPath(repoPath, out var resolved);
         if (pathDenial is not null) return pathDenial;

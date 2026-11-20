@@ -91,6 +91,7 @@ internal static class ReplFactory
         ReplLimits? limits = null)
     {
         var client = factory.Create(config);
+        LearnInputLimit(config, emitter);
         if (addFunctionInvocation)
         {
             var resolved = factory.Resolve(config);
@@ -178,6 +179,21 @@ internal static class ReplFactory
     /// fallback used to apply here: with grok-4.7 (no registry size, a 150K-token REPL budget) it elided every read but
     /// the last 12 rounds at about 45K tokens, and the model spent its turn reading the same files again.
     /// </summary>
+    // Asks the provider for the model's input limit (once a week per model, see ModelLimitStore) before the budgets
+    // below are set from it, and logs the budget that results.
+    private static void LearnInputLimit(ModelConfig config, EventEmitter? emitter)
+    {
+        var known = fuseraft.Infrastructure.Storage.ModelLimitStore.Known(config.ModelId) is not null;
+        if (fuseraft.Infrastructure.Storage.ModelLimitStore.Learn(config) is not { } limit || known || emitter is null)
+            return;
+        _ = emitter.EmitAsync(EventTypes.ModelLimit, payload: new
+        {
+            model        = config.ModelId,
+            input_tokens = limit.Tokens,
+            source       = limit.Source,
+        });
+    }
+
     internal static (int MaxInTurnChars, int TriggerChars) InTurnLimits(int maxContextChars, string? modelId, int? contextBudget)
     {
         if (maxContextChars > 0) return (maxContextChars, maxContextChars);

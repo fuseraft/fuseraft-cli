@@ -764,6 +764,25 @@ public sealed class FileSystemPluginTests : IDisposable
         Assert.Contains("not found", result, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(5)]
+    public async Task ReadFile_EmptyFile_ReadsAsEmpty(int startLine)
+    {
+        await File.WriteAllTextAsync(TempPath("__init__.py"), "");
+        var result = await _plugin.ReadFileAsync(TempPath("__init__.py"), startLine);
+        Assert.Equal("(empty file)", result);
+    }
+
+    [Fact]
+    public async Task ReadFile_StartLinePastTheEnd_ReturnsError()
+    {
+        await File.WriteAllTextAsync(TempPath("two.txt"), "a\nb\n");
+        var result = await _plugin.ReadFileAsync(TempPath("two.txt"), startLine: 3);
+        Assert.StartsWith("[ERROR]", result);
+        Assert.Contains("exceeds file length", result);
+    }
+
     [Fact]
     public async Task ReadFile_BinaryFile_ReturnsError()
     {

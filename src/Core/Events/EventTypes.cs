@@ -70,6 +70,8 @@ public static class EventTypes
     public const string ContextWindowWarn       = "context_window_warn";
     public const string ContextExceededRecovery = "context_exceeded_recovery";
     public const string ContextWarning          = "context_warning";
+    /// <summary>A model's input limit, learned from its provider's metadata, which the REPL's context budget follows.</summary>
+    public const string ModelLimit              = "model_limit";
 
     // ── Compaction ───────────────────────────────────────────────────────────
     public const string Compaction                = "compaction";

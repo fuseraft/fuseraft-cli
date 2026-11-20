@@ -115,7 +115,6 @@ internal sealed class ReplSessionContext
         set
         {
             _modelId = value;
-            ContextTokenBudget = ModelContextWindow.GetBudget(value, UserCfg?.Repl?.ContextBudget);
         }
     }
 
@@ -126,7 +125,7 @@ internal sealed class ReplSessionContext
     // /model switch, and session resume. Relies on UserCfg already being current at that point
     // — the constructor below sets UserCfg before ModelId for this reason, and every later
     // reassignment site that changes both (e.g. /provider setup) must preserve that order.
-    public int ContextTokenBudget { get; private set; } = ModelContextWindow.DefaultBudget;
+    public int ContextTokenBudget => ModelContextWindow.GetBudget(_modelId, UserCfg?.Repl?.ContextBudget);
 
     /// <summary>Per-turn read_file budget in chars, derived from <see cref="ContextTokenBudget"/>.</summary>
     public int ReadBudgetChars => ModelContextWindow.GetReadBudgetChars(ContextTokenBudget);

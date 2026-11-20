@@ -170,6 +170,8 @@ Uses `Microsoft.Extensions.AI` with the OpenAI connector. Works with any API tha
 
 Compatible services include: OpenAI, xAI (Grok), DeepSeek, OpenRouter, Groq, Together AI, LM Studio, vLLM, and many others. Anthropic also exposes an OpenAI-compatible endpoint, reachable this way with an explicit `endpoint` override, but `claude-*` model IDs default to the native `anthropic` provider below instead — the OpenAI-compatible endpoint does not support prompt caching.
 
+A provider's prompt cache lives on the server that wrote it, so the REPL names its session on every request: an `x-litellm-session-id` header, which a LiteLLM gateway with session affinity uses to keep the session on one deployment, and for xAI an `x-grok-conv-id` header, which xAI routes by. Services that don't use them ignore them. Through a LiteLLM gateway, Claude models also get Anthropic `cache_control` breakpoints, which LiteLLM passes to Bedrock as cache points; each `model_response` event in the session log reports how much of the request was cached (see [Sessions](sessions.md)).
+
 ```bash
 export OPENAI_API_KEY=sk-...
 ```
