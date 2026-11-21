@@ -32,7 +32,7 @@ internal sealed class RequestPrefixTracker
         }
     }
 
-    private static int Hash(ChatMessage message)
+    internal static int Hash(ChatMessage message)
     {
         var hash = new HashCode();
         hash.Add(message.Role);

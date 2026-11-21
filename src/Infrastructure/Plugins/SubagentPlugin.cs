@@ -674,22 +674,14 @@ public sealed class SubagentPlugin(
 
         // Trim first (inner), then wrap with the function-invocation loop (outer) — same
         // layering AgentFactory uses for regular agents: FunctionInvokingChatClient keeps
-        // its own full message list for tool-call bookkeeping, but what actually goes out
-        // over the wire each round is the trimmed view built fresh every call.
+        // its own full message list for tool-call bookkeeping, but what goes out over the wire
+        // each round is this run's append-only view of it (see CacheStableRequestView).
+        var view = NewRequestView();
         var trimmedClient = client.AsBuilder()
             .Use(
                 getResponseFunc: async (msgs, opts, inner, ct) =>
-                {
-                    // triggerChars uses the same budget as the hard char cap — the pair
-                    // window engages at CompactionTriggerRatio of it, slightly before
-                    // TrimInTurnContext would kick in at 100%.
-                    var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
-                        msgs, SubagentMaxInTurnToolPairs, SubagentMaxInTurnChars,
-                        triggerChars: SubagentMaxInTurnChars, cancellationToken: ct,
-                        cacheStep: AgentContextCompactionFilters.CacheStableTrimStep);
-                    return await inner.GetResponseAsync(trimmed, opts, ct);
-                },
-                getStreamingResponseFunc: StreamWithInTurnTrimAsync)
+                    await inner.GetResponseAsync(await view.RenderAsync(null, [.. msgs], SubagentMaxInTurnChars, ct), opts, ct),
+                getStreamingResponseFunc: (msgs, opts, inner, ct) => StreamWithInTurnTrimAsync(view, msgs, opts, inner, ct))
             .Build();
 
         // AgentToolLoopGuard guards against a model looping on the exact same tool call forever —
@@ -828,18 +820,18 @@ public sealed class SubagentPlugin(
     private static string AppendPartialOutput(string notice, string? partial) =>
         string.IsNullOrWhiteSpace(partial) ? notice : $"{notice}\nPartial output:\n{partial}";
 
-    // Streaming counterpart of the getResponseFunc trim above — same ApplyInTurnFilters call,
-    // just shaped as an async iterator since the streaming delegate can't be a simple lambda.
+    private static CacheStableRequestView NewRequestView() => new((stored, target, ct) => AgentContextCompactionFilters.TrimNearBudget(
+        AgentContextCompactionFilters.DropSupersededContent(stored), SubagentMaxInTurnToolPairs, target, triggerChars: 0, ct));
+
+    // Streaming counterpart of the getResponseFunc trim above, shaped as an async iterator.
     private static async IAsyncEnumerable<ChatResponseUpdate> StreamWithInTurnTrimAsync(
+        CacheStableRequestView view,
         IEnumerable<ChatMessage> messages,
         ChatOptions? options,
         IChatClient inner,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var trimmed = await AgentContextCompactionFilters.ApplyInTurnFilters(
-            messages, SubagentMaxInTurnToolPairs, SubagentMaxInTurnChars,
-            triggerChars: SubagentMaxInTurnChars, cancellationToken: cancellationToken,
-            cacheStep: AgentContextCompactionFilters.CacheStableTrimStep);
+        var trimmed = await view.RenderAsync(null, [.. messages], SubagentMaxInTurnChars, cancellationToken);
         await foreach (var update in inner.GetStreamingResponseAsync(trimmed, options, cancellationToken))
             yield return update;
     }

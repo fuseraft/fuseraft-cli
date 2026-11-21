@@ -46,11 +46,20 @@ public sealed class ToolResultArtifactStore
     /// </summary>
     public bool TryOffload(string toolName, string hint, string content, out string stub)
     {
-        if (_artifactsDir is null || content.Length <= ThresholdChars)
+        if (content.Length <= ThresholdChars || Save(toolName, hint, content) is not { } saved)
         {
             stub = content;
             return false;
         }
+
+        stub = BuildStub(toolName, hint, content.Length, saved.Id, saved.TextPath);
+        return true;
+    }
+
+    /// <summary>Stores <paramref name="content"/> whatever its size; returns its ID and the path of its plain-text copy, or null when it can't.</summary>
+    public (string Id, string TextPath)? Save(string source, string hint, string content)
+    {
+        if (_artifactsDir is null) return null;
 
         var id = Guid.NewGuid().ToString("N")[..12];
         try
@@ -61,7 +70,7 @@ public sealed class ToolResultArtifactStore
                 JsonSerializer.Serialize(new ToolResultArtifact
                 {
                     Id      = id,
-                    Tool    = toolName,
+                    Tool    = source,
                     Hint    = hint,
                     Chars   = content.Length,
                     Content = content,
@@ -72,21 +81,18 @@ public sealed class ToolResultArtifactStore
         }
         catch
         {
-            // Best-effort: if the write fails, return content unchanged.
-            stub = content;
-            return false;
+            return null;
         }
 
         if (_emitter is not null)
             _ = _emitter.EmitAsync(EventTypes.ArtifactCreated, payload: new
             {
                 id,
-                tool  = toolName,
+                tool  = source,
                 chars = content.Length,
             });
 
-        stub = BuildStub(toolName, hint, content.Length, id, TextPath(id));
-        return true;
+        return (id, TextPath(id));
     }
 
     private string TextPath(string id) => Path.GetFullPath(Path.Combine(_artifactsDir!, $"{id}.txt"));

@@ -586,7 +586,7 @@ Compaction and Context Budget operate across turns. The in-turn sliding window o
 Without a cap, N sequential tool calls cost O(N²) cumulative tokens across the turn because
 each iteration resends all prior tool results. The sliding window keeps this cost at O(window)
 by replacing every tool result older than the last `maxInTurnToolPairs` with a compact
-placeholder before the next LLM call:
+placeholder when a request is trimmed:
 
 ```yaml
 agents:
@@ -595,32 +595,30 @@ agents:
       maxInTurnToolPairs: 12   # keep only the last 12 tool call/result pairs in full
 ```
 
-**Trigger-gated, not unconditional:** the window only actually collapses anything once the
-turn's estimated size reaches `CompactionTriggerRatio` (90%) of a reference budget — the
-agent's `maxContextTokens` when configured, otherwise a 200k-char fallback. Below that
-threshold every call resends the exact same tool-pair sequence as the previous one, so a
-provider's prompt-cache prefix stays intact across the turn instead of being rewritten (and
-the cache invalidated) on every single round once the pair count merely exceeds N. This
-mirrors how Cline's own context-compaction pipeline only triggers past ~90% of usable input
-rather than reshaping the transcript on every call.
+**Append-only between trims:** each request resends exactly what the previous request in
+the same conversation sent, plus the messages added since. Nothing earlier in the request is
+rewritten, so a provider's prompt cache can serve all of it. This matters most on providers
+that serve nothing from cache once any earlier message changes (Grok on Bedrock is one of these).
 
-**Moves in steps once triggered:** past the trigger, the window and the char budget below
-move their cut points 8 groups or results at a time rather than one per round. Each move
-rewrites a message near the start of the request — a prompt-cache miss on nearly all of
-it — so the window floats between `maxInTurnToolPairs` and `MaxInTurnToolPairs + 7` groups,
-and the char budget trims results in batches of 8, keeping the prefix unchanged for the
-rounds in between instead of breaking the cache on every one.
+**Trimmed in one step, well below the budget:** once a request passes its in-turn budget
+(the agent's `maxInTurnContextTokens`, or its context budget), fuseraft trims it once. That
+single trim does three things. It drops superseded pairs (see below), applies the sliding
+window, and replaces the oldest remaining results with placeholders, down to 60% of the budget.
+That one trim is one cache miss. Requests then grow, append-only and cached, back toward the
+budget before the next trim. If the request can't get under the budget (one message is bigger
+than it, say), it isn't trimmed again until it has grown by another 40% of the budget, so it
+doesn't miss the cache on every round.
 
-**Deterministic vs. budget-reactive:**
+**`maxInTurnToolPairs` vs. `maxInTurnContextTokens`:**
 
 | Field | When it fires | Guarantee |
 |-------|--------------|-----------|
-| `maxInTurnToolPairs` | Once the turn crosses the size trigger above | O(N) tool-result footprint once triggered |
-| `maxInTurnContextTokens` | Only when total in-turn chars exceed the budget | Fires only after the budget is exceeded |
+| `maxInTurnToolPairs` | At each trim | At most N whole tool rounds after a trim |
+| `maxInTurnContextTokens` | Sets the budget that triggers a trim | The request is cut to 60% of it |
 
 Use `maxInTurnToolPairs` when you want a hard bound regardless of result sizes. Use
 `maxInTurnContextTokens` when result sizes vary and you want to preserve more context for
-turns with small results. Both can be set simultaneously — the sliding window runs first.
+turns with small results. Both can be set simultaneously; a trim applies the sliding window first.
 
 **Replaced results:** replaced pairs become `[result omitted — sliding window]`. The
 `CallId` on each `FunctionResultContent` is preserved so the conversation structure stays
@@ -637,12 +635,8 @@ the same path, an earlier observational read (`read_file`, `grep_file`, `list_fi
 etc.) superseded by a later identical call, and repeated `shell_run` invocations of the same
 command (whose earlier results collapse to a one-line outcome).
 
-This rewrite is batched rather than applied the instant something is superseded: it only fires
-once the superseded content across a filter's candidates totals at least 64k characters. A
-single stale re-read is left alone — rewriting it would change a message in the middle of the
-transcript and break the provider's prompt-cache prefix from that point forward for no real
-savings; batching means most calls still resend an identical prefix, and the rewrite only
-happens once enough staleness has piled up to be worth the one-time cache miss.
+These pairs are dropped only as part of a trim. Below the budget they stay in the request
+as they were sent, so the request's prefix stays cached.
 
 ---
 

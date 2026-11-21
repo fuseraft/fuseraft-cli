@@ -274,6 +274,45 @@ internal static class ReplTurn
         return false;
     }
 
+    // Share of the context budget one message may take before the user is told what it costs. A pasted 3,000-line
+    // build log was a whole 200K budget on its own, resent on every request.
+    internal const double LargeMessageRatio = 0.25;
+
+    /// <summary>A warning for a message of <paramref name="chars"/> that takes a large share of the context budget, or null.</summary>
+    internal static string? LargeMessageWarning(int chars, int contextTokenBudget)
+    {
+        var tokens = TokenEstimator.EstimateTokens(chars);
+        if (contextTokenBudget <= 0 || tokens < contextTokenBudget * LargeMessageRatio) return null;
+        return $"This message is about {tokens:N0} tokens, {(double)tokens / contextTokenBudget:P0} of the " +
+               $"{contextTokenBudget:N0}-token context budget, and it's resent with every request. With the FileSystem " +
+               "tools on, a long paste is saved to a file the model reads from instead.";
+    }
+
+    // Typed text longer than this is saved to a file the model reads from, as an oversized tool result is
+    // (ToolResultArtifactStore's threshold): sent whole, it is resent with every request until compaction.
+    internal const int PasteOffloadChars = 40_000;
+    // How much of the start and of the end stays in the message: where the question usually is, and a log's summary.
+    private const int PasteExcerptChars = 3_000;
+
+    /// <summary>What the model gets for typed <paramref name="text"/>: the text, or for a long paste its start and end and where the rest is.</summary>
+    internal static string OffloadLargePaste(ReplSessionContext ctx, string text)
+    {
+        if (text.Length <= PasteOffloadChars || ctx.ToolArtifactStore is not { } store
+            || !ctx.GetActiveTools().Any(t => t.Name == "read_file")
+            || store.Save("user_paste", "text the user sent", text) is not { } saved)
+            return text;
+
+        var lines = text.Count(c => c == '\n') + 1;
+        var excerpt = ReplCommands.KeepStartAndEnd(text, PasteExcerptChars * 2, $"; the whole message is in {saved.TextPath}");
+        var notice = $"Your message is long ({lines:N0} lines), so it was saved to {saved.TextPath}. The model reads the parts it needs from there.";
+        if (ctx.JsonMode) ReplJsonBridge.Emit(new { type = "warning", text = notice });
+        else AnsiConsole.MarkupLine($"[dim]  ↳ {Markup.Escape(notice)}[/]");
+
+        return $"[This message is {lines:N0} lines ({text.Length:N0} characters), too long to include whole, so it was saved to " +
+               $"{saved.TextPath}. Its start and end are below. Read the rest with read_file (startLine/maxLines) or search it " +
+               "with grep_file; don't ask the user to paste it again.]\n\n" + excerpt;
+    }
+
     /// <summary>The user message for a turn: plain text, or text followed by its image attachments.</summary>
     internal static ChatMessage BuildUserMessage(string input, IReadOnlyList<DataContent>? attachments, string? mentioned = null)
     {
@@ -838,6 +877,10 @@ internal static class ReplTurn
         // Every request this turn makes, its subagents' included, names the session (see SessionAffinityHandler).
         fuseraft.Infrastructure.Context.RequestSession.Id.Value = ctx.SessionId;
 
+        // Before anything copies the request (history, the event log, the todo critic): a long paste becomes its excerpt.
+        if (originalInput is null && !isStepRequest)
+            input = OffloadLargePaste(ctx, input);
+
         // The true original user request, preserved across every level of recursive
         // self-correction below — `input` itself becomes the injected correction text on
         // recursive calls, but the todo-critic escalation needs the real task, not the last
@@ -854,6 +897,13 @@ internal static class ReplTurn
         await ctx.Emitter.EmitAsync(EventTypes.UserInput, turn: ctx.TurnIndex,
             payload: new { content = input, images = attachments?.Count ?? 0 });
         ctx.History.Add(BuildUserMessage(input, attachments, mentioned));
+        if (originalInput is null && !isStepRequest
+            && LargeMessageWarning(input.Length + (mentioned?.Length ?? 0), ctx.ContextTokenBudget) is { } large)
+        {
+            if (ctx.JsonMode) ReplJsonBridge.Emit(new { type = "warning", text = large });
+            else AnsiConsole.MarkupLine($"[dim yellow]  ⚠ {Markup.Escape(large)}[/]");
+            await ctx.Emitter.EmitAsync(EventTypes.ReplWarning, turn: ctx.TurnIndex, payload: new { message = "large_message" });
+        }
         // Files the model has seen that changed while it waited (an edit in the user's editor, say), before it answers from its copy.
         if (FileLedger.Shared.Sweep() is { Count: > 0 } changed)
             ctx.History.Add(new ChatMessage(ChatRole.User, FileChangeNotice.Build(changed, during: null)));
@@ -866,7 +916,7 @@ internal static class ReplTurn
         }
         // What the user sent while the REPL was busy that no turn has read yet: this turn's first model call takes it.
         if (!isStepRequest && await TakeHeldInputAsync(ctx, cancellationToken) is { } held)
-            ctx.History.Add(new ChatMessage(ChatRole.User, held));
+            ctx.History.Add(new ChatMessage(ChatRole.User, OffloadLargePaste(ctx, held)));
         await ctx.Emitter.EmitAsync(EventTypes.TurnStart, turn: ctx.TurnIndex, payload: new { is_step = isStepRequest, is_correction = isCorrectionTurn });
 
         // Preserve the user's input before the LLM call so a crash mid-turn still
@@ -1187,10 +1237,11 @@ internal static class ReplTurn
                 });
 
                 var autoCompacted = false;
+                string? compactError = null;
                 if (autoCompact)
                 {
                     if (!ctx.JsonMode) AnsiConsole.Markup($"[dim]  ⚡ context is {pct:P0} full — auto-compacting…[/]");
-                    var (compacted, compactError, beforeTok, afterTok) = await ReplCommands.CompactHistoryAsync(
+                    (var compacted, compactError, var beforeTok, var afterTok) = await ReplCommands.CompactHistoryAsync(
                         ctx, focus: null, cancellationToken, source: "auto_compact_threshold");
                     if (!ctx.JsonMode) ReplConsole.ClearLine(60);
 
@@ -1212,16 +1263,16 @@ internal static class ReplTurn
                                 $"[dim]({beforeTok:N0} → {afterTok:N0} tok)[/]");
                     }
                     else if (ctx.JsonMode)
-                        ReplJsonBridge.Emit(new { type = "warning", text = $"Auto-compaction failed: {compactError ?? "unknown error"}." });
+                        ReplJsonBridge.Emit(new { type = "warning", text = $"Auto-compaction didn't run: {ReplCommands.CompactionFailureText(compactError)}." });
                     else
                     {
                         AnsiConsole.MarkupLine(
-                            $"[red]  Auto-compaction failed:[/] {Markup.Escape(compactError ?? "unknown error")} " +
-                            "[dim](falling back to warning)[/]");
+                            $"[red]  Auto-compaction didn't run:[/] {Markup.Escape(ReplCommands.CompactionFailureText(compactError))}");
                     }
                 }
 
-                if (!autoCompacted)
+                // Suggesting /compact right after it found nothing to fold sends the user to a command that can't help.
+                if (!autoCompacted && (!autoCompact || ReplCommands.CompactionCouldSucceedLater(compactError)))
                 {
                     if (ctx.JsonMode)
                         ReplJsonBridge.Emit(new
@@ -1233,6 +1284,14 @@ internal static class ReplTurn
                         AnsiConsole.MarkupLine(
                             $"[dim yellow]  ⚠ Context {pct:P0} full — consider [/][bold]/compact[/]" +
                             $"[dim yellow] to summarise and free space.[/]");
+                }
+                else if (!autoCompacted)
+                {
+                    const string advice = "Older turns will be dropped to fit if it grows. /clear starts a new chat.";
+                    if (ctx.JsonMode)
+                        ReplJsonBridge.Emit(new { type = "warning", text = $"Context is {pct:P0} full. {advice}" });
+                    else
+                        AnsiConsole.MarkupLine($"[dim yellow]  ⚠ Context {pct:P0} full. {advice}[/]");
                 }
             }
         }
@@ -1270,7 +1329,7 @@ internal static class ReplTurn
             else if (!ctx.JsonMode)
             {
                 AnsiConsole.MarkupLine(
-                    $"[red]  Forced compaction failed:[/] {Markup.Escape(compactError ?? "unknown error")} " +
+                    $"[red]  Forced compaction didn't run:[/] {Markup.Escape(ReplCommands.CompactionFailureText(compactError))} " +
                     "[dim](falling back to normal history trim)[/]");
             }
         }
@@ -1278,7 +1337,10 @@ internal static class ReplTurn
         var trimmedCount = TrimHistory(ctx.History, ctx.ContextTokenBudget);
         if (trimmedCount > 0)
         {
-            if (!ctx.JsonMode)
+            // The panel has to say so too: a model that lost earlier turns otherwise looks like it forgot them on its own.
+            if (ctx.JsonMode)
+                ReplJsonBridge.Emit(new { type = "warning", text = "Older turns were dropped to fit the context budget." });
+            else
                 AnsiConsole.MarkupLine("[dim]  (old messages trimmed to fit context window)[/]");
             await ctx.Emitter.EmitAsync(EventTypes.HistoryTrimmed, turn: ctx.TurnIndex,
                 payload: new { messages_removed = trimmedCount, estimated_tokens = ctx.EstimateTokens() });
@@ -1812,7 +1874,7 @@ internal static class ReplTurn
         // There, what the user sends while a free-form turn runs joins it after its next tool results.
         var interjector    = (screen is null && pump is null) || isStepRequest ? null : activeClient.GetService<ReplInterjectingChatClient>();
         if (interjector is not null)
-            interjector.Take = ct => TakeInterjectionsAsync(ctx, ct);
+            interjector.Take = async ct => await TakeInterjectionsAsync(ctx, ct) is { } typed ? OffloadLargePaste(ctx, typed) : null;
 
         // Whatever the turn didn't read starts the next one, unless the turn was cancelled, which drops it.
         void ReleaseInterjections(bool cancelled)
@@ -2445,17 +2507,26 @@ internal static class ReplTurn
         var total = history.Sum(EstimateMessage);
         if (total <= contextTokenBudget) return 0;
 
-        int sysEnd  = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
+        int evictAt = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
+        // A compaction summary is all that's left of the turns before it, so the turns after it go first.
+        if (evictAt < history.Count && history[evictAt].Role == ChatRole.User
+            && ReplCommands.IsCompactedSummary(history[evictAt].Text))
+        {
+            evictAt++;
+            while (evictAt < history.Count && history[evictAt].Role != ChatRole.User)
+                evictAt++;
+        }
+
         int removed = 0;
         while (total > contextTokenBudget)
         {
             // Evict the oldest complete turn group (User + all following non-User
             // messages). Removing partial groups can leave orphaned FunctionCallContent
             // without a preceding User message, which is invalid for Anthropic.
-            if (sysEnd >= history.Count || history[sysEnd].Role != ChatRole.User)
+            if (evictAt >= history.Count || history[evictAt].Role != ChatRole.User)
                 break;
 
-            int nextUserIdx = sysEnd + 1;
+            int nextUserIdx = evictAt + 1;
             while (nextUserIdx < history.Count && history[nextUserIdx].Role != ChatRole.User)
                 nextUserIdx++;
 
@@ -2463,11 +2534,11 @@ internal static class ReplTurn
             if (nextUserIdx >= history.Count)
                 break;
 
-            int groupSize = nextUserIdx - sysEnd;
+            int groupSize = nextUserIdx - evictAt;
             for (int i = 0; i < groupSize; i++)
             {
-                total -= EstimateMessage(history[sysEnd]);
-                history.RemoveAt(sysEnd);
+                total -= EstimateMessage(history[evictAt]);
+                history.RemoveAt(evictAt);
                 removed++;
             }
         }

@@ -236,6 +236,152 @@ public sealed class ReplCompactionPreserveTailTests : IDisposable
         Assert.Contains("later messages are kept word for word after this handoff", prompt);
     }
 
+    // A pasted build log: thousands of lines, the first and last of which are distinct, ~100K tokens against the 80K default budget.
+    private static string PastedLog(int lines = 4_000) =>
+        "LOG-FIRST-LINE: please help me fix this build\n" +
+        string.Concat(Enumerable.Range(0, lines).Select(i => $"  CSC : warning CS0618: line {i} {new string('w', 80)}\n")) +
+        "LOG-LAST-LINE: Build FAILED. 1 error";
+
+    [Fact]
+    public async Task CompactHistoryAsync_PastedLogBiggerThanTheWindow_IsSummarizedAndQuotedOnlyAtItsEnds()
+    {
+        IEnumerable<ChatMessage>? summarized = null;
+        var ctx = NewContext(new ScriptedStubChatClient(m => { summarized = m.ToList(); return "summary"; }));
+        AddSyntheticHistory(ctx, groups: 2);
+        var log = PastedLog();
+        ctx.History.Add(new ChatMessage(ChatRole.User, log));
+        ctx.History.Add(new ChatMessage(ChatRole.Assistant, "The failing project is X."));
+
+        var (success, error, _, _) = await ReplCommands.CompactHistoryAsync(ctx, focus: null, CancellationToken.None);
+
+        Assert.True(success, error);
+        Assert.DoesNotContain(ctx.History, m => m.Text == log);
+        var summary = ctx.History.First(m => ReplCommands.IsCompactedSummary(m.Text)).Text;
+        Assert.Contains("LOG-FIRST-LINE", summary);
+        Assert.Contains("LOG-LAST-LINE", summary);
+        Assert.Contains("left out here", summary);
+        Assert.True(ctx.EstimateTokens() < ctx.ContextTokenBudget / 2, $"{ctx.EstimateTokens()} tokens left");
+        Assert.Equal("The failing project is X.", ctx.History[^1].Text);
+        // The summarizer saw the log's start and end, not all of it.
+        var sentLog = summarized!.Single(m => m.Text.Contains("LOG-FIRST-LINE")).Text;
+        Assert.Contains("LOG-LAST-LINE", sentLog);
+        Assert.True(sentLog.Length < log.Length / 2);
+    }
+
+    [Fact]
+    public async Task CompactHistoryAsync_OversizedSummaryFromAnEarlierCompaction_IsCompactedAgain()
+    {
+        // What the old code left behind: a summary carrying a pasted log word for word, then small turns after it.
+        // Every compaction found nothing older than the tail, and the trim then dropped the summary.
+        var ctx = NewContext(new ScriptedStubChatClient(_ => "summary"));
+        ctx.History.Add(new ChatMessage(ChatRole.User,
+            $"{ReplCommands.CompactedContextPrefix}\n\nold summary\n\nThe request being worked on, word for word:\n{PastedLog()}"));
+        ctx.History.Add(new ChatMessage(ChatRole.Assistant, "looking at it"));
+        ctx.History.Add(new ChatMessage(ChatRole.User, "Continue"));
+        ctx.History.Add(new ChatMessage(ChatRole.Assistant, "done"));
+
+        var (success, error, _, _) = await ReplCommands.CompactHistoryAsync(ctx, focus: null, CancellationToken.None);
+
+        Assert.True(success, error);
+        Assert.True(ctx.EstimateTokens() < ctx.ContextTokenBudget / 2, $"{ctx.EstimateTokens()} tokens left");
+        Assert.Equal("Continue", ctx.History[^2].Text);
+    }
+
+    [Fact]
+    public async Task CompactHistoryAsync_SendsTheConversationsOwnPrefix_SoTheSummaryCallIsCached()
+    {
+        List<ChatMessage>? sent = null;
+        var ctx = NewContext(new ScriptedStubChatClient(m => { sent = m.ToList(); return "summary"; }));
+        AddSyntheticHistory(ctx);
+        var systemPrompt = ctx.History[0];
+
+        await ReplCommands.CompactHistoryAsync(ctx, focus: null, CancellationToken.None);
+
+        // The same messages the conversation's last request started with, in the same order.
+        Assert.Equal(ChatRole.System, systemPrompt.Role);
+        Assert.Same(systemPrompt, sent![0]);
+        Assert.StartsWith("synthetic-group-0-", sent[1].Text);
+    }
+
+    private sealed class RejectsToolChoiceNoneClient : IChatClient
+    {
+        public List<ChatOptions?> Calls { get; } = [];
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            Calls.Add(options);
+            if (options?.ToolMode == ChatToolMode.None)
+                throw new InvalidOperationException("400: tool_choice 'none' is not supported");
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "summary")));
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? key = null) => null;
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task CompactHistoryAsync_ProviderRejectsTheToolsOffCall_RetriesWithoutTools()
+    {
+        var client = new RejectsToolChoiceNoneClient();
+        var ctx = NewContext(client);
+        ctx.ChatOptions = new ChatOptions { Tools = [AIFunctionFactory.Create(() => "", "read_file")] };
+        AddSyntheticHistory(ctx);
+
+        var (success, error, _, _) = await ReplCommands.CompactHistoryAsync(ctx, focus: null, CancellationToken.None);
+
+        Assert.True(success, error);
+        Assert.Equal(2, client.Calls.Count);
+        Assert.Null(client.Calls[1]);
+    }
+
+    [Fact]
+    public void SummaryCallOptions_KeepsTheSessionsTools_ButNoneCanBeCalled()
+    {
+        var tool = AIFunctionFactory.Create(() => "ran", "read_file", "Reads a file.");
+        var session = new ChatOptions { Tools = [tool], Temperature = 0.2f };
+
+        var options = ReplCommands.SummaryCallOptions(session)!;
+
+        var declared = Assert.Single(options.Tools!);
+        Assert.IsNotAssignableFrom<AIFunction>(declared);
+        Assert.Equal(("read_file", "Reads a file."), (declared.Name, declared.Description));
+        Assert.Equal(ChatToolMode.None, options.ToolMode);
+        Assert.Equal(0.2f, options.Temperature);
+        Assert.Same(tool, Assert.Single(session.Tools));
+        Assert.Null(ReplCommands.SummaryCallOptions(new ChatOptions()));
+    }
+
+    [Fact]
+    public void KeepStartAndEnd_CutsAtLineBreaks_AndSaysHowMuchWasLeftOut()
+    {
+        Assert.Equal("short", ReplCommands.KeepStartAndEnd("short", 100));
+
+        var log = PastedLog(lines: 1_000);
+        var kept = ReplCommands.KeepStartAndEnd(log, 4_000);
+
+        Assert.StartsWith("LOG-FIRST-LINE", kept);
+        Assert.EndsWith("LOG-LAST-LINE: Build FAILED. 1 error", kept);
+        Assert.Contains("lines (", kept);
+        Assert.True(kept.Length < 4_500, $"{kept.Length} chars");
+        // Whole lines on both sides of the note.
+        Assert.All(kept.Split('\n').Where(l => l.Contains("CS0618")), l => Assert.EndsWith(new string('w', 80), l));
+    }
+
+    [Fact]
+    public void CompactionFailureText_SaysWhy_AndOnlyRetryableReasonsSuggestCompactingLater()
+    {
+        Assert.Contains("nothing older to summarize", ReplCommands.CompactionFailureText("nothing_to_compact"));
+        Assert.False(ReplCommands.CompactionCouldSucceedLater("nothing_to_compact"));
+        Assert.False(ReplCommands.CompactionCouldSucceedLater("not_smaller"));
+        Assert.True(ReplCommands.CompactionCouldSucceedLater("HTTP 500"));
+        Assert.Equal("HTTP 500", ReplCommands.CompactionFailureText("HTTP 500"));
+    }
+
     [Fact]
     public void CompactionNotNeeded_BelowTheAutoCompactThreshold_SaysSo_AndAboveItDoesNot()
     {
