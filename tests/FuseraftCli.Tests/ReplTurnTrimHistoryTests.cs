@@ -64,7 +64,7 @@ public sealed class ReplTurnTrimHistoryTests
         var warning = ReplTurn.LargeMessageWarning(chars: 800_000, contextTokenBudget: 200_000);
 
         Assert.NotNull(warning);
-        Assert.Contains("100%", warning);
+        Assert.Contains($"{1.0:P0}", warning);
         Assert.Contains("saved to a file", warning);
     }
 }
