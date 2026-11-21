@@ -65,6 +65,11 @@ internal sealed class AgentMiddlewareBuilder(
         // Requests under a quarter of the trigger are too small to judge by (see InputTokenCalibration).
         var calibration = new InputTokenCalibration(minSampleChars: triggerChars / 4);
         var rewrites = new RequestRewriteTracker();
+        // A trim drops superseded content, collapses old tool rounds and shortens old results, all at once, down to
+        // the view's low-water mark; between trims requests only grow.
+        var requestView = new CacheStableRequestView((stored, target, ct) => AgentContextCompactionFilters.TrimNearBudget(
+            AgentContextCompactionFilters.DropSupersededContent(stored), maxInTurnToolPairs,
+            maxInTurnChars > 0 ? target : 0, triggerChars: 0, ct));
 
         return chatClient.AsBuilder()
             .Use(
@@ -195,12 +200,9 @@ internal sealed class AgentMiddlewareBuilder(
         // step so model_response can say which one changed its prefix.
         async Task<IEnumerable<ChatMessage>> FilterAsync(IEnumerable<ChatMessage> messages, string? run, CancellationToken ct)
         {
-            var stored  = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
-            var dropped = AgentContextCompactionFilters.DropSupersededContent(stored).ToList();
-            rewrites.ObserveInputs(run, stored, dropped);
-            return await AgentContextCompactionFilters.TrimNearBudget(
-                dropped, maxInTurnToolPairs, calibration.Scale(maxInTurnChars), calibration.Scale(triggerChars), ct,
-                AgentContextCompactionFilters.CacheStableTrimStep);
+            var stored = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
+            rewrites.ObserveInputs(run, stored, stored);
+            return await requestView.RenderAsync(run, stored, calibration.Scale(maxInTurnChars > 0 ? maxInTurnChars : triggerChars), ct);
         }
 
         async IAsyncEnumerable<ChatResponseUpdate> StreamWithToolPairWindowAsync(

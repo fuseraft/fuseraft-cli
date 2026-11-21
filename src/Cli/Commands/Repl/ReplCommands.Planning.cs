@@ -217,6 +217,18 @@ internal static partial class ReplCommands
             : null;
     }
 
+    /// <summary>Why a compaction didn't happen, in words, for the error reason <see cref="CompactHistoryAsync"/> returned.</summary>
+    internal static string CompactionFailureText(string? reason) => reason switch
+    {
+        "nothing_to_compact" => "the recent messages alone fill it, so there's nothing older to summarize",
+        "not_smaller"        => "a summary wouldn't have made it smaller",
+        "empty"              => "the summary came back empty",
+        _                    => reason ?? "unknown error",
+    };
+
+    /// <summary>False when running /compact again can't help: the history as it stands has nothing to fold.</summary>
+    internal static bool CompactionCouldSucceedLater(string? reason) => reason is not ("nothing_to_compact" or "not_smaller");
+
     private static int EstimateMessageListTokens(IEnumerable<ChatMessage> messages) =>
         messages.Sum(m => TokenEstimator.EstimateTokens(m.Contents.Sum(AgentContextCompactionFilters.EstimateContentChars)));
 
@@ -260,7 +272,59 @@ internal static partial class ReplCommands
             keepFromGroup = g;
             if (total >= preserveTokens) break;
         }
-        return groupStarts[keepFromGroup];
+
+        // A pasted log or file bigger than the window is summarized, not kept: kept word for word it filled the
+        // budget on its own, every later compaction found nothing older to fold, and the trim dropped it with the summary.
+        var start = groupStarts[keepFromGroup];
+        var oversized = OversizedMessageTokens(preserveTokens);
+        while (start + 1 < history.Count && history[start].Role == ChatRole.User && Tokens(history[start]) > oversized)
+            start++;
+        return start;
+    }
+
+    /// <summary>Tokens above which a user message counts as pasted material rather than a request to keep word for word.</summary>
+    internal static int OversizedMessageTokens(int preserveTokens) => Math.Max(preserveTokens, 2_000);
+
+    /// <summary><paramref name="text"/> cut to about <paramref name="maxChars"/>: its start and end at line breaks, and a note of what was left out.</summary>
+    internal static string KeepStartAndEnd(string text, int maxChars, string why = " when the conversation was compacted")
+    {
+        if (text.Length <= maxChars) return text;
+        var half = Math.Max(1, maxChars / 2);
+
+        var headEnd = text.LastIndexOf('\n', half - 1);
+        if (headEnd < half / 2) headEnd = half;
+        var tailStart = text.IndexOf('\n', text.Length - half);
+        if (tailStart < 0 || tailStart > text.Length - half / 2) tailStart = text.Length - half;
+        else tailStart++;
+
+        var omitted = text.AsSpan(headEnd, tailStart - headEnd);
+        var lines = omitted.Count('\n');
+        return $"{text[..headEnd].TrimEnd()}\n\n" +
+               $"[… {lines:N0} lines ({omitted.Length:N0} characters) left out here{why} …]\n\n" +
+               text[tailStart..];
+    }
+
+    /// <summary>The session's options with its tools as declarations only and tool calls turned off, or null with no tools.</summary>
+    internal static ChatOptions? SummaryCallOptions(ChatOptions? session)
+    {
+        if (session?.Tools is not { Count: > 0 } tools) return null;
+        var options = session.Clone();
+        options.Tools = [.. tools.Select(t => t is AIFunction f ? f.AsDeclarationOnly() : t)];
+        options.ToolMode = ChatToolMode.None;
+        return options;
+    }
+
+    // Oversized user messages go to the summarizer as their start and end, so the summary call fits where the
+    // conversation no longer did.
+    private static ChatMessage BoundOversizedUserMessage(ChatMessage m, int oversizedTokens)
+    {
+        if (m.Role != ChatRole.User) return m;
+        var maxChars = TokenEstimator.EstimateChars(oversizedTokens);
+        var text = m.Text ?? string.Empty;
+        if (text.Length <= maxChars) return m;
+        var contents = new List<AIContent> { new TextContent(KeepStartAndEnd(text, maxChars)) };
+        contents.AddRange(m.Contents.Where(c => c is not TextContent));
+        return new ChatMessage(ChatRole.User, contents) { AuthorName = m.AuthorName };
     }
 
     /// <summary>
@@ -287,10 +351,16 @@ internal static partial class ReplCommands
         var tailStart       = FindPreserveTailStart(ctx.History, sysEnd, preserveTokens);
         var toSummarize     = ctx.History.Skip(sysEnd).Take(tailStart - sysEnd).ToList();
         var preservedTail   = ctx.History.Skip(tailStart).ToList();
-        // Split inside a turn: the request it's answering would only survive as the summary's paraphrase.
+        var oversizedTokens = OversizedMessageTokens(preserveTokens);
+        // Split inside a turn: the request it's answering would only survive as the summary's paraphrase. A pasted log
+        // is quoted as its start and end only; the summary covers the rest.
         var requestInProgress = tailStart < ctx.History.Count && ctx.History[tailStart].Role != ChatRole.User
             ? ctx.History.Take(tailStart).LastOrDefault(m => m.Role == ChatRole.User)?.Text
             : null;
+        if (IsCompactedSummary(requestInProgress))
+            requestInProgress = null;
+        if (requestInProgress is not null)
+            requestInProgress = KeepStartAndEnd(requestInProgress, TokenEstimator.EstimateChars(oversizedTokens / 2));
 
         // Recent history alone already fits the preserved window — nothing old enough to
         // fold into a summary, so don't spend an LLM call summarising nothing.
@@ -306,6 +376,8 @@ internal static partial class ReplCommands
             "Quote word for word each request and instruction the user gave in the conversation above, including how they " +
             "asked to be answered. This message is not one of them: don't quote or describe it, or present writing this " +
             "handoff as the user's request. " +
+            "Material the user pasted, such as a log, command output or a file, is not a request: say what it was and quote " +
+            "only the lines that matter, such as the errors. " +
             "Reference file paths and symbols by name rather than quoting their full content. " +
             "Redact any sensitive values such as API keys or passwords. " +
             "For any facts about files, code, or system state that the assistant stated WITHOUT a corresponding tool call " +
@@ -315,7 +387,14 @@ internal static partial class ReplCommands
             "Facts confirmed by actual tool output are verified and should be stated normally." +
             focusNote;
 
-        var messages = new List<ChatMessage>(toSummarize) { new ChatMessage(ChatRole.User, compactionPrompt) };
+        // Sent with the conversation's own system prompt and tools, the summary call starts with the prefix the
+        // provider just cached; without them it shared nothing with it and was billed whole. The tools are
+        // declarations only, so the function-invocation loop can't run one mid-summary.
+        var messages = new List<ChatMessage>();
+        if (sys is not null) messages.Add(sys);
+        messages.AddRange(toSummarize.Select(m => BoundOversizedUserMessage(m, oversizedTokens)));
+        messages.Add(new ChatMessage(ChatRole.User, compactionPrompt));
+        var summaryOptions = SummaryCallOptions(ctx.ChatOptions);
 
         // The summary replaces the older turns, so save their memories first. It runs alongside
         // the summary call and must finish before ctx.History changes, since it reads (and
@@ -330,6 +409,9 @@ internal static partial class ReplCommands
             await memorySave;
         }
 
+        async Task<string> SummarizeAsync(ChatOptions? options) =>
+            (await ctx.Client.GetResponseAsync(messages, options, cancellationToken)).Text ?? string.Empty;
+
         async Task<(bool, string?, int, int)> ReplaceWithSummaryAsync()
         {
             string summary;
@@ -338,13 +420,21 @@ internal static partial class ReplCommands
                 // Route through ctx.Client rather than a bare ctx.Factory.Create client: this call
                 // fires exactly when history is largest (75%+ of budget, or a forced post-overflow
                 // recovery), so it needs the same AgentMiddlewareBuilder adaptive-trim-and-retry
-                // protection normal turns get. No ChatOptions/tools are passed, so the wrapped
-                // FunctionInvokingChatClient just runs a single pass-through round — it never invokes
-                // a tool mid-summarization.
-                var response = await ctx.Client.GetResponseAsync(messages, cancellationToken: cancellationToken);
-                summary      = response.Text ?? string.Empty;
+                // protection normal turns get. Its tools are declarations only, so the wrapped
+                // FunctionInvokingChatClient never invokes one mid-summarization.
+                summary = await SummarizeAsync(summaryOptions);
+                // Some providers reject a "none" tool choice (Bedrock's has none); without tools the call still works,
+                // it just isn't cached.
+                if (string.IsNullOrWhiteSpace(summary) && summaryOptions is not null)
+                    summary = await SummarizeAsync(null);
             }
             catch (OperationCanceledException) { return (false, "cancelled", 0, 0); }
+            catch (Exception ex) when (summaryOptions is not null)
+            {
+                try { summary = await SummarizeAsync(null); }
+                catch (OperationCanceledException) { return (false, "cancelled", 0, 0); }
+                catch (Exception retryEx)          { return (false, $"{retryEx.Message} (first attempt: {ex.Message})", 0, 0); }
+            }
             catch (Exception ex)               { return (false, ex.Message,   0, 0); }
 
             if (string.IsNullOrWhiteSpace(summary)) return (false, "empty", 0, 0);
