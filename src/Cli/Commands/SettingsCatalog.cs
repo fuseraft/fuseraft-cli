@@ -45,7 +45,7 @@ public static class SettingsCatalog
         new("sampling.seed",            SettingKind.Integer, "Sampling seed, for providers that support one.", c => Long(c.Sampling.Seed)),
         new("sampling.maxOutputTokens", SettingKind.Integer, "Most tokens one reply may produce. Unset uses the provider's default.", c => Int(c.Sampling.MaxOutputTokens), Min: 1),
 
-        new("repl.contextBudget", SettingKind.Integer, "Working context budget in tokens, overriding the built-in estimate for the model's family.", c => Int(c.Repl.ContextBudget), Min: 1),
+        new("repl.contextBudget", SettingKind.Integer, "Working context budget in tokens. Leave empty to use the model's input limit as its provider reports it, or an estimate from its name.", c => Int(c.Repl.ContextBudget), Min: 1),
         new("repl.theme", SettingKind.Text, "Full-screen terminal REPL color theme: default, bright, light, mono, rust, or a file in ~/.fuseraft/themes.", c => c.Repl.Theme, "default"),
         new("repl.dock",  SettingKind.Choice, "Where the full-screen terminal REPL puts the prompt.", c => c.Repl.Dock, "bottom", Choices: ["bottom", "top"]),
         new("repl.bell",  SettingKind.Bool, "Ring the terminal bell when a turn ends or a question waits while you're away.", c => Bool(c.Repl.Bell), "true"),
