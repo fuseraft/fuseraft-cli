@@ -502,7 +502,7 @@ public sealed class ShellPlugin : IDisposable
         return errors;
     }
 
-    [Description("Write a script to a temp file and execute it. On Windows it runs as a .cmd batch file, or as a .ps1 with shell='powershell'.")]
+    [Description("Write a script to a temp file and execute it. On Windows it runs as a .ps1 with shell='powershell' or when it's plainly PowerShell, otherwise as a .cmd batch file.")]
     public async Task<string> RunScriptAsync(
         [Description("Script body.")] string script,
         [Description("Working directory.")] string? workingDirectory = null,
@@ -535,7 +535,7 @@ public sealed class ShellPlugin : IDisposable
 
         if (OperatingSystem.IsWindows() &&
             (shellChoice == WindowsShell.PowerShell ||
-             (shellChoice is null && WindowsShellRouting.LooksLikePowerShell(script))))
+             (shellChoice is null && WindowsShellRouting.LooksLikePowerShellScript(script))))
             return Present(await RunPowerShellFileAsync(script, resolvedDir, timeoutSeconds, cancellationToken), resolvedDir);
 
         var ext     = OperatingSystem.IsWindows() ? ".cmd" : ".sh";

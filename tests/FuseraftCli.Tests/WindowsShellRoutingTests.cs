@@ -85,6 +85,36 @@ public sealed class WindowsShellRoutingTests
         Assert.False(WindowsShellRouting.LooksLikePowerShell(command));
 
     [Fact]
+    public void RecognizesAPowerShellScriptPastItsFirstLine()
+    {
+        // From a session where this ran as a .cmd file: cmd.exe turned "Month > 6" into a redirect and created a file named 6.
+        var script = "$desc = @'\r\nThe FY combo was built from the calendar (Month > 6 rolls the year +1).\r\n'@\r\n" +
+                     "powershell -NoProfile -File \"C:\\skills\\work-item-update.ps1\" -Id 42 -Description $desc";
+
+        Assert.False(WindowsShellRouting.LooksLikePowerShell(script));
+        Assert.True(WindowsShellRouting.LooksLikePowerShellScript(script));
+    }
+
+    [Theory]
+    [InlineData("$count = 0\nwhile (x) { }")]
+    [InlineData("[string]$name = 'a'")]
+    [InlineData("$env:Path += ';C:\\tools'")]
+    [InlineData("param(\n  [int]$Id\n)")]
+    [InlineData("function Invoke-Build {\n}")]
+    [InlineData("try {\n  x\n} catch { }")]
+    [InlineData("cd src\nGet-ChildItem -Recurse")]
+    [InlineData("$body = @\"\n{ \"a\": 1 }\n\"@")]
+    public void RecognizesPowerShellScripts(string script) =>
+        Assert.True(WindowsShellRouting.LooksLikePowerShellScript(script));
+
+    [Theory]
+    [InlineData("@echo off\r\nset CONFIG=Release\r\ndotnet build -c %CONFIG% > build.log\r\nif errorlevel 1 exit /b 1")]
+    [InlineData("cd src\ngit commit -m \"fix Get-Item handling\"\necho done")]
+    [InlineData("for %%f in (*.cs) do echo %%f\nmsbuild App.sln /p:Configuration=Release")]
+    public void LeavesBatchScriptsToCmd(string script) =>
+        Assert.False(WindowsShellRouting.LooksLikePowerShellScript(script));
+
+    [Fact]
     public void EncodedCommand_CarriesTheScriptVerbatim()
     {
         var script = @"Write-Output ""a 'b' \""c\"" | & > %PATH%""";
