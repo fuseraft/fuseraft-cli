@@ -1033,6 +1033,8 @@ Do not re-describe the changes — just call the tool.
 
 If the agent still does not call a write tool on the correction turn, a warning is printed to the terminal so you can verify the result manually.
 
+*Refusal-claim correction* — A model sometimes says a tool call "was blocked" when it never made the call, then stops and gives you commands to run yourself. When a reply claims a call was blocked or denied, but every tool call in that turn succeeded, the harness sends it back once to make the call. A turn that had a real `[DENIED]` result, or any failed call, is left alone.
+
 *Completion checklist* — The agent's system prompt includes a structured self-verification checklist that fires before every response:
 
 - **Tools & verification:** every action was performed with a tool call — not described as if done; tool calls succeeded (no errors, exit code 0 for shell)

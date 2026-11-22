@@ -202,6 +202,18 @@ internal static class WindowsShellRouting
         PowerShellOnlySyntax.IsMatch(command) ||
         CmdletAtCommandStart.IsMatch(QuotedString.Replace(command, "\"\""));
 
+    // Script lines with no cmd.exe meaning: a variable assignment, a here-string opener, or a param/function/try block.
+    private static readonly Regex PowerShellScriptLine = new(
+        @"^\s*(?:\[[\w.\[\]]+\]\s*)?\$[A-Za-z_][\w:]*\s*[-+*/]?=|@['""]\s*$|^\s*param\s*\(|^\s*function\s+[\w-]+\s*[({]?\s*$|^\s*try\s*\{",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Multiline);
+
+    /// <summary>True when the multi-line <paramref name="script"/> is plainly PowerShell, judged line by line.</summary>
+    // A PowerShell script run as a .cmd file runs each line through cmd.exe, so text such as "Month > 6" in a
+    // here-string becomes a redirect that creates or overwrites a file.
+    internal static bool LooksLikePowerShellScript(string script) =>
+        PowerShellScriptLine.IsMatch(script) ||
+        script.Split('\n').Any(line => LooksLikePowerShell(line.TrimEnd('\r')));
+
     /// <summary>
     /// The arguments that run <paramref name="script"/> in PowerShell with no command-line parsing
     /// in between, or null when the encoded script is too long for a command line.

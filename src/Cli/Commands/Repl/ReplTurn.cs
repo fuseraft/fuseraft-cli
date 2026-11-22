@@ -43,6 +43,7 @@ internal static class ReplTurn
     // prefixes to keep them out of a resumed session's replayed turns.
     internal const string EmptyReplyCorrectionPrefix   = "Your last reply was empty or contained internal tool-call text.";
     internal const string NoWriteToolCorrectionPrefix  = "You described changes above but did not call any write tool.";
+    internal const string NoDenialCorrectionPrefix     = "You said an action was blocked, but no tool call was blocked or denied this turn.";
     internal const string CriticRejectedCorrectionPrefix = "A critic reviewed ";
     internal const string TodoOpenCorrectionPrefix     = "Your todo list still has ";
     internal const string FailureLimitSummaryPrefix    = "Your tool calls were stopped because ";
@@ -51,6 +52,7 @@ internal static class ReplTurn
     internal static bool IsInternalCorrectionMessage(string text) =>
         text.StartsWith(EmptyReplyCorrectionPrefix,    StringComparison.Ordinal) ||
         text.StartsWith(NoWriteToolCorrectionPrefix,   StringComparison.Ordinal) ||
+        text.StartsWith(NoDenialCorrectionPrefix,      StringComparison.Ordinal) ||
         text.StartsWith(CriticRejectedCorrectionPrefix, StringComparison.Ordinal) ||
         text.StartsWith(TodoOpenCorrectionPrefix,      StringComparison.Ordinal) ||
         text.StartsWith(FailureLimitSummaryPrefix,     StringComparison.Ordinal) ||
@@ -1431,6 +1433,11 @@ internal static class ReplTurn
                 rootInput, todoCorrectionRound, todoCriticRound, cancellationToken))
             return stepPassed;
 
+        if (await TryApplyRefusalCorrectionAsync(
+                ctx, responseText, stream.AnyToolFailed, isStepRequest, capturePlan, isCorrectionTurn,
+                rootInput, todoCorrectionRound, todoCriticRound, cancellationToken))
+            return stepPassed;
+
         if (await TryApplyCriticReviewAsync(
                 ctx, input, responseText, toolCallsThisTurn, isStepRequest, capturePlan, isCorrectionTurn,
                 rootInput, todoCorrectionRound, todoCriticRound, cancellationToken))
@@ -1542,6 +1549,55 @@ internal static class ReplTurn
         }
         return false;
     }
+
+    // A model that says a call was blocked when none was (Grok did, after a get_file_info, with HITL off) stops
+    // working and hands the user commands to run; it then treats later tools as blocked too. Send it back once, but only
+    // when every tool call this turn worked: any failure might be what the reply is describing.
+    private static async Task<bool> TryApplyRefusalCorrectionAsync(
+        ReplSessionContext ctx,
+        string responseText,
+        bool anyToolFailed,
+        bool isStepRequest,
+        bool capturePlan,
+        bool isCorrectionTurn,
+        string rootInput,
+        int todoCorrectionRound,
+        int todoCriticRound,
+        CancellationToken cancellationToken)
+    {
+        if (isStepRequest || capturePlan || anyToolFailed || !ClaimsToolRefusal(responseText)) return false;
+
+        if (isCorrectionTurn)
+        {
+            if (!ctx.JsonMode)
+                AnsiConsole.MarkupLine("[yellow]  ⚠ The reply says a tool was blocked, but nothing was denied this turn.[/]");
+            return false;
+        }
+
+        await ctx.Emitter.EmitAsync(EventTypes.CorrectionInjected, turn: ctx.TurnIndex, payload: new { reason = "refusal_claimed_without_denial" });
+        if (!ctx.JsonMode)
+            AnsiConsole.MarkupLine("[dim]  ↺ refusal claimed with nothing denied — injecting correction[/]");
+        await ExecuteAsync(
+            ctx,
+            NoDenialCorrectionPrefix + " " +
+            "Only a tool result that starts with [DENIED] means a call was blocked, and you didn't make the call. " +
+            "If the action is still needed, call the tool now. Don't ask the user to run it.",
+            isStepRequest: false, capturePlan: false, activeStep: null,
+            cancellationToken, isCorrectionTurn: true,
+            originalInput: rootInput, todoCorrectionRound: todoCorrectionRound,
+            todoCriticRound: todoCriticRound);
+        return true;
+    }
+
+    // "that call was blocked", "those actions were denied", "blocked by the approval settings", "I can't commit from here".
+    private static readonly Regex RefusalClaimRegex = new(
+        @"\b(?:call|calls|tool|tools|action|actions|command|commands|operation|it|that|those|this|they)\s+(?:was|were|is|are|got|has been|have been)\s+(?:blocked|denied)\b" +
+        @"|\b(?:blocked|denied)\s+by\s+(?:the\s+|this\s+|your\s+)?(?:user|approvals?|hitl|sandbox|policy|session|permissions?)\b" +
+        @"|\b(?:can't|can’t|cannot|can not|couldn't|couldn’t|am unable to|'m unable to|’m unable to)\s+[^.\n]{0,60}\bfrom here\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    internal static bool ClaimsToolRefusal(string text) =>
+        !string.IsNullOrEmpty(text) && RefusalClaimRegex.IsMatch(text);
 
     // Free-form turns under adversarial mode: a critic agent reviews the response for
     // fabrication/correctness, same infrastructure /execute steps use. Skipped on the
@@ -1734,7 +1790,8 @@ internal static class ReplTurn
         string? LastRepeatedToolCallDetail,
         int RepeatedToolCallLimit,
         bool HitTurnTokenBudget,
-        bool HitRunawayOutput = false)
+        bool HitRunawayOutput = false,
+        bool AnyToolFailed = false)
     {
         // toolCallsThisTurn is preserved from the aborted attempt (not always empty) so a
         // step halted mid-stream can still report which tools it managed to call before
@@ -1794,6 +1851,7 @@ internal static class ReplTurn
         var consecutiveToolFailures    = 0;
         var hitConsecutiveFailureLimit = false;
         string? lastToolFailureDetail  = null;
+        var anyToolFailed              = false;
         // See MaxConsecutiveIdenticalToolCalls — resets whenever a call's name or arguments
         // differ from the immediately preceding call.
         var lastToolCallName               = string.Empty;
@@ -2089,6 +2147,8 @@ internal static class ReplTurn
                             lastToolFailureDetail = McpToolResult.Display(funcResult.Result);
                         else
                             roundSucceeded = true;
+                        if (IsToolFailure(funcResult) || McpToolResult.Display(funcResult.Result).Contains("blocked", StringComparison.OrdinalIgnoreCase))
+                            anyToolFailed = true;
 
                         if (capturedResults is not null)
                         {
@@ -2257,7 +2317,7 @@ internal static class ReplTurn
                 fileChanges.Clear(); fileChangeSeen.Clear();
                 capturedResults?.Clear(); callIdToName?.Clear();
                 toolRounds = 0; usageRounds = 0; finishRounds = 0;
-                consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null;
+                consecutiveToolFailures = 0; hitConsecutiveFailureLimit = false; lastToolFailureDetail = null; anyToolFailed = false;
                 lastToolCallName = string.Empty; lastToolCallSignature = string.Empty;
                 consecutiveIdenticalToolCalls = 0; hitRepeatedToolCallLimit = false; lastRepeatedToolCallDetail = null;
                 repeatedToolCallLimit = limits.MaxIdenticalToolCalls; toolCallCycles.Reset();
@@ -2331,7 +2391,7 @@ internal static class ReplTurn
             turnInputTokens, turnOutputTokens, turnCacheReadTokens, turnUncachedInputTokens, turnFirstInputTokens, rawUpdates,
             hitConsecutiveFailureLimit, lastToolFailureDetail,
             hitRepeatedToolCallLimit, lastRepeatedToolCallDetail, repeatedToolCallLimit,
-            hitTurnTokenBudget, hitRunawayOutput);
+            hitTurnTokenBudget, hitRunawayOutput, anyToolFailed);
     }
 
     // Removes the last `count` characters of streamed text from the updates, newest first.
