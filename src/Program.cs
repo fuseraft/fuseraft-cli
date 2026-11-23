@@ -94,14 +94,15 @@ else
     logConfig = logConfig.WriteTo.Sink(new AnsiConsoleSink(maskedFormatter));
 
 // Always write Warning+ to .fuseraft/logs/app.log so store-corruption and other
-// runtime warnings survive past the terminal session.
-logConfig = logConfig.WriteTo.File(
-    formatter: maskedFormatter,
-    path: FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAppLog, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory())),
-    restrictedToMinimumLevel: LogEventLevel.Warning,
-    fileSizeLimitBytes: 5_000_000,
-    rollOnFileSizeLimit: true,
-    retainedFileCountLimit: 3);
+// runtime warnings survive past the terminal session. Not for uninstall, which may be deleting that folder.
+if (args.FirstOrDefault() != "uninstall")
+    logConfig = logConfig.WriteTo.File(
+        formatter: maskedFormatter,
+        path: FuseraftPaths.ExpandProjectPaths(FuseraftPaths.LocalAppLog, FuseraftPaths.ProjectSlug(Directory.GetCurrentDirectory())),
+        restrictedToMinimumLevel: LogEventLevel.Warning,
+        fileSizeLimitBytes: 5_000_000,
+        rollOnFileSizeLimit: true,
+        retainedFileCountLimit: 3);
 
 // When --verbose and --output are both set, write the debug log to a sidecar file
 // (<output>.debug.log) so the transcript file contains only clean session content.
@@ -427,6 +428,12 @@ app.Configure(cfg =>
         .WithDescription("Fetch the latest fuseraft release from GitHub and replace the running binary.")
         .WithExample(["update"])
         .WithExample(["update", "--check"]);
+
+    cfg.AddCommand<fuseraft.Cli.Commands.Uninstall.UninstallCommand>("uninstall")
+        .WithDescription("Remove the fuseraft CLI. --purge also removes your data (~/.fuseraft) and keychain entries.")
+        .WithExample(["uninstall"])
+        .WithExample(["uninstall", "--purge"])
+        .WithExample(["uninstall", "--dry-run", "--purge"]);
 
     cfg.AddCommand<KeychainCommand>("keychain")
         .WithDescription("Manage the fuseraft API key in the OS keychain (bidirectional sync with the VS Code extension).")

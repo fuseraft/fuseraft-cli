@@ -26,4 +26,6 @@ internal sealed class UnavailableKeyStore : IApiKeyStore
             "instead (e.g. ANTHROPIC_API_KEY) — see docs/security.md#api-key-storage.");
 
     public Task DeleteAsync(string account = "default") => Task.CompletedTask;
+
+    public Task<IReadOnlyList<string>> ListAccountsAsync() => Task.FromResult<IReadOnlyList<string>>([]);
 }

@@ -120,5 +120,7 @@ public sealed class ProviderKeysTests
             Entries.Remove(account);
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<string>> ListAccountsAsync() => Task.FromResult<IReadOnlyList<string>>([.. Entries.Keys]);
     }
 }

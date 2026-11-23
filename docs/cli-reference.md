@@ -2790,6 +2790,8 @@ The command detects the current platform and architecture, downloads the matchin
 
 `fuseraft-update.exe` lives alongside `fuseraft.exe`; it is included in every Windows release archive, and `install.ps1` installs both. If it's missing (installs made with `install.ps1` before October 2026 only got `fuseraft.exe`), `fuseraft update` restores it from the release it just downloaded.
 
+After a successful update, the command clears the runtime cache: the folder each release unpacks its native libraries into on its first run (`~/.net/fuseraft`, or `%TEMP%\.net\fuseraft` on Windows). On Linux and macOS it keeps the running version's folder for anything still running it. On Windows, `fuseraft-update.exe` clears all of them, since no fuseraft is running by then. A folder that another fuseraft process still has open is skipped, and the next update tries it again.
+
 If the current version already matches or exceeds the latest release the command exits immediately with no changes.
 
 **Examples**
@@ -2801,6 +2803,74 @@ fuseraft update --check
 # Download and install the latest release
 fuseraft update
 ```
+
+---
+
+## `fuseraft uninstall`
+
+Remove the fuseraft CLI. With `--purge`, also remove everything it keeps on this machine.
+
+```
+fuseraft uninstall [options]
+```
+
+**Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--purge` | off | Also delete your fuseraft home (`~/.fuseraft`, or `FUSERAFT_HOME`), every fuseraft entry in the OS keychain, and fuseraft's temp files. |
+| `--dry-run` | off | Show what would be removed and change nothing. |
+| `-y`, `--yes` | off | Don't ask for confirmation. Required when stdin isn't a terminal. |
+
+It lists what it will remove and what it leaves, then asks before changing anything.
+
+**Removed**
+
+- The binary that's running, and the files an install or update leaves beside it (`fuseraft.new`; on Windows also `fuseraft-update.exe`, `fuseraft.exe.pending`, `fuseraft.exe.backup`).
+- The runtime cache: the native libraries each release unpacks on its first run, one folder per version. It's `~/.net/fuseraft`, or `%TEMP%\.net\fuseraft` on Windows, or `fuseraft` under `DOTNET_BUNDLE_EXTRACT_BASE_DIR` when that's set.
+- On Windows, the `PATH` entry `install.ps1` added, and the `%LOCALAPPDATA%\fuseraft\bin` folder. This happens only when that folder holds nothing but fuseraft, because a custom `-InstallDir` may be shared with other tools. A running exe can't delete itself on Windows, so `fuseraft.exe` is removed a few seconds after the command exits. Terminals that are already open keep the old `PATH` until you reopen them.
+- With `--purge`:
+  - Your fuseraft home: config, chats and sessions, memory, skills, logs, schedules.
+  - Every keychain entry fuseraft saved under the service `fuseraft-cli`: API keys for each endpoint and MCP OAuth sign-ins. These are listed by name before anything is deleted, and checked again afterwards. Keychain entries belong to your OS user, not to a `FUSERAFT_HOME`, so this removes the ones every fuseraft home on this account saved.
+  - Temp files: `fuseraft/` and leftover drafts in the system temp folder.
+
+**Left in place**
+
+- **Project `.fuseraft/` folders.** They can hold team files, agents and skills you wrote and committed, so they're never deleted. The command lists the ones it finds by looking at where your saved chats and sessions ran.
+- **Whatever runs `fuseraft schedule run`.** The command shows the crontab lines and systemd user units it finds that run fuseraft. Remove them yourself; on Windows, check Task Scheduler.
+- **`~/.fuseraft` while `FUSERAFT_HOME` points somewhere else.** The command names it. Run the command again with `FUSERAFT_HOME` unset to purge it.
+- **The VS Code extension.** The command says so if it's installed. See [VS Code — Uninstalling](vscode.md#uninstalling).
+
+**Safety checks**
+
+- `--purge` refuses to run while another fuseraft process is running, including VS Code chats and `fuseraft serve`, because it would write new data as soon as the old data is gone. On Windows this applies without `--purge` too, since a running `fuseraft.exe` is locked.
+- `--purge` refuses a fuseraft home that is your home folder, contains it, is the root of a drive, or doesn't look like a fuseraft home (no config, sessions or logs in it). This guards against a mistaken `FUSERAFT_HOME`.
+- `--purge` refuses to run under `sudo`, where it would delete root's data and keys instead of yours. For a `--system` install in `/usr/local/bin`, run `fuseraft uninstall --purge` as yourself. It removes your data first, then prints the `sudo rm` command for the binary.
+- A development build run through `dotnet` has no binary to remove. `--purge` still works.
+
+The exit code is 0 when everything listed was removed, and 1 when something was refused, declined, or left behind. The output says what was left and how to remove it.
+
+**Examples**
+
+```bash
+# See what would go, without changing anything
+fuseraft uninstall --purge --dry-run
+
+# Remove the CLI, keep your chats, settings and keys
+fuseraft uninstall
+
+# Remove the CLI and everything it keeps
+fuseraft uninstall --purge
+```
+
+**By hand**, if the binary is already gone:
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Binary | `rm ~/.local/bin/fuseraft` (or `sudo rm /usr/local/bin/fuseraft`) | same as Linux | delete `%LOCALAPPDATA%\fuseraft`, then remove `%LOCALAPPDATA%\fuseraft\bin` from your user `PATH` |
+| Runtime cache | `rm -rf ~/.net/fuseraft` | `rm -rf ~/.net/fuseraft` | delete `%TEMP%\.net\fuseraft` |
+| Data | `rm -rf ~/.fuseraft` | `rm -rf ~/.fuseraft` | delete `%USERPROFILE%\.fuseraft` |
+| Keychain | `secret-tool clear service fuseraft-cli` | `security delete-generic-password -s fuseraft-cli`, repeated until it reports nothing found | Credential Manager → Windows Credentials → remove entries starting `fuseraft-cli/` |
 
 ---
 

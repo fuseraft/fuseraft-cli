@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.
 irm https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/install.ps1 | iex
 ```
 
-Or download an archive from [Releases](https://github.com/fuseraft/fuseraft-cli/releases). `fuseraft update` keeps it current.
+Or download an archive from [Releases](https://github.com/fuseraft/fuseraft-cli/releases). `fuseraft update` keeps it current, and `fuseraft uninstall` removes it (add `--purge` to remove your data and saved keys too).
 
 ## Chat in your terminal
 

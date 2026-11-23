@@ -238,6 +238,15 @@ fuseraft update --check  # check for a newer release without installing
 
 On Linux and macOS the binary is replaced atomically in place. On Windows a separate `fuseraft-update.exe` process (bundled in the release archive) handles the swap after all fuseraft instances exit. See [CLI Reference — fuseraft update](cli-reference.md#fuseraft-update) for full details.
 
+## Uninstall
+
+```bash
+fuseraft uninstall           # remove the CLI, keep your chats, settings and keys
+fuseraft uninstall --purge   # also remove ~/.fuseraft and fuseraft's keychain entries
+```
+
+The command shows what it will remove and what it leaves, then asks before changing anything. Add `--dry-run` to see that list without changing anything. Project `.fuseraft/` folders are never deleted, since they can hold files you wrote and committed. See [CLI Reference — fuseraft uninstall](cli-reference.md#fuseraft-uninstall) for everything it removes and how to do it by hand.
+
 ## Next steps
 
 - Read [REPL](repl.md) for the full walkthrough of interactive chat sessions — tools, the safety model, the `!` shell escape, skills, memory
