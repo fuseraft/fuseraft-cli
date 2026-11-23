@@ -13,4 +13,10 @@ public interface IApiKeyStore
     Task<string?> RetrieveAsync(string account = "default");
     Task StoreAsync(string apiKey, string account = "default");
     Task DeleteAsync(string account = "default");
+
+    /// <summary>
+    /// Every account this store holds a fuseraft entry under, so all of them can be found without knowing their names.
+    /// Throws when the store can't be read, so "couldn't look" is never mistaken for "nothing there".
+    /// </summary>
+    Task<IReadOnlyList<string>> ListAccountsAsync();
 }

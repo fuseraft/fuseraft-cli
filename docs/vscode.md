@@ -45,6 +45,19 @@ You can rerun setup at any time with **fuseraft: Configure fuseraft** from the C
 
 ---
 
+## Uninstalling
+
+**fuseraft: Uninstall fuseraft…**, in the Command Palette or the **Chats** view's **…** menu, offers two choices:
+
+- **Remove the CLI.** Your chats, settings, skills and saved API keys stay, ready for a reinstall.
+- **Remove the CLI and all my data.** Also deletes your fuseraft home (`~/.fuseraft`, or the one **Set Home Directory** picked) and the API keys and MCP sign-ins fuseraft saved in your OS keychain.
+
+It closes the open chat, then runs [`fuseraft uninstall`](cli-reference.md#fuseraft-uninstall) in a terminal. The terminal lists everything that will be removed and everything that's left (project `.fuseraft/` folders, for example), and asks before changing anything. Once it's done, a notification offers to uninstall the extension as well. A chat open in another VS Code window keeps the CLI running, so close those chats first; the terminal names any fuseraft process that's still running.
+
+Uninstalling only the extension, from the Extensions view, leaves the CLI and your data in place. If the CLI is older than `fuseraft uninstall`, the command offers to update it first.
+
+---
+
 ## Where things are
 
 - **The chat panel** opens beside your editor. Each chat runs its own CLI process, started in your workspace folder.

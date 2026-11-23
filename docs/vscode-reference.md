@@ -43,6 +43,8 @@ Most are in the Command Palette under **fuseraft:**. The ones marked _menu_ act 
 | **Fix with fuseraft** _(quick fix)_ | On an error or warning: puts the problem and its surrounding code in the prompt |
 | **Configure fuseraft** | Open the [setup screen](vscode-setup.md) |
 | **Install CLI** / **Update CLI** | Install the CLI, or update it to the latest release, in a terminal |
+| **Remove CLI** | Delete the CLI the extension runs, so you can install a fresh one. Your chats, settings and keys are kept |
+| **Uninstall fuseraft…** | Remove the CLI, or the CLI and all its data, then optionally this extension. See [Uninstalling](vscode.md#uninstalling) |
 | **Set Binary Path** | Point at a `fuseraft` that isn't on your `PATH` |
 | **Set Home Directory** | Use a fuseraft home other than `~/.fuseraft` |
 | **Refresh Chats** / **Refresh Memory** / **Refresh Skills** | Reload a sidebar view |

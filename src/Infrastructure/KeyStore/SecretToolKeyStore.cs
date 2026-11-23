@@ -3,9 +3,9 @@ using System.Diagnostics;
 namespace fuseraft.Infrastructure.KeyStore;
 
 // Linux: GNOME Keyring / libsecret via the secret-tool CLI.
-internal sealed class SecretToolKeyStore : IApiKeyStore
+internal sealed class SecretToolKeyStore(string service = "fuseraft-cli") : IApiKeyStore
 {
-    private const string Service = "fuseraft-cli";
+    private readonly string _service = service;
 
     public string StoreName => "GNOME Keyring (secret-tool)";
 
@@ -14,13 +14,13 @@ internal sealed class SecretToolKeyStore : IApiKeyStore
 
     public async Task<string?> RetrieveAsync(string account = "default")
     {
-        var (exit, stdout, _) = await RunAsync("lookup", "service", Service, "account", account);
+        var (exit, stdout, _) = await RunAsync("lookup", "service", _service, "account", account);
         return exit == 0 && !string.IsNullOrEmpty(stdout) ? stdout.Trim() : null;
     }
 
     public async Task StoreAsync(string apiKey, string account = "default")
     {
-        var psi = new ProcessStartInfo("secret-tool", $"store --label \"fuseraft API key\" service {Service} account {account}")
+        var psi = new ProcessStartInfo("secret-tool", $"store --label \"fuseraft API key\" service {_service} account {account}")
         {
             RedirectStandardInput  = true,
             RedirectStandardOutput = true,
@@ -41,7 +41,31 @@ internal sealed class SecretToolKeyStore : IApiKeyStore
 
     public async Task DeleteAsync(string account = "default")
     {
-        await RunAsync("clear", "service", Service, "account", account);
+        await RunAsync("clear", "service", _service, "account", account);
+    }
+
+    public async Task<IReadOnlyList<string>> ListAccountsAsync()
+    {
+        // --unlock so entries in a locked keyring are listed too, not silently missed.
+        var (exit, stdout, stderr) = await RunAsync("search", "--all", "--unlock", "service", _service);
+        if (exit != 0) throw new InvalidOperationException($"secret-tool search failed: {stderr.Trim()}");
+        return ParseSearchAccounts(stdout + "\n" + stderr);
+    }
+
+    /// <summary>
+    /// The <c>attribute.account</c> values in <c>secret-tool search</c> output. It prints attributes on stderr and each
+    /// secret on stdout, so both streams are passed in; only account lines are read.
+    /// </summary>
+    internal static IReadOnlyList<string> ParseSearchAccounts(string output)
+    {
+        const string Prefix = "attribute.account = ";
+        return output.Split('\n')
+            .Select(l => l.TrimEnd('\r'))
+            .Where(l => l.StartsWith(Prefix, StringComparison.Ordinal))
+            .Select(l => l[Prefix.Length..])
+            .Where(a => a.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     private static bool CheckAvailable()
