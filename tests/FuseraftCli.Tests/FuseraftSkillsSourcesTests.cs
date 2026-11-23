@@ -105,13 +105,25 @@ public sealed class FuseraftSkillsSourcesTests
     [InlineData("C:\\s\\run.py", true, "python", new[] { "C:\\s\\run.py" })]
     [InlineData("/s/run.js", false, "node", new[] { "/s/run.js" })]
     [InlineData("/s/run.sh", false, "bash", new[] { "/s/run.sh" })]
-    [InlineData("/s/run.ps1", false, "pwsh", new[] { "/s/run.ps1" })]
+    [InlineData("/s/run.ps1", false, "pwsh", new[] { "-NoProfile", "-NonInteractive", "-File", "/s/run.ps1" })]
     public void ResolveCommand_KnownInterpreterExtensions_PrependInterpreter(string path, bool isWindows, string fileName, string[] leading)
     {
         var (file, args) = FuseraftSkillsSources.ResolveCommand(path, isWindows);
 
         Assert.Equal(fileName, file);
         Assert.Equal(leading, args);
+    }
+
+    [Theory]
+    [InlineData(@"C:\Program Files\PowerShell\7\pwsh.exe")]
+    [InlineData(@"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")]
+    public void ResolveCommand_PowerShellOnWindows_UsesResolvedHostWithExplicitFileAndBypass(string host)
+    {
+        // Windows PowerShell 5.1 defaults to -Command and a Restricted policy, so both flags are required.
+        var (file, args) = FuseraftSkillsSources.ResolveCommand(@"C:\s\run.ps1", isWindows: true, windowsPowerShell: host);
+
+        Assert.Equal(host, file);
+        Assert.Equal(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", @"C:\s\run.ps1"], args);
     }
 
     [Fact]
