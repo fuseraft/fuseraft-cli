@@ -173,7 +173,21 @@ public sealed class UpdateCommand : AsyncCommand<UpdateSettings>
         }
 
         AnsiConsole.MarkupLine($"[green]✓ fuseraft updated to {Markup.Escape(latestVersion)}.[/]");
+        PruneRuntimeCache();
         return 0;
+    }
+
+    // Each release unpacks its native libraries into a folder of its own, and nothing else ever clears the old ones. This
+    // build's folder stays for anything still running it; the new build unpacks its own on its first run.
+    private static void PruneRuntimeCache()
+    {
+        var root = RuntimeCache.Root;
+        var keep = RuntimeCache.Current(root);
+        if (keep is null) return;
+
+        var (count, bytes) = RuntimeCache.PruneExcept(root, keep);
+        if (count > 0)
+            AnsiConsole.MarkupLine($"[dim]Removed {count} older version{(count == 1 ? "" : "s")} of the runtime cache ({RuntimeCache.FormatBytes(bytes)}).[/]");
     }
 
     // Windows: can't overwrite a running executable. Write a pending binary then

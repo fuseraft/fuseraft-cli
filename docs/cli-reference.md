@@ -2790,6 +2790,8 @@ The command detects the current platform and architecture, downloads the matchin
 
 `fuseraft-update.exe` lives alongside `fuseraft.exe`; it is included in every Windows release archive, and `install.ps1` installs both. If it's missing (installs made with `install.ps1` before October 2026 only got `fuseraft.exe`), `fuseraft update` restores it from the release it just downloaded.
 
+After a successful update, the command clears the runtime cache: the folder each release unpacks its native libraries into on its first run (`~/.net/fuseraft`, or `%TEMP%\.net\fuseraft` on Windows). On Linux and macOS it keeps the running version's folder for anything still running it. On Windows, `fuseraft-update.exe` clears all of them, since no fuseraft is running by then. A folder that another fuseraft process still has open is skipped, and the next update tries it again.
+
 If the current version already matches or exceeds the latest release the command exits immediately with no changes.
 
 **Examples**

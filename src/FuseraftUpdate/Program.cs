@@ -106,6 +106,22 @@ catch (Exception ex)
 try { File.Delete(backupPath); }
 catch { /* non-fatal — leftover backup won't affect anything */ }
 
+// Each release unpacks its native libraries into a folder of its own under the runtime cache, and nothing else clears
+// the old ones. No fuseraft is running now, and the new one unpacks its own on its first run, so all of them can go.
+var extractBase = Environment.GetEnvironmentVariable("DOTNET_BUNDLE_EXTRACT_BASE_DIR");
+var cacheRoot   = Path.Combine(string.IsNullOrEmpty(extractBase) ? Path.Combine(Path.GetTempPath(), ".net") : extractBase, "fuseraft");
+if (Directory.Exists(cacheRoot))
+{
+    var removed = 0;
+    foreach (var dir in Directory.EnumerateDirectories(cacheRoot))
+    {
+        try { Directory.Delete(dir, recursive: true); removed++; }
+        catch { /* in use or locked; the next update tries again */ }
+    }
+    if (removed > 0)
+        Console.WriteLine($"  Removed {removed} older version{(removed == 1 ? "" : "s")} of the runtime cache.");
+}
+
 Console.WriteLine();
 Console.WriteLine($"✓ Update complete.");
 Console.WriteLine($"  Run 'fuseraft --version' to verify.");
