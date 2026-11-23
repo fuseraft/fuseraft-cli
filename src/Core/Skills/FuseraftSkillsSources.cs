@@ -170,14 +170,20 @@ public static class FuseraftSkillsSources
     }
 
     // Discovery lists .cs by default, so it must be runnable; the "--" keeps a script's own
-    // --flags from being parsed by `dotnet run` itself.
-    internal static (string FileName, string[] LeadingArgs) ResolveCommand(string scriptPath, bool isWindows) =>
+    // --flags from being parsed by `dotnet run` itself. On Windows a .ps1 falls back to Windows
+    // PowerShell 5.1 when pwsh isn't installed; 5.1 needs an explicit -File (its default is
+    // -Command) and -ExecutionPolicy Bypass (client SKUs default to Restricted).
+    internal static (string FileName, string[] LeadingArgs) ResolveCommand(
+        string scriptPath, bool isWindows, string? windowsPowerShell = null) =>
         Path.GetExtension(scriptPath) switch
         {
             ".py"  => (isWindows ? "python" : "python3", [scriptPath]),
             ".js"  => ("node", [scriptPath]),
             ".sh"  => ("bash", [scriptPath]),
-            ".ps1" => ("pwsh", [scriptPath]),
+            ".ps1" when isWindows => (
+                windowsPowerShell ?? fuseraft.Infrastructure.Plugins.ProcessHelper.WindowsPowerShellPath.Value,
+                ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath]),
+            ".ps1" => ("pwsh", ["-NoProfile", "-NonInteractive", "-File", scriptPath]),
             ".cs"  => ("dotnet", ["run", scriptPath, "--"]),
             _      => (scriptPath, []),
         };
