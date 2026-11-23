@@ -52,7 +52,7 @@
     <PackageReference Include="PdfPig" Version="0.1.16" />
 
     <!-- Structured logging -->
-    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="11.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
 
