@@ -32,7 +32,7 @@ Most are in the Command Palette under **fuseraft:**. The ones marked _menu_ act 
 
 | Command | What it does |
 |---------|--------------|
-| **Open REPL** | Show the open chat, or start one with the configured model |
+| **Open Chat** | Show the open chat, or start one with the configured model |
 | **New Chat** | Start a fresh chat. The one it replaces stays resumable |
 | **Resume Chat** | Pick any saved chat, from any folder, and resume it |
 | **Rename Chat** _(menu)_ | Rename a chat: right-click it in **Chats**, or press **F2** |
