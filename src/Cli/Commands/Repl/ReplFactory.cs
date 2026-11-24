@@ -256,8 +256,7 @@ internal static class ReplFactory
         }
         else
         {
-            if (string.IsNullOrWhiteSpace(apiKey) && !endpoint.Contains("localhost", StringComparison.OrdinalIgnoreCase)
-                && !endpoint.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(apiKey) && !LocalEndpoint.IsLocal(endpoint))
             {
                 AnsiConsole.MarkupLine("[red]✗ API key is required.[/]");
                 return (null, null, false);

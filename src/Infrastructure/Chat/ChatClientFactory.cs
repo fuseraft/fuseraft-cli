@@ -1,3 +1,4 @@
+using fuseraft.Core;
 using System.ClientModel;
 using System.ClientModel.Primitives;
 using System.Collections.Concurrent;
@@ -356,8 +357,8 @@ public sealed class ChatClientFactory(
                     throw new InvalidOperationException(
                         $"Provider '{provider}' requires Endpoint to be set (model: '{config.ModelId}'). " +
                         $"This should have been filled in by auto-detection — check the model ID prefix.");
-                // A server on this machine (Ollama's /v1, llama.cpp) usually needs no key, but the SDK insists on one.
-                if (string.IsNullOrEmpty(apiKey) && new Uri(config.Endpoint).IsLoopback)
+                // A server on this machine or the local network (Ollama's /v1, llama.cpp) usually needs no key, but the SDK insists on one.
+                if (string.IsNullOrEmpty(apiKey) && LocalEndpoint.IsLocal(config.Endpoint))
                     apiKey = LocalServerPlaceholderKey;
                 if (string.IsNullOrEmpty(apiKey))
                     throw new InvalidOperationException(
