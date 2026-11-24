@@ -1,3 +1,4 @@
+using fuseraft.Core;
 using System.Text.Json.Serialization;
 
 namespace fuseraft.Core.Models.Config;
@@ -79,12 +80,12 @@ public sealed class UserConfig
     [JsonIgnore]
     public string ApiKeyOrigin { get; set; } = string.Empty;
 
-    // Ollama, and any server on this machine (the VS Code extension saves Ollama as an
-    // OpenAI-compatible localhost endpoint), can run without an API key.
+    // Ollama, and any server on this machine or the local network (the VS Code extension
+    // saves Ollama and Custom as OpenAI-compatible endpoints), can run without an API key.
     [JsonIgnore]
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(ModelId) &&
         (!string.IsNullOrWhiteSpace(ApiKey)
          || Provider.Equals("ollama", StringComparison.OrdinalIgnoreCase)
-         || (Uri.TryCreate(Endpoint, UriKind.Absolute, out var uri) && uri.IsLoopback));
+         || LocalEndpoint.IsLocal(Endpoint));
 }

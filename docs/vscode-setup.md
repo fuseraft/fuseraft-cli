@@ -42,7 +42,7 @@ The provider here is the default for new chats. You can switch models from a cha
 Paste your key. **Get a key** opens the provider's key page, and **Show** reveals what you've typed.
 
 - **Ollama** runs on your machine, so there's no key field.
-- **Custom** servers often need no key. Leave it blank if yours doesn't.
+- **Custom** servers often need no key. Leave it blank if yours doesn't. A blank key works for a server on your machine or your local network (a `192.168.x.x` or `10.x.x.x` address, a `.local` name, or a Tailscale address); a server on the internet needs one.
 - **A key is already saved for this server:** the field shows `(saved)`. Leave it blank to keep that key.
 
 See [Where your key is kept](#where-your-key-is-kept) below.

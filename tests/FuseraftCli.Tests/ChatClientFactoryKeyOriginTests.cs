@@ -68,6 +68,14 @@ public sealed class ChatClientFactoryKeyOriginTests
         Assert.NotNull(factory.Create(Model("http://localhost:11434/v1", XaiOrigin)));
     }
 
+    [Fact]
+    public void LanOpenAiCompatibleServer_WorksWithoutAKey()
+    {
+        using var factory = new ChatClientFactory();
+
+        Assert.NotNull(factory.Create(Model("http://192.168.1.102:11434/v1", XaiOrigin)));
+    }
+
     [Theory]
     [InlineData("grok-4.7", "openai", "https://api.x.ai/v1", "https://api.x.ai/v1")]
     [InlineData("grok-4.7", "", "", "https://api.x.ai/v1")]
@@ -82,6 +90,7 @@ public sealed class ChatClientFactoryKeyOriginTests
     [Theory]
     [InlineData("http://localhost:11434/v1", true)]
     [InlineData("http://127.0.0.1:8080/v1", true)]
+    [InlineData("http://192.168.1.102:11434/v1", true)]
     [InlineData("https://gateway.example.com/v1", false)]
     [InlineData("", false)]
     public void UserConfig_WithALocalEndpoint_IsConfiguredWithoutAKey(string endpoint, bool expected) =>
