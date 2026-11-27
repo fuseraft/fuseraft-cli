@@ -46,13 +46,13 @@
     <PackageReference Include="OllamaSharp" Version="5.5.2" />
 
     <!-- DI -->
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.20.1" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.20.2" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.20.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.21.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.21.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.21.0" />
     <PackageReference Include="PdfPig" Version="0.1.16" />
 
     <!-- Structured logging -->
-    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="11.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
 
@@ -60,7 +60,7 @@
     <PackageReference Include="Spectre.Console.Cli" Version="0.57.2" />
 
     <!-- Full-screen REPL: transcript, prompt editor, and status line -->
-    <PackageReference Include="Terminal.Gui" Version="2.5.0" />
+    <PackageReference Include="Terminal.Gui" Version="2.6.0" />
     <PackageReference Include="Terminal.Gui.Editor" Version="2.5.7" />
 
     <!-- Line diffing for REPL diff views (HITL write/patch approval previews) -->
@@ -73,7 +73,7 @@
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
 
     <!-- SQLite — skill index FTS5 -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0" />
     <!-- Bundle the native e_sqlite3 library inside the single-file executable so
          it can be self-extracted at startup without a sibling .so file on disk. -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
