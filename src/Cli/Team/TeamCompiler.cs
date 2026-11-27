@@ -49,14 +49,14 @@ public static class TeamCompiler
 
     private static readonly string[] Patterns = ["magentic", "adversarial", "mapreduce", "scattergather"];
 
-    private static readonly HashSet<string> AdvancedTopLevel = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> AdvancedTopLevel = new(StringComparer.OrdinalIgnoreCase)
     {
         "systemPrompt", "systemPromptPath", "warnTurnTokens", "contextBudget", "compaction", "scratchpad",
         "chatroom", "telemetry", "checkpoint", "apiProfiles", "verifier", "failureHandling",
         "brownfield", "testSelector", "skillCuration", "memory", "output",
     };
 
-    private static readonly HashSet<string> AdvancedAgent = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> AdvancedAgent = new(StringComparer.OrdinalIgnoreCase)
     {
         "functionChoice", "trustScore", "contextWindow", "context", "skipExecutionState", "capabilities",
         "maxToolCallsPerTurn", "maxInTurnContextTokens", "maxInTurnToolPairs", "knowledgeWeight",
@@ -372,7 +372,7 @@ public static class TeamCompiler
         List<string> To, string? Name, string? When, List<JsonElement> Requires,
         string? OnStuck, string? Join, MergeConfig? Merge, int MaxRevisits, bool Approve);
 
-    private static readonly HashSet<string> EdgeFields = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> EdgeFields = new(StringComparer.OrdinalIgnoreCase)
         { "to", "name", "when", "requires", "onStuck", "join", "merge", "maxRevisits", "approve" };
 
     private static Edge ReadEdge(JsonElement el, string at)

@@ -17,7 +17,7 @@ public sealed record TeamConfig
     /// <summary>Files agents hand each other, declared once and referenced by name.</summary>
     public Dictionary<string, ArtifactConfig> Artifacts { get; init; } = [];
 
-    /// <summary>Agents keyed by name.</summary>
+    /// <summary>Agents keyed by name: an inline map, or the path of a markdown agent file.</summary>
     public Dictionary<string, TeamAgentConfig> Agents { get; init; } = [];
 
     /// <summary>Either <c>Start</c> + <c>Steps</c>, or a <c>Pattern</c> with its fields.</summary>
@@ -49,9 +49,6 @@ public sealed record ArtifactConfig
 /// <summary>One agent in a v2 team file.</summary>
 public sealed record TeamAgentConfig
 {
-    /// <summary>Optional YAML file holding this agent's fields; inline fields win.</summary>
-    public string? AgentFile { get; init; }
-
     /// <summary>One-line description of what the agent does.</summary>
     public string? Role { get; init; }
 

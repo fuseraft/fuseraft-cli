@@ -221,7 +221,8 @@ public static class SubagentDefinitionLoader
     private static string? Scalar(Dictionary<string, object?> fm, string key) =>
         fm.TryGetValue(key, out var v) ? v?.ToString() : null;
 
-    private static bool TrySplitFrontmatter(string content, out string yaml, out string body)
+    /// <summary>Splits a markdown file into its leading <c>---</c> YAML block and the body after it.</summary>
+    public static bool TrySplitFrontmatter(string content, out string yaml, out string body)
     {
         yaml = body = string.Empty;
         var text  = content.TrimStart('﻿').Replace("\r\n", "\n");

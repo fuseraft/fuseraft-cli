@@ -1323,7 +1323,7 @@ Paste the output into [mermaid.live](https://mermaid.live) to render it. The dia
 
 ## `fuseraft migrate`
 
-Convert a config in the old `Orchestration:` format into a team file.
+Convert a config in the old `Orchestration:` format into a team file, or a team file's `agentFile:` agents into [markdown agent files](configuration.md#agent-files).
 
 ```
 fuseraft migrate <path> [--write]
@@ -1331,14 +1331,32 @@ fuseraft migrate <path> [--write]
 
 | Argument / flag | Description |
 |-----------------|-------------|
-| `<path>` | The old config file (YAML or JSON). |
-| `-w`, `--write` | Overwrite the file in place. Without it, the converted team file is printed to stdout. |
+| `<path>` | The old config file, or a team file whose agents use `agentFile` (YAML or JSON). |
+| `-w`, `--write` | Overwrite the file in place and write any new agent files. Without it, the converted team file is printed to stdout and each agent file it would write is listed on stderr. |
 
 The converter maps routes and state machines to `flow.steps`, validators and contracts to `requires:` gates, the brief and test report paths to `artifacts`, and the optional sections to `advanced`. It rewrites quoted routing keywords in agent instructions to the new route names, and checks that the result loads before printing it.
 
 Anything it had to approximate is printed to stderr as a `note:`, for example a termination keyword that agents should now replace with a handoff to `end`. The leading comment block is kept; comments inside the file are not.
 
 `llm` selection and graph sub-graphs have no direct equivalent; the converter stops and says so, and those configs need converting by hand.
+
+For `agentFile:` agents, each referenced YAML file becomes a `.md` file beside it, with the inline fields merged in as they used to be (inline wins), the keys in camelCase, and the instructions as the body. The team file then names the `.md` file. Several agents sharing one file with different inline fields each get their own file (`reviewer-<agent>.md`). An existing `.md` with different content stops the conversion rather than being overwritten. The old YAML file is left in place, with a note that it's no longer read.
+
+---
+
+## `fuseraft schema`
+
+Print the JSON Schema for team files.
+
+```
+fuseraft schema [--output <path>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-o`, `--output <path>` | Write the schema to a file instead of printing it. |
+
+Point your editor at it for completion and inline errors (see [Configuration — Editor support](configuration.md)), or use it to check team files that a script generates. The same schema is in the repository at `schema/team.schema.json`. A schema check is a subset of `fuseraft validate`, which also checks names across the file, gates and the flow.
 
 ---
 

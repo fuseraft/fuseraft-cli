@@ -272,9 +272,14 @@ app.Configure(cfg =>
         .WithExample(["validate", ".fuseraft/config/my-team.yaml", "--strict"]);
 
     cfg.AddCommand<MigrateCommand>("migrate")
-        .WithDescription("Convert a config in the old 'Orchestration:' format to the current team format.")
+        .WithDescription("Convert an old 'Orchestration:' config, or a team's agentFile agents, to the current team format.")
         .WithExample(["migrate", ".fuseraft/config/orchestration.yaml"])
         .WithExample(["migrate", ".fuseraft/config/orchestration.yaml", "--write"]);
+
+    cfg.AddCommand<SchemaCommand>("schema")
+        .WithDescription("Print the JSON Schema for team files, for editors and for scripts that generate them.")
+        .WithExample(["schema"])
+        .WithExample(["schema", "--output", "team.schema.json"]);
 
     cfg.AddCommand<SessionsCommand>("sessions")
         .WithDescription("List, inspect, or delete persisted session checkpoints.")

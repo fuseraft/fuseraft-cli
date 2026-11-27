@@ -1,0 +1,35 @@
+## A developer and a reviewer, with the reviewer kept in its own markdown file
+## (agents/reviewer.md) so other teams can use the same reviewer.
+## Run:      fuseraft run --config config/examples/shared-agent.yaml "Your task"
+## Validate: fuseraft validate config/examples/shared-agent.yaml
+
+team: DevWithSharedReviewer
+description: Developer implements, a shared reviewer approves or sends it back.
+
+agents:
+  Developer:
+    role: Implements the task.
+    tools: [FileSystem, Shell, Git, Search, Changes]
+    instructions: |
+      Implement the task, run the project's build and tests, and commit.
+      If the reviewer sent it back, fix every numbered finding first.
+
+  Reviewer: agents/reviewer.md
+
+flow:
+  start: Developer
+  steps:
+    Developer:
+      - to: Reviewer
+        requires: [anyFileWritten]
+    Reviewer:
+      - to: end
+        name: approve
+        when: the change is correct and tested
+        requires: [reviewJudgement]
+      - to: Developer
+        name: revise
+        when: the change needs fixes
+
+limits:
+  maxTurns: 20

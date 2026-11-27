@@ -9,14 +9,14 @@ namespace fuseraft.Cli.Team;
 /// <summary>Writes a <see cref="JsonNode"/> tree as readable YAML: block maps, literal multi-line strings, flow lists of short scalars.</summary>
 internal static partial class YamlWriter
 {
-    /// <summary>Renders <paramref name="root"/>, separating top-level keys with a blank line.</summary>
-    public static string Write(JsonObject root)
+    /// <summary>Renders <paramref name="root"/>, separating top-level keys with a blank line unless <paramref name="spaced"/> is false.</summary>
+    public static string Write(JsonObject root, bool spaced = true)
     {
         var sb = new StringBuilder();
         var first = true;
         foreach (var (key, value) in root)
         {
-            if (!first) sb.Append('\n');
+            if (!first && spaced) sb.Append('\n');
             first = false;
             WriteEntry(sb, key, value, 0);
         }
