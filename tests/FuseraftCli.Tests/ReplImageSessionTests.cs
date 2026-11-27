@@ -51,7 +51,8 @@ public sealed class ReplImageSessionTests : IDisposable
 
         Assert.NotNull(id1);
         Assert.Equal(id1, id2);                                   // same bytes → one file
-        Assert.Single(Directory.GetFiles(ReplImageStore.Root));
+        // Only this image's files: a turn's fire-and-forget snapshot from an earlier test can land in this home.
+        Assert.Single(Directory.GetFiles(ReplImageStore.Root), f => Path.GetFileName(f).StartsWith(id1![..24]));
         Assert.Equal(bytes, ReplImageStore.Load(id1));
         Assert.EndsWith(".png", id1);
     }
@@ -166,9 +167,10 @@ public sealed class ReplImageSessionTests : IDisposable
         var history = new List<ChatMessage> { new(ChatRole.User, [new TextContent("x"), image]) };
 
         await ReplSessionSnapshot.SaveAsync(ReplSessionSnapshot.Capture("s-cache", "m", "/tmp", 1, history, DateTime.UtcNow));
-        var stored = Directory.GetFiles(ReplImageStore.Root).Single();
+        Assert.True(image.AdditionalProperties!.TryGetValue(ImageAttachments.IdProperty, out var id));
+        var stored = Path.Combine(ReplImageStore.Root, (string)id!);
+        Assert.True(File.Exists(stored));
         var firstWrite = File.GetLastWriteTimeUtc(stored);
-        Assert.True(image.AdditionalProperties!.ContainsKey(ImageAttachments.IdProperty));
 
         await Task.Delay(50);
         await ReplSessionSnapshot.SaveAsync(ReplSessionSnapshot.Capture("s-cache", "m", "/tmp", 2, history, DateTime.UtcNow));
