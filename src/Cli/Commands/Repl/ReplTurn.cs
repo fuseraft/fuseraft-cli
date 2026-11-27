@@ -190,9 +190,7 @@ internal static class ReplTurn
     }
 
     // A provider's refusal of the forced tool choice BuildRequestOptions asked for, rather than of the request as a whole.
-    internal static bool IsToolChoiceRejection(Exception ex) =>
-        ex is not OperationCanceledException &&
-        $"{ex.Message} {ex.InnerException?.Message}".Contains("tool_choice", StringComparison.OrdinalIgnoreCase);
+    internal static bool IsToolChoiceRejection(Exception ex) => AgentMiddlewareBuilder.IsToolChoiceRejection(ex);
 
     // The options for a reply that mustn't call tools. The tools stay declared, since a provider may reject a
     // history with tool calls in it when none are, and the model is told not to use them.
