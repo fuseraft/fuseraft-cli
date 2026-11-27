@@ -52,6 +52,11 @@ internal sealed class AgentMiddlewareBuilder(
         // Lets us correlate inner_call_context events with http_reasoning events in the log.
         int innerCallSeq = 0;
 
+        // Newer models reject a forced tool call outright (Claude Sonnet 5.5 and Opus 5.5: "tool_choice: type \"tool\" and
+        // \"any\" are not supported for this model"). After the first rejection this agent asks with auto from then on,
+        // so no later request fails the same way or switches tool_choice, which also costs the provider's message cache.
+        var forcedToolChoiceRejected = false;
+
         // Reference budget for AgentContextCompactionFilters.CompactionTriggerRatio — gates
         // the sliding tool-pair window so it only engages once a turn is actually
         // approaching its budget, keeping the request prefix (and a provider's prompt cache)
@@ -96,6 +101,7 @@ internal sealed class AgentMiddlewareBuilder(
                         return new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty));
 
                     var merged  = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
+                    if (forcedToolChoiceRejected) merged = Unforced(merged);
                     var baseMsg = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
 
                     // Probe 3: emit a per-inner-call context snapshot after all trimming.
@@ -153,6 +159,12 @@ internal sealed class AgentMiddlewareBuilder(
                                         config.Model.ModelId, response.FinishReason, response.Usage, callSeq, change, attempt, run));
 
                             return response;
+                        }
+                        catch (Exception ex) when (IsForcedToolChoiceRejection(merged, ex))
+                        {
+                            RecordForcedToolChoiceRejected(ex);
+                            merged = Unforced(merged);
+                            attempt--;
                         }
                         catch (Exception ex) when (attempt < AdaptiveContextTrimMaxRetries
                                                    && IsContextLimitException(ex))
@@ -213,6 +225,14 @@ internal sealed class AgentMiddlewareBuilder(
             return await requestView.RenderAsync(run, stored, calibration.Scale(viewChars), ct);
         }
 
+        void RecordForcedToolChoiceRejected(Exception ex)
+        {
+            if (forcedToolChoiceRejected) return;
+            forcedToolChoiceRejected = true;
+            logger.LogInformation("{Agent}: {Model} refused a forced tool call ({Error}); asking with tool choice auto from now on",
+                config.Name, config.Model.ModelId, ex.Message[..Math.Min(ex.Message.Length, 120)].Replace('\n', ' '));
+        }
+
         async IAsyncEnumerable<ChatResponseUpdate> StreamWithToolPairWindowAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options,
@@ -226,6 +246,7 @@ internal sealed class AgentMiddlewareBuilder(
                 yield break;
 
             var merged = chatOptions is not null ? MergeOptions(messages, options, chatOptions) : options;
+            if (forcedToolChoiceRejected) merged = Unforced(merged);
 
             // Pre-trim proactively when limits are known — cheap and always safe up front.
             if (maxContextChars > 0 || maxPayloadBytes > 0)
@@ -277,6 +298,13 @@ internal sealed class AgentMiddlewareBuilder(
                     try
                     {
                         moved = await enumerator.MoveNextAsync();
+                    }
+                    catch (Exception ex) when (IsForcedToolChoiceRejection(merged, ex))
+                    {
+                        RecordForcedToolChoiceRejected(ex);
+                        merged = Unforced(merged);
+                        attempt--;
+                        continue;
                     }
                     catch (Exception ex) when (attempt < AdaptiveContextTrimMaxRetries && IsContextLimitException(ex))
                     {
@@ -827,6 +855,22 @@ internal sealed class AgentMiddlewareBuilder(
             break; // User message = turn boundary; no handoff in this batch.
         }
         return false;
+    }
+
+    /// <summary>Whether a provider refused the forced tool choice a request asked for, rather than the request as a whole.</summary>
+    internal static bool IsToolChoiceRejection(Exception ex) =>
+        ex is not OperationCanceledException &&
+        $"{ex.Message} {ex.InnerException?.Message}".Contains("tool_choice", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsForcedToolChoiceRejection(ChatOptions? options, Exception ex) =>
+        options?.ToolMode is RequiredChatToolMode && IsToolChoiceRejection(ex);
+
+    private static ChatOptions? Unforced(ChatOptions? options)
+    {
+        if (options?.ToolMode is not RequiredChatToolMode) return options;
+        var auto = options.Clone();
+        auto.ToolMode = ChatToolMode.Auto;
+        return auto;
     }
 
     private static ChatOptions MergeOptions(

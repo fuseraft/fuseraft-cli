@@ -161,16 +161,20 @@ public sealed class ContextAssemblyPipeline : IContextAssemblyPipeline
         }
         else if (agentCfg?.Context is { Count: > 0 } contextSources2 && _contextAssembler is not null)
         {
-            var assembled   = await _contextAssembler.AssembleForAgentAsync(
-                agentName, task, contextSources2,
-                history as IList<ChatMessage> ?? new List<ChatMessage>(history),
-                isolation == AgentIsolation.Fork ? directive : null, ct);
-            baseMessages    = assembled.Messages;
-            historyChars    = baseMessages.Sum(m => m.Text?.Length ?? 0);
-            historyMessages = baseMessages;
+            // `sees: conversation` and `sees: fork` agents see the shared conversation; their sources are added after
+            // it, at the end, where a change to them leaves the conversation's cached prefix alone. They used to
+            // replace it, so these agents saw only their own past turns.
+            var filtered    = ContextWindowFilter.Apply(history, agentCfg?.ContextWindow);
+            var empty       = new List<string>();
+            var block       = await _contextAssembler.BuildArtifactBlockAsync(contextSources2, empty, ct);
+            baseMessages    = block is null ? filtered : [.. filtered, block];
+            if (isolation == AgentIsolation.Fork && directive is not null)
+                baseMessages = [.. baseMessages, new ChatMessage(ChatRole.User, directive.Format())];
+            historyChars    = filtered.Sum(m => m.Text?.Length ?? 0);
+            historyMessages = filtered;
             contextStrategy = ContextAssemblyMetrics.Strategies.ArtifactSpec;
             declaredSources = contextSources2.Select(s => s.Source).ToList();
-            emptySources    = assembled.EmptySources;
+            emptySources    = empty;
         }
         else
         {

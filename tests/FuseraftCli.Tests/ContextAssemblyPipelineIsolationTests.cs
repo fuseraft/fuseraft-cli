@@ -142,4 +142,33 @@ public sealed class ContextAssemblyPipelineIsolationTests
         Assert.Contains(assembled.Messages, m =>
             m.Text?.Contains("Audit the session for inconsistencies.", StringComparison.Ordinal) == true);
     }
+
+    // In a steps flow every agent gets context sources (execution state, at least), and they replaced the shared
+    // conversation, so a `sees: conversation` agent saw only its own past turns.
+    [Fact]
+    public async Task Shared_agent_with_context_sources_sees_the_conversation_then_the_sources()
+    {
+        var file = Path.Combine(Path.GetTempPath(), $"fuseraft-test-brief-{Guid.NewGuid():N}.md");
+        await File.WriteAllTextAsync(file, "BRIEF_CONTENT");
+        try
+        {
+            var pipeline = new ContextAssemblyPipeline(contextAssembler: new ContextAssembler());
+            var assembled = await pipeline.AssembleAsync(new AgentExecutionRequest
+            {
+                AgentName     = "Fixer",
+                Task          = "Fix the outage.",
+                SharedHistory = SharedHistoryWithSecret(),
+                AgentConfig   = new AgentConfig
+                {
+                    Name = "Fixer", Isolation = AgentIsolation.Shared,
+                    Context = [new ContextSource { Source = $"file:{file}" }],
+                },
+            });
+
+            var texts = assembled.Messages.Select(m => m.Text ?? "").ToList();
+            Assert.Contains(texts, t => t.Contains("SECRET_REASONING", StringComparison.Ordinal));
+            Assert.Contains("BRIEF_CONTENT", texts[^1]);
+        }
+        finally { File.Delete(file); }
+    }
 }

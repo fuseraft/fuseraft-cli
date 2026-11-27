@@ -181,31 +181,8 @@ public sealed class ContextAssembler
         }
 
         // 3. Artifact block — all non-own_history sources formatted into one user message.
-        if (artifactSources.Count > 0)
-        {
-            var sections = new List<(string Label, string Content)>(artifactSources.Count);
-            foreach (var src in artifactSources)
-            {
-                var content = await ResolveArtifactAsync(src, ct);
-                if (!string.IsNullOrWhiteSpace(content))
-                    sections.Add((src.Label ?? DefaultLabel(src.Source), content.Trim()));
-                else
-                    emptySources.Add(src.Source);
-            }
-
-            if (sections.Count > 0)
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine("[AGENT CONTEXT — assembled from artifacts]");
-                foreach (var (label, content) in sections)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine($"## {label}");
-                    sb.AppendLine(content);
-                }
-                result.Add(new ChatMessage(ChatRole.User, sb.ToString().TrimEnd()));
-            }
-        }
+        if (await BuildArtifactBlockAsync(artifactSources, emptySources, ct) is { } block)
+            result.Add(block);
 
         // 4. Pending corrections — user correction messages injected into shared history after
         // this agent's last turn. Context-spec agents replace shared-history replay entirely,
@@ -224,6 +201,33 @@ public sealed class ContextAssembler
         }
 
         return new AgentContextAssembly(result, emptySources);
+    }
+
+    /// <summary>The declared sources other than <c>own_history</c>, as one user message; null when all are empty.</summary>
+    public async Task<ChatMessage?> BuildArtifactBlockAsync(
+        IReadOnlyList<ContextSource> sources, List<string> emptySources, CancellationToken ct = default)
+    {
+        var sections = new List<(string Label, string Content)>(sources.Count);
+        foreach (var src in sources)
+        {
+            if (ParseSource(src.Source).Type == "own_history") continue;
+            var content = await ResolveArtifactAsync(src, ct);
+            if (!string.IsNullOrWhiteSpace(content))
+                sections.Add((src.Label ?? DefaultLabel(src.Source), content.Trim()));
+            else
+                emptySources.Add(src.Source);
+        }
+        if (sections.Count == 0) return null;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("[AGENT CONTEXT — assembled from artifacts]");
+        foreach (var (label, content) in sections)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"## {label}");
+            sb.AppendLine(content);
+        }
+        return new ChatMessage(ChatRole.User, sb.ToString().TrimEnd());
     }
 
     // ── Shared source resolution ─────────────────────────────────────────────
