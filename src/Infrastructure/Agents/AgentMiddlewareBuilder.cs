@@ -70,6 +70,14 @@ internal sealed class AgentMiddlewareBuilder(
         var requestView = new CacheStableRequestView((stored, target, ct) => AgentContextCompactionFilters.TrimNearBudget(
             AgentContextCompactionFilters.DropSupersededContent(stored), maxInTurnToolPairs,
             maxInTurnChars > 0 ? target : 0, triggerChars: 0, ct));
+        // The pre-flight checks count the tool schemas as well as the messages. With the view's budget above theirs, every
+        // request in between was cut by the streaming pre-trim (or failed the context check and was retried trimmed),
+        // shortening older tool results again on each one, so none of them matched the request before.
+        var viewChars = maxInTurnChars > 0 ? maxInTurnChars : triggerChars;
+        if (maxContextChars > 0)
+            viewChars = Math.Min(viewChars, Math.Max(1, maxContextChars - toolSchemaChars));
+        if (maxPayloadBytes > 0)
+            viewChars = (int)Math.Min(viewChars, Math.Max(1, (maxPayloadBytes - 2048 - (long)(toolSchemaChars * 1.2)) / 1.2));
 
         return chatClient.AsBuilder()
             .Use(
@@ -202,7 +210,7 @@ internal sealed class AgentMiddlewareBuilder(
         {
             var stored = messages as IReadOnlyList<ChatMessage> ?? messages.ToList();
             rewrites.ObserveInputs(run, stored, stored);
-            return await requestView.RenderAsync(run, stored, calibration.Scale(maxInTurnChars > 0 ? maxInTurnChars : triggerChars), ct);
+            return await requestView.RenderAsync(run, stored, calibration.Scale(viewChars), ct);
         }
 
         async IAsyncEnumerable<ChatResponseUpdate> StreamWithToolPairWindowAsync(

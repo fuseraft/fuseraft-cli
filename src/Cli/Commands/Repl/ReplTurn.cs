@@ -2559,6 +2559,9 @@ internal static class ReplTurn
     }
 
     // Returns the number of ChatMessage entries removed (0 when no trimming was needed).
+    // Past the budget it drops turns down to the low-water mark, not just under the budget: dropping only the oldest
+    // turn each time rewrote the start of the history on every turn once it was full, and the provider's prompt cache
+    // then served nothing past the system prompt.
     internal static int TrimHistory(List<ChatMessage> history, int contextTokenBudget)
     {
         static int EstimateMessage(ChatMessage m) =>
@@ -2566,6 +2569,7 @@ internal static class ReplTurn
 
         var total = history.Sum(EstimateMessage);
         if (total <= contextTokenBudget) return 0;
+        var target = (int)(contextTokenBudget * CacheStableRequestView.DefaultLowWaterRatio);
 
         int evictAt = history.Count > 0 && history[0].Role == ChatRole.System ? 1 : 0;
         // A compaction summary is all that's left of the turns before it, so the turns after it go first.
@@ -2578,7 +2582,7 @@ internal static class ReplTurn
         }
 
         int removed = 0;
-        while (total > contextTokenBudget)
+        while (total > target)
         {
             // Evict the oldest complete turn group (User + all following non-User
             // messages). Removing partial groups can leave orphaned FunctionCallContent
