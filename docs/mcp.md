@@ -212,6 +212,10 @@ names look like secrets (`..._TOKEN`, `..._KEY`) are masked in tool output; `FUS
   doesn't use the name. If it can't connect, the run logs a warning and carries on without its tools, rather
   than failing as a server in `mcpServers` would.
 
+Servers you saved in the REPL (`/mcp add`, kept in `~/.fuseraft/config`) work the same way for `fuseraft run`:
+an agent that names one in `tools` gets it without the team file declaring it, a team's own `mcpServers` entry
+with the same name wins, and a saved server wins over a launcher-provided one.
+
 ---
 
 ## Building your own MCP server

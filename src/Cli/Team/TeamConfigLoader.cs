@@ -22,14 +22,18 @@ public static class TeamConfigLoader
     public static OrchestrationConfig LoadAndCompile(string path) =>
         TeamCompiler.Compile(Load(path));
 
-    /// <summary>Loads <paramref name="path"/> into a <see cref="TeamConfig"/>, resolving <c>AgentFile</c> references.</summary>
+    /// <summary>Loads <paramref name="path"/> into a <see cref="TeamConfig"/>, reading the markdown agent files it names.</summary>
     public static TeamConfig Load(string path)
     {
         if (!File.Exists(path))
             throw new FileNotFoundException($"Config file not found: {path}");
+        return Load(ReadObject(path), path);
+    }
 
-        var root = ReadObject(path);
-        var dir  = Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".";
+    /// <summary>Loads an already-parsed team file; <paramref name="pending"/> supplies agent files (by full path) not yet on disk.</summary>
+    internal static TeamConfig Load(JsonObject root, string path, IReadOnlyDictionary<string, string>? pending = null)
+    {
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".";
 
         RejectCaseDuplicates(root, "");
 
@@ -44,8 +48,14 @@ public static class TeamConfigLoader
 
         if (Find(root, "Agents") is { Value: JsonObject agents })
             foreach (var (name, node) in agents.ToList())
-                if (node is JsonObject agent && Find(agent, "AgentFile")?.Value?.GetValue<string>() is { Length: > 0 } file)
-                    agents[name] = MergeAgentFile(agent, Path.IsPathRooted(file) ? file : Path.Combine(dir, file), name);
+            {
+                if (node is JsonObject agent && Find(agent, "AgentFile") is not null)
+                    throw new TeamConfigException(
+                        $"agents.{name}.agentFile: agent files are now markdown, referenced as '{name}: agents/{name.ToLowerInvariant()}.md'.\n" +
+                        $"Convert this team with: fuseraft migrate {path}");
+                if (node is JsonValue value && value.TryGetValue<string>(out var file))
+                    agents[name] = ReadAgentMarkdown(Path.GetFullPath(Path.IsPathRooted(file) ? file : Path.Combine(dir, file)), name, pending);
+            }
 
         return Deserialize<TeamConfig>(root, path);
     }
@@ -92,12 +102,17 @@ public static class TeamConfigLoader
         return $"{firstLine}{at}.";
     }
 
-    private static JsonObject ReadObject(string path)
+    internal static JsonObject ReadObject(string path)
     {
         string text;
         try { text = File.ReadAllText(path); }
         catch (Exception ex) { throw new TeamConfigException($"Cannot read '{path}': {ex.Message}", ex); }
+        return ParseObject(text, path);
+    }
 
+    /// <summary>Parses <paramref name="text"/> as YAML or JSON, by <paramref name="path"/>'s extension.</summary>
+    internal static JsonObject ParseObject(string text, string path)
+    {
         string json;
         try { json = YamlConfigLoader.IsYamlPath(path) ? YamlConfigLoader.ConvertYamlToJson(text) : text; }
         catch (Exception ex) { throw new TeamConfigException($"'{path}' has invalid YAML: {ex.Message}", ex); }
@@ -110,28 +125,52 @@ public static class TeamConfigLoader
         catch (JsonException ex) { throw new TeamConfigException($"'{path}' is not valid JSON: {ex.Message}", ex); }
     }
 
-    private static JsonObject MergeAgentFile(JsonObject inline, string file, string agentName)
+    /// <summary>Reads a markdown agent file: the frontmatter holds the agent's fields, the body is its instructions.</summary>
+    private static JsonObject ReadAgentMarkdown(string file, string agentName, IReadOnlyDictionary<string, string>? pending)
     {
-        if (!File.Exists(file))
-            throw new TeamConfigException($"agents.{agentName}.agentFile: '{file}' not found.");
+        var at = $"agents.{agentName} ({file})";
+        if (!file.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            throw new TeamConfigException($"agents.{agentName}: '{file}' isn't a markdown file. Write the agent inline, or point to a .md file.");
 
-        var baseObj = ReadObject(file);
-        if (Find(baseObj, "Agent") is { Value: JsonObject wrapped }) baseObj = wrapped;
-        RejectCaseDuplicates(baseObj, $"agents.{agentName}.agentFile ({Path.GetFileName(file)})");
-
-        // Inline fields win, whatever case either file writes them in.
-        var merged = (JsonObject)baseObj.DeepClone();
-        foreach (var (key, value) in inline)
+        string? text = null;
+        if (pending?.TryGetValue(file, out var staged) != true)
         {
-            if (key.Equals("AgentFile", StringComparison.OrdinalIgnoreCase)) continue;
-            if (Find(merged, key) is { Key: var existing }) merged.Remove(existing);
-            merged[key] = value?.DeepClone();
+            if (!File.Exists(file))
+                throw new TeamConfigException($"agents.{agentName}: '{file}' not found.");
+            try { text = File.ReadAllText(file); }
+            catch (Exception ex) { throw new TeamConfigException($"Cannot read '{file}': {ex.Message}", ex); }
         }
-        return merged;
+        else text = staged!;
+
+        if (!Core.Subagents.SubagentDefinitionLoader.TrySplitFrontmatter(text, out var yaml, out var body))
+            throw new TeamConfigException($"{at}: the file must start with a '---' frontmatter block holding the agent's fields.");
+
+        JsonObject fields;
+        try
+        {
+            fields = yaml.Trim().Length == 0
+                ? []
+                : JsonNode.Parse(YamlConfigLoader.ConvertYamlToJson(yaml)) as JsonObject
+                  ?? throw new TeamConfigException($"{at}: the frontmatter must be a map of fields.");
+        }
+        catch (Exception ex) when (ex is not TeamConfigException)
+        {
+            throw new TeamConfigException($"{at}: invalid frontmatter YAML: {ex.Message}", ex);
+        }
+
+        RejectCaseDuplicates(fields, at);
+        if (Find(fields, "Instructions") is not null)
+            throw new TeamConfigException($"{at}: the markdown body is the instructions; remove 'instructions' from the frontmatter.");
+        if (Find(fields, "AgentFile") is not null)
+            throw new TeamConfigException($"{at}: an agent file can't name another agent file; remove 'agentFile'.");
+
+        fields["instructions"] = body.Trim();
+        Deserialize<TeamAgentConfig>(fields, at);
+        return fields;
     }
 
     // Keys match case-insensitively, so maxTurns and MaxTurns are the same field.
-    private static KeyValuePair<string, JsonNode?>? Find(JsonObject obj, string key)
+    internal static KeyValuePair<string, JsonNode?>? Find(JsonObject obj, string key)
     {
         foreach (var pair in obj)
             if (pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
@@ -142,7 +181,7 @@ public static class TeamConfigLoader
     // Maps whose direct children are names the user chose, and maps whose whole subtree is user data.
     private static readonly HashSet<string> NamedChildren = new(StringComparer.OrdinalIgnoreCase)
         { "agents", "models", "steps", "artifacts", "apiProfiles" };
-    private static readonly HashSet<string> Opaque = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> Opaque = new(StringComparer.OrdinalIgnoreCase)
         { "shape", "env", "headers", "defaultHeaders", "capabilities", "toolResultCharOverrides" };
 
     // Fields match case-insensitively, so the same field written twice in different cases would

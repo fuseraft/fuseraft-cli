@@ -154,11 +154,14 @@ The canonical style is already established in `StateMachineSelectionStrategy.Bui
 Users write **team files**: a top-level `team:` key, then `models`, `artifacts`, `agents` (a map keyed by name), `flow` (`start` + `steps`, or a `pattern`), `limits`, `security`, `mcpServers` and `advanced`. Keys are camelCase in everything we ship (examples, templates, docs, `migrate` output); the loader matches them case-insensitively and rejects a field written twice in different cases. Gate names are camelCase too (`filesWritten`), so an artifact can't share a gate's name. The format is documented in `docs/configuration.md`.
 
 - `src/Core/Models/Team/TeamConfig.cs` — the user-facing records.
-- `src/Cli/Team/TeamConfigLoader.cs` — strict loading: unknown fields are errors; `AgentFile` merging; old `Orchestration:` files are rejected with a pointer to `fuseraft migrate`.
+- `src/Cli/Team/TeamConfigLoader.cs` — strict loading: unknown fields are errors; markdown agent files (`Reviewer: agents/reviewer.md`); old `Orchestration:` files and `agentFile:` agents are rejected with a pointer to `fuseraft migrate`.
+- `src/Cli/Team/TeamSchema.cs` — the JSON Schema (`fuseraft schema`). Regenerate `schema/team.schema.json` with `fuseraft schema -o schema/team.schema.json` when a team record changes; `TeamSchemaTests` fails until you do.
 - `src/Cli/Team/TeamCompiler.cs` — compiles a team into the runtime `OrchestrationConfig`. `steps` always compile to the state machine; every edge's `requires:` becomes one contract; an edge to `end` targets an agentless terminal state that ends the run.
 - `src/Cli/Team/TeamChecks.cs` — the gate vocabulary. Each check compiles to contract predicates; history-based checks compile to a `Validator` predicate that runs the routing validator through `ContractEngine`.
 - `src/Cli/Team/TeamPrompt.cs` — the generated "Team protocol" section (artifacts, routes, gates) appended to each agent's instructions.
-- `src/Cli/Team/LegacyConfigConverter.cs` — `fuseraft migrate`: old `Orchestration:` files to team files.
+- `src/Cli/Team/LegacyConfigConverter.cs` — `fuseraft migrate`: old `Orchestration:` files to team files. `AgentFileMigrator.cs` does the same for `agentFile:` agents.
+
+Team files are declarative only: don't add includes, overlays, inheritance, variables or expressions (see `docs/design.md#4-configuration`). Reuse is a markdown agent file or a global setting in `~/.fuseraft/config`.
 
 `OrchestrationConfig` and its records are now an internal compile target. Every user-visible fact (a path, a route, an end condition) must have exactly one home in the team file; don't add a team field that duplicates one, and don't add a field that is ignored in some mode — make it a load error instead.
 
@@ -209,7 +212,7 @@ When adding a new `FailureAction` or `FailureType` value, update:
 | How are contracts evaluated? | `src/Orchestration/Contracts/ContractEngine.cs` |
 | What tools do agents have? | `src/Infrastructure/Plugins/` |
 | How is the config schema defined? | User-facing: `src/Core/Models/Team/TeamConfig.cs`. Runtime compile target: `src/Core/Models/Orchestration/OrchestrationConfig.cs` and friends |
-| How does AgentFile loading work? | `src/Cli/Team/TeamConfigLoader.cs` → `MergeAgentFile` |
+| How are markdown agent files loaded? | `src/Cli/Team/TeamConfigLoader.cs` → `ReadAgentMarkdown` |
 | How does compaction work? | `src/Orchestration/ConversationCompactor.cs` |
 | How does change tracking work? | `src/Orchestration/ChangeTracker.cs` |
 | How is agent context assembled? | `src/Orchestration/ContextAssemblyPipeline.cs` (main entry point, stages 1–6); `src/Orchestration/ContextAssembler.cs` (per-agent assembled contexts) |

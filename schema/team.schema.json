@@ -1,0 +1,1224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/schema/team.schema.json",
+  "title": "fuseraft team",
+  "description": "A fuseraft team file. See docs/configuration.md.",
+  "type": "object",
+  "properties": {
+    "team": {
+      "type": "string"
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "models": {
+      "type": "object",
+      "description": "Named model aliases that agents and patterns refer to by name.",
+      "additionalProperties": {
+        "$ref": "#/$defs/model"
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "shape": true
+        },
+        "additionalProperties": false
+      }
+    },
+    "agents": {
+      "type": "object",
+      "description": "Agents keyed by name: an inline map, or the path of a markdown agent file.",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "\\.md$",
+            "description": "A markdown file, relative to the team file: frontmatter holds the agent\u0027s fields, the body is its instructions."
+          },
+          {
+            "$ref": "#/$defs/agent"
+          }
+        ]
+      }
+    },
+    "flow": {
+      "description": "Either start \u002B steps, or a pattern with its fields.",
+      "anyOf": [
+        {
+          "type": "object",
+          "description": "A state machine: each step is named after its agent and lists that agent\u0027s outgoing edges.",
+          "properties": {
+            "start": {
+              "type": "string",
+              "description": "The agent that runs first."
+            },
+            "steps": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/edge"
+                }
+              }
+            }
+          },
+          "required": [
+            "start",
+            "steps"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "model": {
+              "$ref": "#/$defs/model"
+            },
+            "instructions": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "maxRoundCount": {
+              "type": "integer"
+            },
+            "maxStallCount": {
+              "type": "integer"
+            },
+            "maxResetCount": {
+              "type": "integer"
+            },
+            "enablePlanReview": {
+              "type": "boolean"
+            },
+            "pattern": {
+              "const": "magentic"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "pattern"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "stages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "generator": {
+                    "type": "string"
+                  },
+                  "critic": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "rounds": {
+              "type": "integer"
+            },
+            "passKeyword": {
+              "type": "string"
+            },
+            "pattern": {
+              "const": "adversarial"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "pattern"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "splitter": {
+              "type": "string"
+            },
+            "mapper": {
+              "type": "string"
+            },
+            "reducer": {
+              "type": "string"
+            },
+            "itemsJsonPath": {
+              "type": "string"
+            },
+            "maxConcurrency": {
+              "type": "integer"
+            },
+            "maxSplitterRetries": {
+              "type": "integer"
+            },
+            "pattern": {
+              "const": "mapreduce"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "pattern"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "synthesizer": {
+              "type": "string"
+            },
+            "maxConcurrency": {
+              "type": "integer"
+            },
+            "pattern": {
+              "const": "scattergather"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "pattern"
+          ]
+        }
+      ]
+    },
+    "limits": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "maxTurns": {
+          "type": "integer"
+        },
+        "maxTokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "security": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "fileSystemSandboxPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "httpAllowedHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowPrivateHosts": {
+          "type": "boolean"
+        },
+        "readFileSizeLimit": {
+          "type": "integer"
+        },
+        "changeEnvelope": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "fileSystemPermissions": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "read": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "write": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "deny": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "shellPolicy": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allowMode": {
+              "type": "string"
+            },
+            "allowSegments": {
+              "type": "boolean"
+            },
+            "deny": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "denyCredentialFiles": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "mcpServers": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string"
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "workingDirectory": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "transportMode": {
+            "type": "string"
+          },
+          "oAuth": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "clientId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "clientSecret": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "callbackPort": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "advanced": {
+      "type": "object",
+      "properties": {
+        "systemPromptPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "systemPrompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "warnTurnTokens": {
+          "type": "integer"
+        },
+        "contextBudget": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "warnAt": {
+              "type": "integer"
+            },
+            "cutoverAt": {
+              "type": "integer"
+            },
+            "maxSingleTurnInputTokens": {
+              "type": "integer"
+            },
+            "maxToolResultTokens": {
+              "type": "integer"
+            },
+            "inTurnToolWindow": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "compaction": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "triggerTurnCount": {
+              "type": "integer"
+            },
+            "keepRecentTurns": {
+              "type": "integer"
+            },
+            "model": {
+              "$ref": "#/$defs/model"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "tokenBudget": {
+              "type": "integer"
+            },
+            "includeReasoning": {
+              "type": "boolean"
+            },
+            "includeSymbolGraph": {
+              "type": "boolean"
+            },
+            "includeExploration": {
+              "type": "boolean"
+            },
+            "pinLastRoutingSignal": {
+              "type": "boolean"
+            },
+            "summaryTemplate": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "maxCharsPerHistoryMessage": {
+              "type": "integer"
+            },
+            "antiThrashMinSavingsRatio": {
+              "type": "number"
+            },
+            "antiThrashWindow": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "scratchpad": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "basePath": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "chatroom": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "telemetry": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "otlpEndpoint": {
+              "type": "string"
+            },
+            "serviceName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "checkpoint": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string"
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "apiProfiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "baseUrl": {
+                "type": "string"
+              },
+              "defaultHeaders": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "timeoutSeconds": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "verifier": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "agentName": {
+              "type": "string"
+            },
+            "everyNTurns": {
+              "type": "integer"
+            },
+            "triggerOnSuspiciousTransition": {
+              "type": "boolean"
+            },
+            "findingsKeyword": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "failureHandling": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "missingEvidence": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "enum": [
+                    "Reinstruct",
+                    "ActivateRecovery",
+                    "EscalateToHuman",
+                    "Abort"
+                  ]
+                },
+                "threshold": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "invalidTransition": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "enum": [
+                    "Reinstruct",
+                    "ActivateRecovery",
+                    "EscalateToHuman",
+                    "Abort"
+                  ]
+                },
+                "threshold": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "conflictingEvidence": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "enum": [
+                    "Reinstruct",
+                    "ActivateRecovery",
+                    "EscalateToHuman",
+                    "Abort"
+                  ]
+                },
+                "threshold": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "noProgress": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "enum": [
+                    "Reinstruct",
+                    "ActivateRecovery",
+                    "EscalateToHuman",
+                    "Abort"
+                  ]
+                },
+                "threshold": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxConsecutiveTurnsWithoutSignal": {
+              "type": "integer"
+            },
+            "maxConsecutiveContractFailures": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "brownfield": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "entryPoints": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "discoveryBriefPath": {
+              "type": "string"
+            },
+            "conventionProfilePath": {
+              "type": "string"
+            },
+            "seedEnvelopeFromBrief": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "testSelector": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "findRelatedCommand": {
+              "type": "string"
+            },
+            "fullSuiteCommand": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "skillCuration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "libraryPath": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "minTurns": {
+              "type": "integer"
+            },
+            "digestTurns": {
+              "type": "integer"
+            },
+            "indexPath": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "indexTopN": {
+              "type": "integer"
+            },
+            "logPath": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "memory": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "webhook": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "loadUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "saveUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "timeoutSeconds": {
+                  "type": "integer"
+                },
+                "saveEveryNTurns": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "output": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "json": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "description": "Opt-in layers (compaction, verifier, telemetry, ...)."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "team",
+    "agents",
+    "flow"
+  ],
+  "$defs": {
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "modelId": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "endpoint": {
+              "type": "string"
+            },
+            "apiKeyEnvVar": {
+              "type": "string"
+            },
+            "apiKey": {
+              "type": "string"
+            },
+            "apiKeyOrigin": {
+              "type": "string"
+            },
+            "apiKeys": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "apiKeyEnvVars": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "maxTokens": {
+              "type": "integer"
+            },
+            "maxContextTokens": {
+              "type": "integer"
+            },
+            "maxPayloadBytes": {
+              "type": "integer"
+            },
+            "temperature": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "reasoningEffort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "falloverModels": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/model"
+              }
+            },
+            "falloverOn": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "$ref": "#/$defs/model"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reads": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sees": {
+          "enum": [
+            "handoff",
+            "conversation",
+            "fork"
+          ]
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "remoteAgent": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "timeoutSeconds": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "advanced": {
+          "type": "object",
+          "properties": {
+            "functionChoice": {
+              "type": "string"
+            },
+            "trustScore": {
+              "type": "number"
+            },
+            "contextWindow": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "textOnly": {
+                  "type": "boolean"
+                },
+                "excludeAgents": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "maxTailMessages": {
+                  "type": "integer"
+                },
+                "maxTurnAge": {
+                  "type": "integer"
+                },
+                "maxToolResultChars": {
+                  "type": "integer"
+                },
+                "maxReplayChars": {
+                  "type": "integer"
+                },
+                "toolResultCharOverrides": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "context": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string"
+                  },
+                  "maxChars": {
+                    "type": "integer"
+                  },
+                  "label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "skipExecutionState": {
+              "type": "boolean"
+            },
+            "capabilities": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxToolCallsPerTurn": {
+              "type": "integer"
+            },
+            "maxInTurnContextTokens": {
+              "type": "integer"
+            },
+            "maxInTurnToolPairs": {
+              "type": "integer"
+            },
+            "knowledgeWeight": {
+              "enum": [
+                "None",
+                "Low",
+                "Default",
+                "High"
+              ]
+            },
+            "subagentModel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subagentPlugins": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "subagentMaxToolCalls": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Per-agent knobs."
+        }
+      },
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "description": "An agent, a list of agents, or end.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "description": "The route name the agent hands off with."
+        },
+        "when": {
+          "type": "string",
+          "description": "When the agent should take this edge."
+        },
+        "requires": {
+          "description": "Gates that must pass before the handoff takes effect.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "description": "A gate check name or an artifact name."
+                  },
+                  {
+                    "type": "object",
+                    "description": "A gate check with its argument and options."
+                  }
+                ]
+              }
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "A gate check name or an artifact name."
+                },
+                {
+                  "type": "object",
+                  "description": "A gate check with its argument and options."
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onStuck": {
+          "type": "string",
+          "description": "An agent to hand to, or abort, when the gates keep failing."
+        },
+        "join": {
+          "type": "string"
+        },
+        "merge": {
+          "type": "object",
+          "properties": {
+            "strategy": {
+              "enum": [
+                "Union",
+                "Consensus",
+                "Vote",
+                "Ranked",
+                "SemanticDiff"
+              ]
+            },
+            "agent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "conflictResolution": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxRevisits": {
+          "type": "integer"
+        },
+        "approve": {
+          "type": "boolean",
+          "description": "Ask a person before the handoff takes effect."
+        }
+      },
+      "required": [
+        "to"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

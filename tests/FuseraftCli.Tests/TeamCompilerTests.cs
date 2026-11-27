@@ -424,20 +424,74 @@ public class TeamCompilerTests : IDisposable
     public void MalformedShape_IsRejected() =>
         Assert.Contains("unknown type 'strng'", Fails(Minimal.Replace("Team: T", "Team: T\nArtifacts:\n  a: { Path: a.json, Shape: { x: strng } }")).Message);
 
-    [Fact]
-    public void AgentFile_MergesWithInlineFieldsWinning()
+    private string AgentMarkdown(string content)
     {
-        var agentPath = Path.Combine(Path.GetTempPath(), $"agent-{Guid.NewGuid():N}.yaml");
-        File.WriteAllText(agentPath, "Role: From file\nInstructions: File text.\nTools: [Shell]\n");
-        _files.Add(agentPath);
+        var path = Path.Combine(Path.GetTempPath(), $"agent-{Guid.NewGuid():N}.md");
+        File.WriteAllText(path, content);
+        _files.Add(path);
+        return path;
+    }
 
-        var cfg = Compile(Minimal.Replace("    Instructions: Write it.", $"    AgentFile: {agentPath}\n    Instructions: Inline text."));
-        var agent = cfg.Agents.Single();
+    private string WithMarkdownAgent(string content) =>
+        Minimal.Replace("  Writer:\n    Instructions: Write it.", $"  Writer: {AgentMarkdown(content)}");
+
+    [Fact]
+    public void MarkdownAgent_FrontmatterIsFields_BodyIsInstructions()
+    {
+        var agent = Compile(WithMarkdownAgent("---\nrole: From file\ntools: [Shell]\n---\nWrite it from the file.\n")).Agents.Single();
 
         Assert.Equal("From file", agent.Description);
-        Assert.StartsWith("Inline text.", agent.Instructions);
+        Assert.StartsWith("Write it from the file.", agent.Instructions);
         Assert.Contains("Shell", agent.Plugins);
     }
+
+    [Fact]
+    public void MarkdownAgent_RelativePath_ResolvesFromTeamFile()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"team-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(dir, "agents"));
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "agents", "writer.md"), "---\nrole: Writes\n---\nWrite it.\n");
+            var team = Path.Combine(dir, "team.yaml");
+            File.WriteAllText(team, Minimal.Replace("  Writer:\n    Instructions: Write it.", "  Writer: agents/writer.md"));
+
+            Assert.Equal("Writes", TeamConfigLoader.LoadAndCompile(team).Agents.Single().Description);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void MarkdownAgent_UnknownField_IsRejectedNamingTheFile()
+    {
+        var ex = Fails(WithMarkdownAgent("---\nrole: R\ncolour: blue\n---\nWrite it.\n"));
+        Assert.Contains("unknown field 'colour'", ex.Message);
+        Assert.Contains(".md)", ex.Message);
+    }
+
+    [Fact]
+    public void MarkdownAgent_InstructionsInFrontmatter_IsRejected() =>
+        Assert.Contains("the markdown body is the instructions", Fails(WithMarkdownAgent("---\ninstructions: x\n---\nWrite it.\n")).Message);
+
+    [Fact]
+    public void MarkdownAgent_WithoutFrontmatter_IsRejected() =>
+        Assert.Contains("must start with a '---'", Fails(WithMarkdownAgent("Write it.\n")).Message);
+
+    [Fact]
+    public void MarkdownAgent_EmptyBody_NeedsInstructions() =>
+        Assert.Contains("instructions: required", Fails(WithMarkdownAgent("---\nrole: R\n---\n")).Message);
+
+    [Fact]
+    public void MarkdownAgent_Missing_IsRejected() =>
+        Assert.Contains("not found", Fails(Minimal.Replace("  Writer:\n    Instructions: Write it.", "  Writer: nowhere/writer.md")).Message);
+
+    [Fact]
+    public void AgentStringThatIsntMarkdown_IsRejected() =>
+        Assert.Contains("isn't a markdown file", Fails(Minimal.Replace("  Writer:\n    Instructions: Write it.", "  Writer: agents/writer.yaml")).Message);
+
+    [Fact]
+    public void AgentFile_PointsToMigrate() =>
+        Assert.Contains("fuseraft migrate", Fails(Minimal.Replace("    Instructions: Write it.", "    agentFile: agents/w.yaml\n    Instructions: Write it.")).Message);
 
     [Fact]
     public void RemoteAgent_IsToldToWriteTheRouteName()
@@ -580,17 +634,8 @@ public class TeamCompilerTests : IDisposable
         Assert.Contains("flow.steps.Writer[0]: 'to' and 'To'", Fails(MinimalCamel.Replace("      - to: end", "      - to: end\n        To: end")).Message);
 
     [Fact]
-    public void AgentFile_MergesAcrossCases_InlineWinning()
-    {
-        var agentPath = Path.Combine(Path.GetTempPath(), $"agent-{Guid.NewGuid():N}.yaml");
-        File.WriteAllText(agentPath, "Role: From file\nInstructions: File text.\n");
-        _files.Add(agentPath);
-
-        var cfg = Compile(MinimalCamel.Replace("    instructions: Write it.", $"    agentFile: {agentPath}\n    instructions: Inline text."));
-
-        Assert.StartsWith("Inline text.", cfg.Agents.Single().Instructions);
-        Assert.Equal("From file", cfg.Agents.Single().Description);
-    }
+    public void MarkdownAgent_FieldWrittenTwiceInDifferentCases_IsRejected() =>
+        Assert.Contains("'role' and 'Role'", Fails(WithMarkdownAgent("---\nrole: a\nRole: b\n---\nWrite it.\n")).Message);
 
     [Fact]
     public void ArtifactNamedLikeACheckInAnyCase_IsRejected() =>

@@ -326,8 +326,9 @@ public static class OrchestratorBuilder
         string? ReadCachePath,
         Action<string?> RebindSessionScopedState);
 
-    // A server-provided MCP server serves every run on the machine, so it's connected only for a config whose agents
-    // name it in Plugins, and one that's down costs that agent its tools rather than failing the run.
+    // A global MCP server (saved in ~/.fuseraft/config, or provided by the launcher) serves every run on the machine, so
+    // it's connected only for a config whose agents name it in Plugins, and one that's down costs that agent its tools
+    // rather than failing the run.
     internal static async Task ConnectManagedMcpServersAsync(OrchestrationConfig config, IReadOnlyList<McpServerConfig> managed,
         McpSessionManager mcpManager, PluginRegistry pluginRegistry, ILogger logger, CancellationToken cancellationToken)
     {
@@ -338,13 +339,13 @@ public static class OrchestratorBuilder
             {
                 var (_, tools) = await mcpManager.ConnectSingleAsync(server, cancellationToken);
                 pluginRegistry.RegisterAIFunctions(server.Name, tools);
-                logger.LogInformation("Connected server-provided MCP server '{Name}' ({Count} tool(s)).", server.Name, tools.Count);
+                logger.LogInformation("Connected global MCP server '{Name}' ({Count} tool(s)).", server.Name, tools.Count);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 // Registered empty, so an agent that lists it still builds instead of failing on an unknown plugin.
                 pluginRegistry.RegisterAIFunctions(server.Name, []);
-                logger.LogWarning("Could not connect server-provided MCP server '{Name}': {Error}. Agents that list it run without its tools.",
+                logger.LogWarning("Could not connect global MCP server '{Name}': {Error}. Agents that list it run without its tools.",
                     server.Name, ex.Message);
             }
         }
@@ -367,7 +368,7 @@ public static class OrchestratorBuilder
         if (config.McpServers.Count > 0)
             await mcpManager.InitializeAsync(config.McpServers, pluginRegistry, cancellationToken);
         var mcpLogger  = loggerFactory.CreateLogger("fuseraft.Mcp");
-        var managedMcp = ManagedMcpServers.Load(out var managedMcpError);
+        var managedMcp = ManagedMcpServers.Merge(ReplMcpServerStore.Load(), ManagedMcpServers.Load(out var managedMcpError));
         if (managedMcpError is not null) mcpLogger.LogWarning("{Error}", managedMcpError);
         await ConnectManagedMcpServersAsync(config, managedMcp, mcpManager, pluginRegistry, mcpLogger, cancellationToken);
 

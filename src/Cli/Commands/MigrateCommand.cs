@@ -9,7 +9,7 @@ namespace fuseraft.Cli.Commands;
 public sealed class MigrateSettings : CommandSettings
 {
     [CommandArgument(0, "<path>")]
-    [Description("Config file in the old 'Orchestration:' format.")]
+    [Description("Config file in the old 'Orchestration:' format, or a team file whose agents use agentFile.")]
     public string Path { get; init; } = string.Empty;
 
     [CommandOption("-w|--write")]
@@ -17,11 +17,17 @@ public sealed class MigrateSettings : CommandSettings
     public bool Write { get; init; }
 }
 
-/// <summary>Converts a pre-v2 <c>Orchestration:</c> config into a v2 team file.</summary>
+/// <summary>Converts a pre-v2 <c>Orchestration:</c> config into a v2 team file, or a team's <c>agentFile</c> agents into markdown files.</summary>
 public sealed class MigrateCommand : Command<MigrateSettings>
 {
     public override int Execute(CommandContext context, MigrateSettings settings, CancellationToken cancellationToken)
     {
+        if (File.Exists(settings.Path) && TryReadTeam(settings.Path) is { } team)
+            return AgentFileMigrator.Applies(team)
+                ? MigrateAgentFiles(settings)
+                : Done($"{settings.Path} is already a current team file; nothing to migrate.");
+
+        var innerComments = File.Exists(settings.Path) ? InnerComments(settings.Path) : 0;
         LegacyConfigConverter.Result result;
         try
         {
@@ -45,10 +51,71 @@ public sealed class MigrateCommand : Command<MigrateSettings>
             Console.Out.Write(result.Yaml);
         }
 
-        if (InnerComments(settings.Path) > 0)
+        if (innerComments > 0)
             Console.Error.WriteLine("note: comments inside the file weren't carried over; only the leading comment block was kept.");
         foreach (var note in result.Notes)
             Console.Error.WriteLine($"note: {note}");
+        return 0;
+    }
+
+    private static int MigrateAgentFiles(MigrateSettings settings)
+    {
+        var innerComments = InnerComments(settings.Path);
+        AgentFileMigrator.Result result;
+        try
+        {
+            result = AgentFileMigrator.Convert(settings.Path, LeadingComments(settings.Path));
+            CheckCompiles(settings.Path, result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]✗[/] {Markup.Escape(ex.Message)}");
+            return 1;
+        }
+
+        if (settings.Write)
+        {
+            foreach (var (path, content) in result.Files)
+            {
+                File.WriteAllText(path, content);
+                AnsiConsole.MarkupLine($"[green]✓[/] Wrote {Markup.Escape(Path.GetRelativePath(".", path))}");
+            }
+            File.WriteAllText(settings.Path, result.TeamText);
+            AnsiConsole.MarkupLine($"[green]✓[/] Converted {Markup.Escape(settings.Path)}");
+        }
+        else
+        {
+            Console.Out.Write(result.TeamText);
+            foreach (var (path, _) in result.Files)
+                Console.Error.WriteLine($"note: would write {Path.GetRelativePath(".", path)}; rerun with --write to write it.");
+        }
+
+        if (innerComments > 0)
+            Console.Error.WriteLine("note: comments inside the file weren't carried over; only the leading comment block was kept.");
+        foreach (var note in result.Notes)
+            Console.Error.WriteLine($"note: {note}");
+        return 0;
+    }
+
+    // A result that wouldn't load is never written.
+    private static void CheckCompiles(string teamPath, AgentFileMigrator.Result result) =>
+        TeamCompiler.Compile(TeamConfigLoader.Load(
+            TeamConfigLoader.ParseObject(result.TeamText, teamPath), teamPath,
+            result.Files.ToDictionary(f => f.Path, f => f.Content)));
+
+    private static System.Text.Json.Nodes.JsonObject? TryReadTeam(string path)
+    {
+        try
+        {
+            var root = TeamConfigLoader.ReadObject(path);
+            return TeamConfigLoader.Find(root, "Team") is not null ? root : null;
+        }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    private static int Done(string message)
+    {
+        AnsiConsole.MarkupLine($"[green]✓[/] {Markup.Escape(message)}");
         return 0;
     }
 

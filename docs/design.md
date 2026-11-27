@@ -147,7 +147,7 @@ All paths are configurable via their corresponding config keys. The table above 
 
 Users write a **team file** (`team`, `models`, `artifacts`, `agents`, `flow`, `limits`, `security`, `mcpServers`, `advanced`; see [Configuration](configuration.md)). Keys are written in camelCase and matched case-insensitively, so a PascalCase file still loads; a field written twice in different cases is an error. It is never executed directly. Loading runs in two stages:
 
-1. **`TeamConfigLoader`** reads YAML or JSON strictly: every unknown field is an error, a field written twice in different cases is an error, `agentFile` references are merged, and an old `Orchestration:` file is rejected with a pointer to `fuseraft migrate`.
+1. **`TeamConfigLoader`** reads YAML or JSON strictly: every unknown field is an error, a field written twice in different cases is an error, an agent written as a `.md` path is read from that file (frontmatter fields, body as instructions, checked as strictly as the team file), and an old `Orchestration:` file or an `agentFile:` agent is rejected with a pointer to `fuseraft migrate`.
 2. **`TeamCompiler`** compiles the `TeamConfig` into the runtime `OrchestrationConfig`, which everything below consumes.
 
 The compiler is where the format's "say each fact once" rule pays off:
@@ -168,7 +168,9 @@ The compiler is where the format's "say each fact once" rule pays off:
 
 **Environment variable expansion** for `security.httpAllowedHosts`, `advanced.apiProfiles[*].baseUrl`, and all `apiProfiles` header values is performed at startup via `${ENV_VAR}` tokens. Credentials never appear in agent instructions or conversation history.
 
-**Config formats:** Both JSON (`.json`) and YAML (`.yaml` / `.yml`) are supported. YAML is converted to JSON by `YamlConfigLoader.ConvertYamlToJson`, then bound with `System.Text.Json` using `JsonUnmappedMemberHandling.Disallow`.
+**Config formats:** Both JSON (`.json`) and YAML (`.yaml` / `.yml`) are supported. YAML is converted to JSON by `YamlConfigLoader.ConvertYamlToJson`, then bound with `System.Text.Json` using `JsonUnmappedMemberHandling.Disallow`. `TeamSchema` exports the same records as a JSON Schema (`fuseraft schema`, `schema/team.schema.json`); `TeamSchemaTests` keeps the checked-in file current and checks every example and `init` template against it.
+
+**Team files stay declarative.** A team file has no includes, overlays, inheritance, variables or expressions, and an agent file is a whole agent rather than a base that inline fields override. Each of those would add a rule a reader has to apply in their head (which value wins, where a field came from) and would move part of the flow outside what the compiler can see; the gates-before-handoff invariant holds because the whole flow is data the compiler checks before the first turn. Reuse has two forms only: an agent in its own markdown file, and global settings (default model, saved MCP servers) in `~/.fuseraft/config`. Anything that needs logic belongs in a script that generates a team file, the way CDK generates CloudFormation: code produces the file, and only the file runs.
 
 ---
 

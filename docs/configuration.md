@@ -31,7 +31,17 @@ An agent with no `model` uses your default model from `~/.fuseraft/config`. See 
 
 **Keys are camelCase** (`maxTurns`, `onStuck`), as in every example here. Matching ignores case, so a file written in PascalCase still loads, but writing the same field twice in different cases is an error. Names you choose (agents, artifacts, model aliases, environment variables) are used exactly as written, and an artifact can't share a gate's name: call a test report artifact `testResults`, not `testReport`.
 
-> **Upgrading an older config?** Files that start with `Orchestration:` use the previous format. Convert one with `fuseraft migrate <file>` (prints the result) or `fuseraft migrate <file> --write` (overwrites it). The converter keeps the leading comment block and notes anything it had to approximate.
+> **Upgrading an older config?** Files that start with `Orchestration:` use the previous format, and agents that use `agentFile:` use the previous kind of agent file. Convert either with `fuseraft migrate <file>` (prints the result) or `fuseraft migrate <file> --write` (overwrites it and writes any new agent files). The converter keeps the leading comment block and notes anything it had to approximate.
+
+**Editor support.** `fuseraft schema` prints the team file's JSON Schema, which is also published at [`schema/team.schema.json`](https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/schema/team.schema.json). With the YAML language server (VS Code's YAML extension, for example), add this as the file's first line to get completion and inline errors:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fuseraft/fuseraft-cli/main/schema/team.schema.json
+```
+
+The schema describes the camelCase spelling. `fuseraft validate` remains the full check: it also catches what a schema can't, such as a flow naming an agent that isn't declared.
+
+**Team files are data, not code.** There are no includes, overlays, variables or expressions, so every team file reads the same way and its handoff gates can always be checked before a run starts. To share an agent between teams, give it its own [markdown file](#agent-files). If you need logic (one team per environment, generated agent lists), write a script in any language that produces the team file, and check the result with `fuseraft validate`.
 
 ---
 
@@ -43,11 +53,11 @@ An agent with no `model` uses your default model from `~/.fuseraft/config`. See 
 | `description` | no | One-line summary. |
 | `models` | no | Named model aliases. See [Models](models.md). |
 | `artifacts` | no | Files agents exchange, each declared once. See [Artifacts](#artifacts). |
-| `agents` | yes | Agents keyed by name. See [Agents](#agents). |
+| `agents` | yes | Agents keyed by name, each written inline or in its own markdown file. See [Agents](#agents). |
 | `flow` | yes | Who runs next, and what each handoff requires. See [Flow](#flow). |
 | `limits` | no | Hard caps on a run. See [Limits](#limits). |
 | `security` | no | Sandbox, permissions and network rules. See [Security](#security). |
-| `mcpServers` | no | MCP servers whose tools agents can use. See [MCP](mcp.md). |
+| `mcpServers` | no | MCP servers whose tools agents can use. An agent can also name a server saved in `~/.fuseraft/config` (with the REPL's `/mcp add`) without declaring it here. See [MCP](mcp.md). |
 | `advanced` | no | Opt-in layers: compaction, verifier, telemetry and more. See [Advanced](#advanced). |
 
 ---
@@ -126,7 +136,6 @@ agents:
 | `writes` | Artifacts this agent writes. Their paths and shapes go into its prompt. |
 | `sees` | `handoff` (default), `conversation` or `fork`. See below. |
 | `instructions` | Required. What the agent does and how. |
-| `agentFile` | Load this agent's fields from a separate YAML file. See [Agent files](#agent-files). |
 | `remoteAgent` | Run this agent on a remote A2A server. See [`remoteAgent`](#remoteagent). |
 | `advanced` | Per-agent knobs. See [Advanced agent fields](#advanced-agent-fields). |
 
@@ -201,26 +210,27 @@ Tools not in this map, such as MCP tools, always pass through.
 
 ### Agent files
 
-`agentFile` loads an agent's fields from a separate YAML file, so one agent definition can be shared across teams. The file holds the same fields as an inline agent (an `agent:` wrapper key is also accepted). Inline fields win over the file's.
+Instead of a map, an agent can be the path of a markdown file. The YAML frontmatter holds the same fields as an inline agent, and the body is its `instructions`. This is how one agent definition is shared across teams.
 
-```yaml
-# agents/reviewer.yaml
+```markdown
+---
 role: Reviews changes for correctness and test coverage.
+model: reasoning
 tools: [FileSystem, Git, Changes]
-instructions: |
-  You are a senior engineer reviewing code changes...
 advanced:
   functionChoice: required
+---
+You are a senior engineer reviewing code changes...
 ```
 
 ```yaml
 agents:
-  Reviewer:
-    agentFile: agents/reviewer.yaml
-    model: reasoning        # inline fields win over the file
+  Reviewer: agents/reviewer.md
 ```
 
-Relative paths resolve from the team file's directory. A missing file is a load error.
+The file is the whole agent: there's no merging with inline fields, so a team that needs a different model for the reviewer uses a different file. Paths are relative to the team file. A missing file, a file without a `---` frontmatter block, an unknown field, and an `instructions` field in the frontmatter (the body is the instructions) are load errors that name the file.
+
+Team agent files use the team's fields (`role`, `tools` as tool groups, `reads`, `writes`, ...). They aren't the same as the REPL's [subagent files](subagents.md), whose frontmatter uses `description`, `tools` as tool names and `max_iterations`.
 
 ### Subagent
 
