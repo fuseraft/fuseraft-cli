@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using fuseraft.Cli.Commands.Repl;
+using fuseraft.Core;
 
 namespace FuseraftCli.Tests;
 
@@ -40,6 +41,27 @@ public sealed class ReplTurnTrimHistoryTests
 
         Assert.Equal(2, removed);
         Assert.Equal(["sys", summary, "kept round", "latest", "latest reply"], history.Select(m => m.Text));
+    }
+
+    // A provider's prompt cache serves a request only up to its first changed message. Dropping one turn per turn once
+    // the history was full changed the first message after the system prompt on every turn.
+    [Fact]
+    public void TrimHistory_AfterATrim_TheNextTurnsOnlyAppend()
+    {
+        var history = new List<ChatMessage> { new(ChatRole.System, "sys") };
+        void AddTurn(int i) { history.Add(User($"turn {i} " + new string('a', 4_000))); history.Add(Assistant("ok")); }
+        for (var i = 0; i < 10; i++) AddTurn(i);
+        var budget = (int)(history.Sum(m => TokenEstimator.EstimateTokens(m.Text.Length)) * 0.95);
+
+        Assert.True(ReplTurn.TrimHistory(history, budget) > 2);
+
+        for (var i = 10; i < 13; i++)
+        {
+            var before = history.Select(m => m.Text).ToList();
+            AddTurn(i);
+            Assert.Equal(0, ReplTurn.TrimHistory(history, budget));
+            Assert.Equal(before, history.Take(before.Count).Select(m => m.Text));
+        }
     }
 
     [Fact]
