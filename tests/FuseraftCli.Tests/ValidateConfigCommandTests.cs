@@ -180,6 +180,29 @@ public class ValidateConfigCommandTests : IDisposable
         Assert.Equal("Test", config.GetProperty("name").GetString());
         Assert.Equal("A", Assert.Single(config.GetProperty("agents").EnumerateArray()).GetString());
         Assert.Equal("statemachine", config.GetProperty("selectionType").GetString());
+        Assert.Empty(config.GetProperty("agentFiles").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Json_MissingAgentFile_StillListsTheTeamsAgentFiles()
+    {
+        var path = Yaml("""
+            team: Test
+            agents:
+              A: agents/a.md
+            flow:
+              start: A
+              steps:
+                A:
+                  - to: end
+            """);
+        var (exit, issues, item) = await Validate(path);
+
+        Assert.Equal(1, exit);
+        HasError(issues, "a.md");
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("config").ValueKind);
+        var file = Assert.Single(item.GetProperty("agentFiles").EnumerateArray()).GetString();
+        Assert.Equal(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!, "agents", "a.md"), file);
     }
 
     [Fact]

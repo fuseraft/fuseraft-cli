@@ -59,6 +59,34 @@ public sealed class ShowConfigCommandTests : IDisposable
     }
 
     [Fact]
+    public void ListJson_ReportsMarkdownAgentFiles_EvenWhenOneIsMissing()
+    {
+        const string flow = """
+            flow:
+              start: Dev
+              steps:
+                Dev:
+                  - to: end
+            """;
+        File.WriteAllText(Path.Combine(_dir, "agents", "dev.md"), "---\nmodel: gpt-4o\n---\nbuild\n");
+        File.WriteAllText(Path.Combine(_dir, "ok.yaml"), "team: Ok\nagents:\n  Dev: agents/dev.md\n" + flow);
+        File.WriteAllText(Path.Combine(_dir, "gap.yaml"),
+            "team: Gap\nagents:\n  Dev: agents/dev.md\n  Inline:\n    instructions: x\n    model: gpt-4o\n  Lost: agents/lost.md\n" + flow);
+
+        Assert.Equal(0, Run(new ShowConfigSettings { List = true, Json = true, Dir = _dir }));
+
+        using var doc = JsonDocument.Parse(_out.ToString());
+        var items = doc.RootElement.GetProperty("items").EnumerateArray().ToList();
+        string[] Files(string name) => [.. items.Single(i => i.GetProperty("path").GetString()!.EndsWith(name))
+            .GetProperty("agentFiles").EnumerateArray().Select(f => f.GetString()!)];
+
+        var dev = Path.Combine(_dir, "agents", "dev.md");
+        Assert.Equal([dev], Files("ok.yaml"));
+        Assert.Equal([dev, Path.Combine(_dir, "agents", "lost.md")], Files("gap.yaml"));
+        Assert.Contains("lost.md", items.Single(i => i.GetProperty("path").GetString()!.EndsWith("gap.yaml")).GetProperty("error").GetString());
+    }
+
+    [Fact]
     public void ListJson_MissingDir_IsErrorEnvelope()
     {
         Assert.Equal(1, Run(new ShowConfigSettings { List = true, Json = true, Dir = Path.Combine(_dir, "absent") }));
