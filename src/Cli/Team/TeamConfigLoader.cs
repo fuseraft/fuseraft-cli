@@ -30,6 +30,25 @@ public static class TeamConfigLoader
         return Load(ReadObject(path), path);
     }
 
+    /// <summary>
+    /// The full paths of the markdown agent files <paramref name="path"/> names, whether or not they exist;
+    /// empty when the file doesn't parse or names none.
+    /// </summary>
+    public static IReadOnlyList<string> AgentFilePaths(string path)
+    {
+        JsonObject root;
+        try { root = ReadObject(path); }
+        catch (TeamConfigException) { return []; }
+        if (Find(root, "Agents") is not { Value: JsonObject agents }) return [];
+
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".";
+        return [.. agents
+            .Select(a => a.Value is JsonValue v && v.TryGetValue<string>(out var file) ? file : null)
+            .OfType<string>()
+            .Select(file => Path.GetFullPath(Path.IsPathRooted(file) ? file : Path.Combine(dir, file)))
+            .Distinct()];
+    }
+
     /// <summary>Loads an already-parsed team file; <paramref name="pending"/> supplies agent files (by full path) not yet on disk.</summary>
     internal static TeamConfig Load(JsonObject root, string path, IReadOnlyDictionary<string, string>? pending = null)
     {

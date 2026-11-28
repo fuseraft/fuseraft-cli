@@ -157,6 +157,7 @@ A REPL chat.
 | `agents` | array | Agent names. |
 | `selectionType` | string \| null | How the flow runs: `statemachine` for a `Steps` flow, or the pattern name. |
 | `error` | string \| null | Why the file didn't load; null when it did. |
+| `agentFiles` | array | Absolute paths of the markdown agent files the team names, whether or not they exist. Empty when the file doesn't parse. Since 1.35.0. |
 
 ### Validation
 
@@ -166,6 +167,7 @@ A REPL chat.
 | `valid` | bool | No issue has level `error`. |
 | `issues` | array | `{level, message}`; `level` is `error` or `warning`. |
 | `config` | [ConfigSummary](#configsummary) \| null | Null when the file didn't parse. |
+| `agentFiles` | array | As in [ConfigSummary](#configsummary), and there even when the team doesn't load, such as when an agent file it names is missing. Since 1.35.0. |
 
 ### Template
 

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using fuseraft.Cli.Commands;
 using fuseraft.Cli.Commands.Repl;
+using fuseraft.Cli.Team;
 using fuseraft.Core.Models.Agents;
 using fuseraft.Core.Models.Config;
 using fuseraft.Core.Models.Knowledge;
@@ -53,28 +54,30 @@ public sealed record WireToolCall(string Name, string? ArgsSummary, bool Succeed
 
 /// <summary>A config file from <c>fuseraft config --list --json</c>; <c>Error</c> is set when it doesn't load.</summary>
 public sealed record WireConfigSummary(
-    string Path, string? Name, string? Description, IReadOnlyList<string> Agents, string? SelectionType, string? Error)
+    string Path, string? Name, string? Description, IReadOnlyList<string> Agents, string? SelectionType, string? Error,
+    IReadOnlyList<string> AgentFiles)
 {
     public static WireConfigSummary From(string path, OrchestrationConfig c) => new(
         System.IO.Path.GetFullPath(path), c.Name, c.Description,
-        [.. c.Agents.Select(a => a.Name)], c.Selection.Type, null);
+        [.. c.Agents.Select(a => a.Name)], c.Selection.Type, null, TeamConfigLoader.AgentFilePaths(path));
 
     public static WireConfigSummary Failed(string path, string error) =>
-        new(System.IO.Path.GetFullPath(path), null, null, [], null, error);
+        new(System.IO.Path.GetFullPath(path), null, null, [], null, error, TeamConfigLoader.AgentFilePaths(path));
 }
 
 /// <summary>
 /// The result of <c>fuseraft validate --json</c>. <c>Valid</c> is false when any issue's <c>Level</c> is
 /// <c>error</c>; <c>Config</c> is null when the file didn't load far enough to summarise.
 /// </summary>
-public sealed record WireValidation(string Path, bool Valid, IReadOnlyList<WireIssue> Issues, WireConfigSummary? Config)
+public sealed record WireValidation(
+    string Path, bool Valid, IReadOnlyList<WireIssue> Issues, WireConfigSummary? Config, IReadOnlyList<string> AgentFiles)
 {
     public static WireValidation From(
         string path, IEnumerable<(string Level, string Message)> issues, OrchestrationConfig? config)
     {
         var list = issues.Select(i => new WireIssue(i.Level, i.Message)).ToList();
         return new(System.IO.Path.GetFullPath(path), list.All(i => i.Level != "error"), list,
-            config is null ? null : WireConfigSummary.From(path, config));
+            config is null ? null : WireConfigSummary.From(path, config), TeamConfigLoader.AgentFilePaths(path));
     }
 }
 
