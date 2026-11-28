@@ -496,6 +496,8 @@ Prefix any line with `!` to run it as a real shell command without leaving the R
 
 `/model <id>` switches the LLM mid-session without clearing history. `/reasoning <effort>` adjusts the reasoning depth of the current model without switching it. Both can be combined: `/model grok-4.3 high` switches to grok-4.3 and sets high reasoning effort in a single command.
 
+`/model` stays on the session's connection, the server `/models` lists, when that connection was named: an endpoint or provider in `~/.fuseraft/config`, `--endpoint` or `--provider`, or a key a host injected. Only the model changes, so a gateway can switch to any model it serves, including other vendors'. Only when the connection came from the model's name (no endpoint or provider set) does `/model` move to another provider, such as from `claude-sonnet-4-6` to `gpt-4o`. It then uses that provider's own key: the one saved for its endpoint, or its environment variable (`OPENAI_API_KEY`). The current key never goes along.
+
 Reasoning effort support and accepted values vary by provider and model — e.g. xAI `grok-4.3` accepts `none` / `low` / `medium` / `high`, and some newer models add finer tiers like `minimal` or `xhigh`/`max` for the low and high ends. `none` disables thinking tokens entirely for fast structured output; the highest tier a model supports uses maximum reasoning for complex tasks. The level is injected at the HTTP layer — no provider-specific SDK support is required, so the same mechanism works for any model that accepts a top-level `reasoning` object. fuseraft does not validate the value against a fixed list, so new provider tiers work without a CLI update; an unsupported value is rejected by the provider's API.
 
 **Sampling knobs (`/temperature`, `/top-p`, `/seed`)**

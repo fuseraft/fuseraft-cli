@@ -4,6 +4,7 @@ using Spectre.Console;
 using fuseraft.Core;
 using fuseraft.Core.Models;
 using fuseraft.Infrastructure;
+using fuseraft.Infrastructure.KeyStore;
 
 namespace fuseraft.Cli.Commands.Repl;
 
@@ -25,9 +26,48 @@ internal static class ReplFactory
             Endpoint        = connection is null ? userCfg?.Endpoint ?? string.Empty : connection.Endpoint ?? string.Empty,
             ApiKey          = userCfg?.ApiKey   ?? string.Empty,
             ApiKeyOrigin    = userCfg?.ApiKeyOrigin ?? string.Empty,
+            // provider.apiKeyEnvVar names the config's connection's key, so it goes with that connection only.
+            ApiKeyEnvVar    = connection is null ? userCfg?.ApiKeyEnvVar ?? string.Empty : string.Empty,
             Provider        = connection is null ? userCfg?.Provider ?? string.Empty : connection.Provider ?? string.Empty,
             ReasoningEffort = reasoningEffort,
         };
+
+    /// <summary>
+    /// The config for moving a session to <paramref name="modelId"/> (<c>/model</c>, <c>/switch</c>). A session whose connection was
+    /// named stays on it with its key: an endpoint or provider set in the config or by a host (--endpoint, --provider), or a key a
+    /// host injected without saying whose server it's for. That's the server /models lists, and a gateway lists other vendors'
+    /// models too. Only a session whose connection came from its model's name moves to the new model's provider, with that
+    /// provider's own key (its keychain entry or variable), never the current one.
+    /// </summary>
+    internal static async Task<ModelConfig> SwitchModelConfigAsync(ChatClientFactory factory, IApiKeyStore? keyStore,
+        ModelConfig current, string modelId, string? reasoningEffort)
+    {
+        var next = current with { ModelId = modelId, ReasoningEffort = reasoningEffort };
+        var named = !string.IsNullOrEmpty(current.Endpoint) || !string.IsNullOrEmpty(current.Provider)
+                    || (!string.IsNullOrEmpty(current.ApiKey) && string.IsNullOrEmpty(current.ApiKeyOrigin));
+        if (named)
+            return string.IsNullOrEmpty(current.Endpoint) ? next with { Endpoint = factory.EndpointOf(current) } : next;
+
+        var currentEndpoint = factory.EndpointOf(current);
+        var newEndpoint     = ChatClientFactory.EndpointFor(modelId, string.Empty, string.Empty);
+        if (ProviderKeys.Origin(newEndpoint) == ProviderKeys.Origin(currentEndpoint)) return next;
+        // A name that doesn't say its provider stays on the current server, which it can't be found from.
+        if (newEndpoint.Length == 0)
+            return currentEndpoint.Length == 0 ? next : next with { Endpoint = currentEndpoint };
+
+        string? key = null;
+        if (keyStore is not null)
+            try { key = await ProviderKeys.RetrieveAsync(keyStore, newEndpoint); }
+            catch (KeyStoreUnavailableException) { }
+        return next with
+        {
+            Provider     = string.Empty,
+            Endpoint     = string.Empty,
+            ApiKey       = key ?? string.Empty,
+            ApiKeyOrigin = key is null ? string.Empty : ProviderKeys.Origin(newEndpoint),
+            ApiKeyEnvVar = string.Empty,
+        };
+    }
 
     /// <summary>Resolves the model for a REPL side-call (<c>memory.model</c>, <c>subagent.model</c>) that may not run on the main chat model.</summary>
     // An explicit endpoint makes the connection custom and reuses the main provider's key unless another is named.

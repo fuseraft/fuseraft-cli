@@ -95,6 +95,8 @@ When `endpoint` and `apiKeyEnvVar` are not specified, they are filled in based o
 
 For any model not matching the table, specify `provider`, `endpoint`, and `apiKeyEnvVar` explicitly.
 
+A table entry's key variable goes only to that entry's endpoint. A `claude-*` model behind a gateway at another address doesn't get `ANTHROPIC_API_KEY`: name the gateway's key with `apiKeyEnvVar`, or save it for the gateway's endpoint.
+
 ---
 
 ## Global config defaults
