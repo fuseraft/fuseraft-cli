@@ -85,31 +85,50 @@ public sealed class ChatClientFactory(
     // OpenAI-compatible endpoint) is what makes prompt caching available at all. See
     // AnthropicPromptCachingChatClient for why.
     private const string AnthropicDefaultEndpoint = "https://api.anthropic.com";
+    private const string OpenAiEndpoint   = "https://api.openai.com/v1";
+    private const string XaiEndpoint      = "https://api.x.ai/v1";
+    private const string GoogleEndpoint   = "https://generativelanguage.googleapis.com/v1beta/openai";
+    private const string MistralEndpoint  = "https://api.mistral.ai/v1";
+    private const string DeepSeekEndpoint = "https://api.deepseek.com/v1";
+    private const string OllamaEndpoint   = "http://localhost:11434";
+
+    /// <summary>A provider name's public endpoint, or null for one without a default (azure, a custom server).</summary>
+    public static string? DefaultEndpoint(string provider) => provider.Trim().ToLowerInvariant() switch
+    {
+        "openai"    => OpenAiEndpoint,
+        "anthropic" => AnthropicDefaultEndpoint,
+        "xai"       => XaiEndpoint,
+        "google"    => GoogleEndpoint,
+        "mistral"   => MistralEndpoint,
+        "deepseek"  => DeepSeekEndpoint,
+        "ollama"    => OllamaEndpoint,
+        _           => null,
+    };
 
     internal const string LocalServerPlaceholderKey = "no-key";
 
     // Checked in order — put more-specific prefixes first.
     private static readonly (string Prefix, ProviderPreset Defaults)[] ModelPrefixes =
     [
-        ("gpt-",        new("openai",     "https://api.openai.com/v1",                        "OPENAI_API_KEY")),
-        ("o1",          new("openai",     "https://api.openai.com/v1",                        "OPENAI_API_KEY")),
-        ("o3",          new("openai",     "https://api.openai.com/v1",                        "OPENAI_API_KEY")),
-        ("o4",          new("openai",     "https://api.openai.com/v1",                        "OPENAI_API_KEY")),
-        ("grok-",       new("openai",     "https://api.x.ai/v1",                              "XAI_API_KEY")),
-        ("claude-",     new("anthropic",  AnthropicDefaultEndpoint,                            "ANTHROPIC_API_KEY")),
-        ("gemini-",     new("google",  "https://generativelanguage.googleapis.com/v1beta/openai", "GOOGLE_AI_API_KEY")),
-        ("learnlm-",    new("google",  "https://generativelanguage.googleapis.com/v1beta/openai", "GOOGLE_AI_API_KEY")),
-        ("mistral-",    new("mistral", "https://api.mistral.ai/v1",                           "MISTRAL_API_KEY")),
-        ("mixtral-",    new("mistral", "https://api.mistral.ai/v1",                           "MISTRAL_API_KEY")),
-        ("codestral-",  new("mistral", "https://api.mistral.ai/v1",                           "MISTRAL_API_KEY")),
-        ("pixtral-",    new("mistral", "https://api.mistral.ai/v1",                           "MISTRAL_API_KEY")),
-        ("deepseek-",   new("openai",  "https://api.deepseek.com/v1",                         "DEEPSEEK_API_KEY")),
-        ("llama",       new("ollama",  "http://localhost:11434",                               "")),
-        ("phi",         new("ollama",  "http://localhost:11434",                               "")),
-        ("qwen",        new("ollama",  "http://localhost:11434",                               "")),
-        ("gemma",       new("ollama",  "http://localhost:11434",                               "")),
-        ("codellama",   new("ollama",  "http://localhost:11434",                               "")),
-        ("smollm",      new("ollama",  "http://localhost:11434",                               "")),
+        ("gpt-",        new("openai",    OpenAiEndpoint,            "OPENAI_API_KEY")),
+        ("o1",          new("openai",    OpenAiEndpoint,            "OPENAI_API_KEY")),
+        ("o3",          new("openai",    OpenAiEndpoint,            "OPENAI_API_KEY")),
+        ("o4",          new("openai",    OpenAiEndpoint,            "OPENAI_API_KEY")),
+        ("grok-",       new("openai",    XaiEndpoint,               "XAI_API_KEY")),
+        ("claude-",     new("anthropic", AnthropicDefaultEndpoint,  "ANTHROPIC_API_KEY")),
+        ("gemini-",     new("google",    GoogleEndpoint,            "GOOGLE_AI_API_KEY")),
+        ("learnlm-",    new("google",    GoogleEndpoint,            "GOOGLE_AI_API_KEY")),
+        ("mistral-",    new("mistral",   MistralEndpoint,           "MISTRAL_API_KEY")),
+        ("mixtral-",    new("mistral",   MistralEndpoint,           "MISTRAL_API_KEY")),
+        ("codestral-",  new("mistral",   MistralEndpoint,           "MISTRAL_API_KEY")),
+        ("pixtral-",    new("mistral",   MistralEndpoint,           "MISTRAL_API_KEY")),
+        ("deepseek-",   new("openai",    DeepSeekEndpoint,          "DEEPSEEK_API_KEY")),
+        ("llama",       new("ollama",    OllamaEndpoint,            "")),
+        ("phi",         new("ollama",    OllamaEndpoint,            "")),
+        ("qwen",        new("ollama",    OllamaEndpoint,            "")),
+        ("gemma",       new("ollama",    OllamaEndpoint,            "")),
+        ("codellama",   new("ollama",    OllamaEndpoint,            "")),
+        ("smollm",      new("ollama",    OllamaEndpoint,            "")),
     ];
 
     // Public API
@@ -161,7 +180,7 @@ public sealed class ChatClientFactory(
                            && HasOllamaStyleTag(config.ModelId);
 
         ProviderPreset? detected = isOllamaTag
-            ? new ProviderPreset("ollama", "http://localhost:11434", "")
+            ? new ProviderPreset("ollama", OllamaEndpoint, "")
             : DetectFromPrefix(config.ModelId);
 
         if (detected is null)
@@ -338,7 +357,7 @@ public sealed class ChatClientFactory(
             case "ollama":
                 return new OllamaApiClient(
                     BuildOllamaHttpClient(string.IsNullOrEmpty(config.Endpoint)
-                        ? new Uri("http://localhost:11434")
+                        ? new Uri(OllamaEndpoint)
                         : new Uri(config.Endpoint)),
                     config.ModelId);
 
@@ -378,9 +397,9 @@ public sealed class ChatClientFactory(
     {
         if (!string.IsNullOrWhiteSpace(endpoint)) return endpoint.Trim();
         bool isOllamaTag = modelId.Contains(':') && !modelId.Contains("://") && HasOllamaStyleTag(modelId);
-        if (isOllamaTag) return "http://localhost:11434";
+        if (isOllamaTag) return OllamaEndpoint;
         if (DetectFromPrefix(modelId) is { } preset) return preset.Endpoint;
-        if (provider.Equals("ollama", StringComparison.OrdinalIgnoreCase)) return "http://localhost:11434";
+        if (provider.Equals("ollama", StringComparison.OrdinalIgnoreCase)) return OllamaEndpoint;
         if (provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase)) return AnthropicDefaultEndpoint;
         return string.Empty;
     }

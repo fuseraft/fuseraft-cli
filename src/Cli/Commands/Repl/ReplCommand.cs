@@ -100,6 +100,7 @@ public sealed class ReplCommand(ILoggerFactory loggerFactory) : AsyncCommand<Rep
         title,
         autoTitle,
         midTurnCommands = ReplCommands.MidTurnCommands,
+        commands        = ReplCommands.HostCommands,
     };
 
     private static readonly (string EnvVar, string ModelId)[] AutoDetectOrder =

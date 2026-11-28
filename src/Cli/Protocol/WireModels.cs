@@ -159,6 +159,9 @@ public sealed record WireFunction(string Name, string Description);
 /// <summary>A model from <c>fuseraft models --json</c>.</summary>
 public sealed record WireModel(string Id, bool Current);
 
+/// <summary>A command from the <c>ready</c> event's <c>commands</c>: <c>Usage</c> as /help shows it, such as <c>/model &lt;id&gt; [effort]</c>.</summary>
+public sealed record WireCommand(string Usage, string Description);
+
 /// <summary>
 /// A global setting from <c>fuseraft settings show --json</c> and <c>fuseraft settings set --json</c>. <c>Value</c> is
 /// what the config file holds, null when unset; the setting then takes <c>Default</c>, or the provider's own when that's null too.

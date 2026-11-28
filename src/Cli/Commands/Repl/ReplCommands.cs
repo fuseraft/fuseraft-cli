@@ -80,6 +80,15 @@ internal static partial class ReplCommands
     private readonly record struct HelpEntry(string Command, string Description);
     private readonly record struct HelpSection(string Title, HelpEntry[] Entries);
 
+    // The full-screen terminal's own commands, and /exit, which a host's Close button does instead.
+    private static readonly HashSet<string> TerminalOnly = ["/theme", "/dock", "/paste", "/exit"];
+
+    /// <summary>The commands a host can offer, /help's entries in its order, for the bridge's <c>ready</c> event.</summary>
+    internal static IEnumerable<fuseraft.Cli.Protocol.WireCommand> HostCommands =>
+        HelpSections.SelectMany(s => s.Entries)
+            .Where(e => !TerminalOnly.Contains(e.Command.Split(' ')[0]))
+            .Select(e => new fuseraft.Cli.Protocol.WireCommand(e.Command, e.Description));
+
     /// <summary>What /help says a command does, for the TUI's suggestions: its first entry's description.</summary>
     internal static string Describe(string command) =>
         HelpSections.SelectMany(s => s.Entries)

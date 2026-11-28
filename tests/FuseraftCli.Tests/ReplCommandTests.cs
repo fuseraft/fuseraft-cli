@@ -25,6 +25,21 @@ public sealed class ReplCommandTests
     }
 
     [Fact]
+    public void ReadyEvent_ListsHelpCommandsForAHostMenu_WithoutTerminalOnlyOnes()
+    {
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(
+            ReplCommand.ReadyEvent("abc123", "model-x", null, null), WireProtocol.JsonOpts));
+        var commands = doc.RootElement.GetProperty("commands").EnumerateArray()
+            .Select(c => (Usage: c.GetProperty("usage").GetString()!, Description: c.GetProperty("description").GetString()!))
+            .ToList();
+
+        Assert.Contains(commands, c => c.Usage == "/help" && c.Description.Length > 0);
+        Assert.Contains(commands, c => c.Usage == "/model <id> [effort]");
+        Assert.DoesNotContain(commands, c => c.Usage.StartsWith("/theme") || c.Usage.StartsWith("/dock")
+                                          || c.Usage.StartsWith("/paste") || c.Usage == "/exit");
+    }
+
+    [Fact]
     public void HostModel_CompletesAConfigThatHasSettingsButNoModel()
     {
         var saved = new UserConfig { Repl = new() { Bell = false } };
