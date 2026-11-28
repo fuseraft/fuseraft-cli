@@ -17,12 +17,23 @@ public sealed class ModelsSettings : CommandSettings
     [CommandOption("--json")]
     [Description("Print one JSON object to stdout instead of a list (see docs/protocol.md). Never starts the setup wizard.")]
     public bool Json { get; set; }
+
+    [CommandOption("--provider")]
+    [Description("List another connection's models instead of the configured one: openai (any OpenAI-compatible API), anthropic, xai, google, mistral, deepseek or ollama. The key comes from FUSERAFT_API_KEY.")]
+    public string? Provider { get; set; }
+
+    [CommandOption("--endpoint")]
+    [Description("Provider base URL for that connection. Needed for a custom server; defaults to the provider's public endpoint.")]
+    public string? Endpoint { get; set; }
 }
 
 public sealed class ModelsCommand : AsyncCommand<ModelsSettings>
 {
     public override async Task<int> ExecuteAsync(CommandContext context, ModelsSettings settings, CancellationToken cancellationToken)
     {
+        if (ConnectionOverride.From(settings.Provider, settings.Endpoint) is { } connection)
+            return await ListConnectionAsync(settings, connection, cancellationToken);
+
         var keyStore = ApiKeyStoreFactory.Create();
         var (userCfg, legacyKey) = UserConfigStore.Load();
 
@@ -86,15 +97,10 @@ public sealed class ModelsCommand : AsyncCommand<ModelsSettings>
                 ? string.Empty
                 : Environment.GetEnvironmentVariable(resolved.ApiKeyEnvVar) ?? string.Empty;
 
-        bool isOllama = resolved.Provider.Equals("ollama", StringComparison.OrdinalIgnoreCase);
-        bool isAnthropic = resolved.Provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase);
-
         List<string> modelIds;
         try
         {
-            modelIds = isAnthropic
-                ? await ProviderModelsClient.FetchAnthropicAsync(endpoint, apiKey, cancellationToken)
-                : await ProviderModelsClient.FetchAsync(endpoint, apiKey, isOllama, cancellationToken);
+            modelIds = await FetchAsync(resolved.Provider, endpoint, apiKey, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -106,16 +112,56 @@ public sealed class ModelsCommand : AsyncCommand<ModelsSettings>
         if (pendingSave)
             UserConfigStore.Save(userCfg);
 
+        return Print(settings, endpoint, modelIds, userCfg.ModelId);
+    }
+
+    /// <summary>
+    /// A host's connection (fuseraft-web's profile form): the config's key belongs to the config's connection,
+    /// so only FUSERAFT_API_KEY is sent, and nothing is read from or saved to the config.
+    /// </summary>
+    private static async Task<int> ListConnectionAsync(ModelsSettings settings, ConnectionOverride connection, CancellationToken ct)
+    {
+        var provider = connection.Provider ?? "openai";
+        var endpoint = (connection.Endpoint ?? ChatClientFactory.DefaultEndpoint(provider))?.TrimEnd('/');
+        if (endpoint is null)
+        {
+            var message = $"Provider '{provider}' has no default endpoint. Pass --endpoint.";
+            if (settings.Json) return WireProtocol.WriteError(message);
+            AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(message)}[/]");
+            return 1;
+        }
+
+        List<string> modelIds;
+        try
+        {
+            modelIds = await FetchAsync(provider, endpoint, Environment.GetEnvironmentVariable("FUSERAFT_API_KEY") ?? string.Empty, ct);
+        }
+        catch (Exception ex)
+        {
+            if (settings.Json) return WireProtocol.WriteError(ex.Message);
+            AnsiConsole.MarkupLine($"[red]✗ {Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+        return Print(settings, endpoint, modelIds, currentId: null);
+    }
+
+    private static Task<List<string>> FetchAsync(string provider, string endpoint, string apiKey, CancellationToken ct) =>
+        provider.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
+            ? ProviderModelsClient.FetchAnthropicAsync(endpoint, apiKey, ct)
+            : ProviderModelsClient.FetchAsync(endpoint, apiKey, provider.Equals("ollama", StringComparison.OrdinalIgnoreCase), ct);
+
+    private static int Print(ModelsSettings settings, string endpoint, List<string> modelIds, string? currentId)
+    {
+        bool IsCurrent(string m) => m.Equals(currentId, StringComparison.OrdinalIgnoreCase);
+
         if (settings.Json)
-            return WireProtocol.WriteList(modelIds.Select(m =>
-                new WireModel(m, m.Equals(userCfg.ModelId, StringComparison.OrdinalIgnoreCase))));
+            return WireProtocol.WriteList(modelIds.Select(m => new WireModel(m, IsCurrent(m))));
 
         AnsiConsole.MarkupLine($"  [dim]Available models from[/] [bold]{Markup.Escape(endpoint)}[/] [dim]({modelIds.Count})[/]");
         AnsiConsole.WriteLine();
         foreach (var m in modelIds)
         {
-            var isCurrent = m.Equals(userCfg.ModelId, StringComparison.OrdinalIgnoreCase);
-            if (isCurrent)
+            if (IsCurrent(m))
                 AnsiConsole.MarkupLine($"  [bold green]{Markup.Escape(m)}[/] [dim]← current[/]");
             else
                 AnsiConsole.MarkupLine($"  {Markup.Escape(m)}");

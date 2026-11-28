@@ -46,6 +46,7 @@ A command that returns one thing uses `"item":{ ... }` in place of `items`. An e
 | `fuseraft schedule list --json` | [ScheduledJob](#scheduledjob) | Ordered by next run. |
 | `fuseraft plugins --json` | [Plugin](#plugin) | `--plugin <name>` filters; no match is an error envelope. |
 | `fuseraft models --json` | [Model](#model) | Queries the configured provider. Never starts the setup wizard; unconfigured is an error envelope. |
+| `fuseraft models --json --provider <p> --endpoint <url>` | [Model](#model) | Queries that connection instead, with the key in `FUSERAFT_API_KEY` (none for a local server), without reading the config. Either flag alone works: `--provider` defaults to the provider's public endpoint, and `--endpoint` alone is OpenAI-compatible. No model is `current`. |
 | `fuseraft settings show --json` | [Setting](#setting) | Every key `fuseraft settings set` takes, in display order. With no config yet, every `value` is `null`. |
 | `fuseraft settings tools --json` | [ToolCategory](#toolcategory) | The chat tools new chats start with on or off, by category. |
 | `fuseraft settings set <key> <value> --json` | [Setting](#setting) (as `item`) | The setting after the change. An unknown key or a rejected value is an error envelope, and nothing is saved. |
@@ -237,7 +238,7 @@ Ignore any stdout line that doesn't parse as JSON. Slash-command output can occa
 
 | Event | Fields | |
 |-------|--------|---|
-| `ready` | `protocolVersion`, `sessionId`, `model`, `title`, `autoTitle`, `midTurnCommands[]` | `repl --vscode`. The chat is ready for input. `midTurnCommands` lists the slash commands that take effect at once when sent while the REPL is busy: during a turn, a whole `/goal` run, or another command. |
+| `ready` | `protocolVersion`, `sessionId`, `model`, `title`, `autoTitle`, `midTurnCommands[]`, `commands[]` | `repl --vscode`. The chat is ready for input. `midTurnCommands` lists the slash commands that take effect at once when sent while the REPL is busy: during a turn, a whole `/goal` run, or another command. `commands` is `/help` as `{usage, description}`, such as `{"usage": "/model <id> [effort]", …}`, for a command menu; the `!` shell entries are in it too, and the full-screen terminal's own commands are not. |
 | `ready` | `protocolVersion`, `sessionId`, `task`, `config`, `resumed`, `agents[]` | `run --bridge`. The session is about to start. |
 | `hello` | `protocolVersion`, `clientId`, `readOnly`, `inFlight`, `pendingResults[]` | Serve socket and WebSocket. Sent as soon as you connect. `clientId` echoes your `Fuseraft-Client-Id` (null without one). `readOnly` is true when your bearer token is a `read` token: the daemon answers any `user_input` with an `error` event instead of queuing it. `inFlight` is your task that's still queued or running (`{sessionId, task, status, position}`), or null; its pending approval, if any, is asked again right after. `pendingResults` lists the session IDs of your tasks that finished while you were away; their `result` events follow the `hello`. |
 

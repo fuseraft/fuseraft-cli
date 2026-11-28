@@ -2763,6 +2763,13 @@ The output ends with a hint pointing at `fuseraft repl --model <id>` (and `--sav
 
 Pass `--json` to print one JSON object instead, marking the configured model `current` (see [Wire Protocol](protocol.md#resource-queries)). With `--json` an unconfigured install is an error rather than a setup wizard.
 
+To list another connection's models without touching the config, name it with `--provider` (`openai`, `anthropic`, `xai`, `google`, `mistral`, `deepseek` or `ollama`, which use their public endpoint) and/or `--endpoint` (alone, an OpenAI-compatible server). The key comes from `FUSERAFT_API_KEY`, never from the config or keychain, and a local server needs none. fuseraft-web's profile form uses this.
+
+```bash
+FUSERAFT_API_KEY=… fuseraft models --provider xai
+fuseraft models --provider ollama --endpoint http://gpu-box:11434
+```
+
 **Example**
 
 ```bash
