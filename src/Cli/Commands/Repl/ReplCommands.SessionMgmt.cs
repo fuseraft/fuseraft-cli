@@ -258,7 +258,7 @@ internal static partial class ReplCommands
         {
             var activeTools = ctx.GetActiveTools();
             var hasTools  = activeTools.Count > 0;
-            var newConfig = ReplFactory.BuildModelConfig(snapshot.ModelId, ctx.UserCfg, connection: ctx.Connection);
+            var newConfig = await ReplFactory.SwitchModelConfigAsync(ctx.Factory, ctx.KeyStore, ctx.ModelConfig, snapshot.ModelId, reasoningEffort: null);
             try
             {
                 var newClient     = ReplFactory.BuildClient(newConfig, ctx.Factory, hasTools, ctx.AdaptiveTrimTracker, ctx.Emitter, tools: activeTools, limits: ctx.Limits);

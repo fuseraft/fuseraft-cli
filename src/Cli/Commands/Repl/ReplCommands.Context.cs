@@ -410,7 +410,7 @@ internal static partial class ReplCommands
             return CommandResult.Continue;
         }
 
-        var newConfig   = ReplFactory.BuildModelConfig(newModelId, ctx.UserCfg, newEffort, ctx.Connection);
+        var newConfig   = await ReplFactory.SwitchModelConfigAsync(ctx.Factory, ctx.KeyStore, ctx.ModelConfig, newModelId, newEffort);
         var activeTools = ctx.GetActiveTools();
         var hasTools    = activeTools.Count > 0;
         IChatClient newClient;
@@ -422,6 +422,10 @@ internal static partial class ReplCommands
         {
             AnsiConsole.MarkupLine(
                 $"[red]✗ Could not create client for {Markup.Escape(newModelId)}:[/] {Markup.Escape(ex.Message)}");
+            if (string.IsNullOrEmpty(newConfig.Endpoint))
+                AnsiConsole.MarkupLine(
+                    "[dim]A model from another provider needs that provider's key: set its environment variable, or save one with[/] " +
+                    "[bold]/provider setup[/][dim]. To use a gateway instead, start fuseraft with[/] [bold]--endpoint[/][dim].[/]");
             return CommandResult.Continue;
         }
 

@@ -58,4 +58,14 @@ public sealed class ReplFactoryConnectionTests
         Assert.Equal("openai", resolved.Provider);
         Assert.Equal("https://gateway.example/v1", resolved.Endpoint);
     }
+
+    [Fact]
+    public void ConfigsKeyVariable_GoesWithItsConnection_Only()
+    {
+        var cfg = new UserConfig { ModelId = "acme", Endpoint = "https://llm.example/v1", ApiKeyEnvVar = "GATEWAY_KEY" };
+
+        Assert.Equal("GATEWAY_KEY", ReplFactory.BuildModelConfig("acme", cfg).ApiKeyEnvVar);
+        Assert.Equal(string.Empty,
+            ReplFactory.BuildModelConfig("acme", cfg, connection: ConnectionOverride.From(null, "http://other:8000/v1")).ApiKeyEnvVar);
+    }
 }

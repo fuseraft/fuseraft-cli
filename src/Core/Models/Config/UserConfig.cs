@@ -86,6 +86,7 @@ public sealed class UserConfig
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(ModelId) &&
         (!string.IsNullOrWhiteSpace(ApiKey)
+         || (!string.IsNullOrWhiteSpace(ApiKeyEnvVar) && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(ApiKeyEnvVar.Trim())))
          || Provider.Equals("ollama", StringComparison.OrdinalIgnoreCase)
          || LocalEndpoint.IsLocal(Endpoint));
 }

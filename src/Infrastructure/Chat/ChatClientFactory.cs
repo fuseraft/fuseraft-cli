@@ -203,12 +203,18 @@ public sealed class ChatClientFactory(
             return config;
         }
 
-        var preset = detected.Value;
+        var preset   = detected.Value;
+        var endpoint = string.IsNullOrEmpty(config.Endpoint) ? preset.Endpoint : config.Endpoint;
+        // A preset's variable holds that provider's key, so it goes only to that provider's server: a claude-
+        // model behind a gateway must not send ANTHROPIC_API_KEY to the gateway.
+        var keyVar = !string.IsNullOrEmpty(config.ApiKeyEnvVar) ? config.ApiKeyEnvVar
+            : ProviderKeys.Origin(endpoint) == ProviderKeys.Origin(preset.Endpoint) ? preset.ApiKeyEnvVar
+            : string.Empty;
         return config with
         {
-            Provider    = string.IsNullOrEmpty(config.Provider)    ? preset.Provider    : config.Provider,
-            Endpoint    = string.IsNullOrEmpty(config.Endpoint)    ? preset.Endpoint    : config.Endpoint,
-            ApiKeyEnvVar = string.IsNullOrEmpty(config.ApiKeyEnvVar) ? preset.ApiKeyEnvVar : config.ApiKeyEnvVar,
+            Provider     = string.IsNullOrEmpty(config.Provider) ? preset.Provider : config.Provider,
+            Endpoint     = endpoint,
+            ApiKeyEnvVar = keyVar,
         };
     }
 
